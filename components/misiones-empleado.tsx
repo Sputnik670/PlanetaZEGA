@@ -10,7 +10,7 @@ import { Loader2, Zap, Target, CheckCheck, AlertTriangle, Package, X } from "luc
 import { toast } from "sonner"
 import { format, parseISO, addDays } from "date-fns"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { Progress } from "@/components/ui/progress" // <--- IMPORTACIÓN NUEVA
+import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils" 
 
 // Tipado para las misiones activas
@@ -25,16 +25,18 @@ interface Mision {
     created_at: string
 }
 
+// CORRECCIÓN: El precio viene dentro del producto
 interface ProductoJoin {
     nombre: string
     emoji: string
+    precio_venta: number 
 }
 
 interface StockJoin {
     id: string
     producto_id: string
     fecha_vencimiento: string
-    precio_venta: number
+    // Eliminamos precio_venta de la raíz porque no está en la tabla stock
     productos: ProductoJoin | null 
 }
 
@@ -86,7 +88,7 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
         }
     }, [turnoId])
 
-    // 2. Lógica para Abrir el Modal de Mermar
+    // 2. Lógica para Abrir el Modal de Mermar (CORREGIDA)
     const handleOpenMermarModal = async () => {
         if (!misionVencimiento) return
         setProcesando(true)
@@ -95,14 +97,14 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
             const hoy = new Date()
             const fechaLimite = format(addDays(hoy, 7), 'yyyy-MM-dd') 
 
+            // CORRECCIÓN: Solicitamos precio_venta dentro de productos()
             const { data, error } = await supabase
                 .from('stock')
                 .select(`
                     id, 
                     producto_id, 
                     fecha_vencimiento, 
-                    precio_venta, 
-                    productos(nombre, emoji)
+                    productos(nombre, emoji, precio_venta)
                 `)
                 .eq('estado', 'pendiente')
                 .lt('fecha_vencimiento', fechaLimite)
@@ -119,15 +121,16 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
                 nombre_producto: item.productos?.nombre || 'Producto Desconocido', 
                 emoji_producto: item.productos?.emoji || '📦',
                 fecha_vencimiento: item.fecha_vencimiento,
-                precio_venta: item.precio_venta
+                // CORRECCIÓN: Leemos el precio desde el objeto anidado
+                precio_venta: item.productos?.precio_venta || 0
             }))
 
             setStockParaMermar(stockCriticoFormateado)
             setShowMermarModal(true)
 
-        } catch (error) {
+        } catch (error: any) {
             console.error("Error cargando stock crítico:", error)
-            toast.error("Error de Stock", { description: "No se pudo cargar el stock a mermar." })
+            toast.error("Error de Stock", { description: error.message || "No se pudo cargar el stock a mermar." })
         } finally {
             setProcesando(false)
         }
@@ -240,7 +243,9 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
                     ) : null
 
                     // Cálculo de porcentaje para la barra
-                    const porcentaje = Math.min((m.unidades_completadas / m.objetivo_unidades) * 100, 100)
+                    const porcentaje = m.objetivo_unidades > 0 
+                        ? Math.min((m.unidades_completadas / m.objetivo_unidades) * 100, 100)
+                        : 0
 
                     return (
                         <Card key={m.id} className={cn("p-4 shadow-sm border-2 transition-all", status.bg)}>

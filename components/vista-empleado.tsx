@@ -4,16 +4,17 @@ import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ArrowLeft, Check, X, Target, ClipboardList, Calendar, Loader2 } from "lucide-react"
+import { ArrowLeft, Check, X, Target, ClipboardList, Calendar, Loader2, ShoppingCart } from "lucide-react"
 import { BottomNav } from "@/components/bottom-nav"
 import { supabase } from "@/lib/supabase"
+import CajaVentas from "@/components/caja-ventas"
 
 interface VistaEmpleadoProps {
   onBack: () => void
 }
 
 export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
-  const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks">("tasks")
+  const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks" | "caja">("tasks")
   const [selectedTask, setSelectedTask] = useState<"expiration" | "data" | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -256,7 +257,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
         <h1 className="text-3xl font-bold mb-2">Hola, Equipo 👋</h1>
         <p className="text-accent-foreground/80">Tus misiones del día</p>
         
-        {/* CORRECCIÓN AQUÍ: Usamos w-[30%] en lugar de style={{ width... }} */}
         <div className="mt-4 bg-accent-foreground/20 rounded-full h-3 overflow-hidden">
           <div className="bg-chart-4 h-full rounded-full transition-all duration-1000 w-[30%]" />
         </div>
@@ -264,73 +264,91 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
       </div>
 
       <div className="p-4 space-y-4">
-        {loading ? (
+        
+        {/* VISTA TAREAS (Se muestra solo si NO es modo caja) */}
+        {activeTab === "tasks" && (
+          loading ? (
             <div className="flex justify-center p-8">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
-        ) : (
-        <div>
-          <h2 className="text-xl font-bold text-foreground mb-3 flex items-center gap-2">
-            <ClipboardList className="h-6 w-6 text-primary" />
-            Tareas de Hoy {fechaHoy}
-          </h2>
+          ) : (
+            <div>
+              <h2 className="text-xl font-bold text-foreground mb-3 flex items-center gap-2">
+                <ClipboardList className="h-6 w-6 text-primary" />
+                Tareas de Hoy {fechaHoy}
+              </h2>
 
-          <div className="space-y-3">
-            <Card
-              className="p-6 hover:shadow-xl transition-all duration-300 cursor-pointer border-2 hover:border-primary bg-gradient-to-br from-card to-primary/5 active:scale-98"
-              onClick={() => setSelectedTask("expiration")}
-            >
-              <div className="flex items-center gap-4">
-                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-destructive/80 to-destructive flex items-center justify-center flex-shrink-0 shadow-lg">
-                  <Target className="h-7 w-7 text-destructive-foreground" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-xl font-bold text-foreground">🎯 Caza-Vencimientos</h3>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {productosVencimiento.length > 0 
-                        ? `${productosVencimiento.length} productos en riesgo` 
-                        : "¡Zona segura!"}
-                  </p>
-                </div>
-                {productosVencimiento.length > 0 && (
-                <div className="flex-shrink-0">
-                  <div className="h-8 w-8 rounded-full bg-destructive text-destructive-foreground font-bold flex items-center justify-center text-sm animate-pulse">
-                    {productosVencimiento.length}
+              <div className="space-y-3">
+                <Card
+                  className="p-6 hover:shadow-xl transition-all duration-300 cursor-pointer border-2 hover:border-primary bg-gradient-to-br from-card to-primary/5 active:scale-98"
+                  onClick={() => setSelectedTask("expiration")}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-destructive/80 to-destructive flex items-center justify-center flex-shrink-0 shadow-lg">
+                      <Target className="h-7 w-7 text-destructive-foreground" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-xl font-bold text-foreground">🎯 Caza-Vencimientos</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {productosVencimiento.length > 0 
+                            ? `${productosVencimiento.length} productos en riesgo` 
+                            : "¡Zona segura!"}
+                      </p>
+                    </div>
+                    {productosVencimiento.length > 0 && (
+                    <div className="flex-shrink-0">
+                      <div className="h-8 w-8 rounded-full bg-destructive text-destructive-foreground font-bold flex items-center justify-center text-sm animate-pulse">
+                        {productosVencimiento.length}
+                      </div>
+                    </div>
+                    )}
                   </div>
-                </div>
-                )}
-              </div>
-            </Card>
+                </Card>
 
-            <Card
-              className="p-6 hover:shadow-xl transition-all duration-300 cursor-pointer border-2 hover:border-primary bg-gradient-to-br from-card to-chart-1/5 active:scale-98"
-              onClick={() => setSelectedTask("data")}
-            >
-              <div className="flex items-center gap-4">
-                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-chart-1 to-chart-2 flex items-center justify-center flex-shrink-0 shadow-lg">
-                  <Calendar className="h-7 w-7 text-primary-foreground" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-xl font-bold text-foreground">📝 Completar Datos</h3>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {productosSinFecha.length > 0 
-                        ? `${productosSinFecha.length} productos sin fecha` 
-                        : "¡Al día!"}
-                  </p>
-                </div>
-                {productosSinFecha.length > 0 && (
-                <div className="flex-shrink-0">
-                  <div className="h-8 w-8 rounded-full bg-chart-1 text-primary-foreground font-bold flex items-center justify-center text-sm">
-                    {productosSinFecha.length}
+                <Card
+                  className="p-6 hover:shadow-xl transition-all duration-300 cursor-pointer border-2 hover:border-primary bg-gradient-to-br from-card to-chart-1/5 active:scale-98"
+                  onClick={() => setSelectedTask("data")}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-chart-1 to-chart-2 flex items-center justify-center flex-shrink-0 shadow-lg">
+                      <Calendar className="h-7 w-7 text-primary-foreground" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-xl font-bold text-foreground">📝 Completar Datos</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {productosSinFecha.length > 0 
+                            ? `${productosSinFecha.length} productos sin fecha` 
+                            : "¡Al día!"}
+                      </p>
+                    </div>
+                    {productosSinFecha.length > 0 && (
+                    <div className="flex-shrink-0">
+                      <div className="h-8 w-8 rounded-full bg-chart-1 text-primary-foreground font-bold flex items-center justify-center text-sm">
+                        {productosSinFecha.length}
+                      </div>
+                    </div>
+                    )}
                   </div>
-                </div>
-                )}
+                </Card>
               </div>
-            </Card>
-          </div>
-        </div>
+            </div>
+          )
         )}
+
+        {/* VISTA CAJA (NUEVO) */}
+        {activeTab === "caja" && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <h2 className="text-xl font-bold text-foreground mb-4 flex items-center gap-2">
+              <ShoppingCart className="h-6 w-6 text-emerald-600" />
+              Modo Caja
+            </h2>
+            <CajaVentas />
+          </div>
+        )}
+
       </div>
+      
+      {/* Navbar actualizado (sin casting) */}
       <BottomNav active={activeTab} onChange={setActiveTab} />
     </div>
   )

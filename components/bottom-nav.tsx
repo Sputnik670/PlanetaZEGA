@@ -1,17 +1,19 @@
 "use client"
 
-import { AlertTriangle, Package, ClipboardList } from "lucide-react"
+import { AlertTriangle, Package, ClipboardList, ShoppingCart } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 interface BottomNavProps {
-  active: "alerts" | "inventory" | "tasks"
-  onChange: (tab: "alerts" | "inventory" | "tasks") => void
+  active: "alerts" | "inventory" | "tasks" | "caja"
+  onChange: (tab: "alerts" | "inventory" | "tasks" | "caja") => void
 }
 
 export function BottomNav({ active, onChange }: BottomNavProps) {
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-card border-t border-border shadow-2xl">
+    <div className="fixed bottom-0 left-0 right-0 bg-card border-t border-border shadow-2xl z-50">
       <div className="flex items-center justify-around p-2 max-w-md mx-auto">
+        
+        {/* BOTÓN ALERTAS */}
         <Button
           variant={active === "alerts" ? "default" : "ghost"}
           size="lg"
@@ -28,6 +30,7 @@ export function BottomNav({ active, onChange }: BottomNavProps) {
           </span>
         </Button>
 
+        {/* BOTÓN INVENTARIO */}
         <Button
           variant={active === "inventory" ? "default" : "ghost"}
           size="lg"
@@ -40,10 +43,11 @@ export function BottomNav({ active, onChange }: BottomNavProps) {
           <span
             className={`text-xs font-semibold ${active === "inventory" ? "text-primary-foreground" : "text-muted-foreground"}`}
           >
-            Inventario
+            Stock
           </span>
         </Button>
 
+        {/* BOTÓN TAREAS */}
         <Button
           variant={active === "tasks" ? "default" : "ghost"}
           size="lg"
@@ -59,6 +63,24 @@ export function BottomNav({ active, onChange }: BottomNavProps) {
             Tareas
           </span>
         </Button>
+
+        {/* BOTÓN CAJA (NUEVO) */}
+        <Button
+          variant={active === "caja" ? "default" : "ghost"}
+          size="lg"
+          onClick={() => onChange("caja")}
+          className="flex-1 flex flex-col gap-1 h-auto py-3"
+        >
+          <ShoppingCart
+            className={`h-6 w-6 ${active === "caja" ? "text-primary-foreground" : "text-muted-foreground"}`}
+          />
+          <span
+            className={`text-xs font-semibold ${active === "caja" ? "text-primary-foreground" : "text-muted-foreground"}`}
+          >
+            Caja
+          </span>
+        </Button>
+
       </div>
     </div>
   )

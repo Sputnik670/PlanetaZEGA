@@ -4,8 +4,9 @@ import { useState, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ArrowLeft, Check, X, Target, ClipboardList, Calendar } from "lucide-react"
+import { ArrowLeft, Check, X, Target, ClipboardList, Calendar, Loader2 } from "lucide-react"
 import { BottomNav } from "@/components/bottom-nav"
+import { supabase } from "@/lib/supabase"
 
 interface VistaEmpleadoProps {
   onBack: () => void
@@ -14,65 +15,107 @@ interface VistaEmpleadoProps {
 export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
   const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks">("tasks")
   const [selectedTask, setSelectedTask] = useState<"expiration" | "data" | null>(null)
+  const [loading, setLoading] = useState(true)
 
   // --- FECHA DINÁMICA ---
   const [fechaHoy, setFechaHoy] = useState("")
 
   useEffect(() => {
-    // Esto crea la fecha formato 14/12
     const hoy = new Date()
     const opciones: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'numeric' }
     setFechaHoy(hoy.toLocaleDateString('es-AR', opciones))
+    
+    // Al cargar la pantalla, traemos los datos de Supabase
+    fetchDatos()
   }, [])
 
-  // --- ESTADO DE DATOS (Simulando base de datos por ahora) ---
-  const [productosVencimiento, setProductosVencimiento] = useState([
-    { id: 1, nombre: "Leche Entera", imagen: "🥛" },
-    { id: 2, nombre: "Yogur Frutilla", imagen: "🍓" },
-    { id: 3, nombre: "Pan Lactal", imagen: "🍞" },
-  ])
-
-  const [productosSinFecha, setProductosSinFecha] = useState([
-    { id: 1, nombre: "Gaseosa Cola 2L", imagen: "🥤" },
-    { id: 2, nombre: "Galletitas Chocolate", imagen: "🍪" },
-    { id: 3, nombre: "Fideos Moñitos", imagen: "🍝" },
-  ])
-
+  // --- ESTADO DE DATOS (AHORA REALES) ---
+  const [productosVencimiento, setProductosVencimiento] = useState<any[]>([])
+  const [productosSinFecha, setProductosSinFecha] = useState<any[]>([])
   const [newDate, setNewDate] = useState<Record<number, string>>({})
 
-  // --- LÓGICA DE BOTONES ---
+  // --- FUNCIÓN PARA TRAER DATOS DE SUPABASE ---
+  const fetchDatos = async () => {
+    setLoading(true)
+    try {
+      // 1. Buscar productos CON fecha de vencimiento (para auditar)
+      const { data: dataVencimientos, error: errorV } = await supabase
+        .from('stock')
+        .select('*, productos(*)') 
+        .not('fecha_vencimiento', 'is', null)
+        .eq('estado', 'pendiente')
+        .lte('fecha_vencimiento', new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString())
 
-  const handleCheckExpiration = async (productId: number, isGood: boolean) => {
-    // 1. AQUÍ IRÁ TU LLAMADA A SUPABASE LUEGO
-    // await supabase.from('auditorias').insert({ producto_id: productId, estado: isGood ? 'ok' : 'vencido' })
+      if (errorV) console.error("Error vencimientos:", errorV)
+      else setProductosVencimiento(dataVencimientos || [])
 
-    console.log(`Producto ${productId} - Aún sirve: ${isGood} (Enviando a DB...)`)
+      // 2. Buscar productos SIN fecha (para completar)
+      const { data: dataSinFecha, error: errorS } = await supabase
+        .from('stock')
+        .select('*, productos(*)')
+        .is('fecha_vencimiento', null)
+      
+      if (errorS) console.error("Error sin fecha:", errorS)
+      else setProductosSinFecha(dataSinFecha || [])
 
-    // 2. Feedback Visual Inmediato: Sacamos el producto de la lista
-    setProductosVencimiento((prev) => prev.filter((p) => p.id !== productId))
+    } catch (error) {
+      console.error("Error general:", error)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleAddDate = (productId: number) => {
-    if (newDate[productId]) {
-      console.log(`Producto ${productId} - Nueva fecha guardada: ${newDate[productId]}`)
+  // --- LÓGICA DE BOTONES (ACCIONES REALES) ---
+
+  const handleCheckExpiration = async (stockId: number, isGood: boolean) => {
+    // 1. Feedback Visual Inmediato
+    setProductosVencimiento((prev) => prev.filter((p) => p.id !== stockId))
+
+    // 2. Actualizar en Supabase
+    const nuevoEstado = isGood ? 'verificado' : 'mermado'
+    const { error } = await supabase
+      .from('stock')
+      .update({ estado: nuevoEstado })
+      .eq('id', stockId)
+
+    if (error) {
+      console.error("Error al actualizar:", error)
+    } else {
+      console.log(`Stock ${stockId} actualizado a: ${nuevoEstado}`)
+    }
+  }
+
+  const handleAddDate = async (stockId: number) => {
+    if (newDate[stockId]) {
+      const fechaIngresada = newDate[stockId]
+
+      // 1. Feedback Visual
+      setProductosSinFecha((prev) => prev.filter((p) => p.id !== stockId))
       
-      // Feedback Visual: Sacamos el producto de la lista de "Sin Fecha"
-      setProductosSinFecha((prev) => prev.filter((p) => p.id !== productId))
-      
-      // Limpiamos el estado temporal de ese input
-      const { [productId]: _, ...rest } = newDate
-      setNewDate(rest)
+      // 2. Actualizar en Supabase
+      const { error } = await supabase
+        .from('stock')
+        .update({ fecha_vencimiento: fechaIngresada })
+        .eq('id', stockId)
+
+      if (error) {
+        console.error("Error al guardar fecha:", error)
+      } else {
+        console.log(`Stock ${stockId} fecha guardada: ${fechaIngresada}`)
+        const { [stockId]: _, ...rest } = newDate
+        setNewDate(rest)
+      }
     }
   }
 
   const formatDateToDDMMYYYY = (dateString: string) => {
     if (!dateString) return ""
-    // El input type="date" siempre devuelve YYYY-MM-DD, aquí lo damos vuelta
     const [year, month, day] = dateString.split("-")
     return `${day}/${month}/${year}`
   }
 
-  // Renderizado de Caza-Vencimientos
+  // --- RENDERIZADO ---
+
   if (selectedTask === "expiration") {
     return (
       <div className="min-h-screen bg-background pb-20">
@@ -92,22 +135,24 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
         <div className="p-4 space-y-4">
           {productosVencimiento.length === 0 ? (
             <div className="text-center p-10 text-muted-foreground">
-                <p>¡Todo limpio! No hay más vencimientos por revisar hoy. 🎉</p>
+                <p>¡Todo limpio! No hay más vencimientos críticos por hoy. 🎉</p>
             </div>
           ) : (
-            productosVencimiento.map((producto) => (
-            <Card key={producto.id} className="p-6 bg-gradient-to-br from-card to-muted/20 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            productosVencimiento.map((item) => (
+            <Card key={item.id} className="p-6 bg-gradient-to-br from-card to-muted/20 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="flex items-center gap-4 mb-4">
-                <div className="text-6xl">{producto.imagen}</div>
+                <div className="text-6xl">{item.productos?.emoji || '📦'}</div>
                 <div className="flex-1">
-                  <h3 className="text-2xl font-bold text-foreground text-pretty">{producto.nombre}</h3>
-                  <p className="text-sm text-muted-foreground mt-1">¿Está en buen estado?</p>
+                  <h3 className="text-2xl font-bold text-foreground text-pretty">{item.productos?.nombre || 'Producto Desconocido'}</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Vence: {item.fecha_vencimiento ? formatDateToDDMMYYYY(item.fecha_vencimiento) : 'Sin fecha'}
+                  </p>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <Button
-                  onClick={() => handleCheckExpiration(producto.id, true)}
+                  onClick={() => handleCheckExpiration(item.id, true)}
                   className="h-16 bg-chart-4 hover:bg-chart-4/90 text-white font-bold text-lg shadow-lg active:scale-95 transition-transform"
                   size="lg"
                 >
@@ -115,13 +160,13 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                   Sirve
                 </Button>
                 <Button
-                  onClick={() => handleCheckExpiration(producto.id, false)}
+                  onClick={() => handleCheckExpiration(item.id, false)}
                   variant="destructive"
                   className="h-16 font-bold text-lg shadow-lg active:scale-95 transition-transform"
                   size="lg"
                 >
                   <X className="mr-2 h-6 w-6" />
-                  Vencido
+                  Tirar
                 </Button>
               </div>
             </Card>
@@ -132,7 +177,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
     )
   }
 
-  // Renderizado de Completar Datos
   if (selectedTask === "data") {
     return (
       <div className="min-h-screen bg-background pb-20">
@@ -155,15 +199,15 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                 <p>¡Excelente! Todos los productos tienen fecha. ✅</p>
             </div>
           ) : (
-          productosSinFecha.map((producto) => (
-            <Card key={producto.id} className="p-6 bg-gradient-to-br from-card to-muted/20 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          productosSinFecha.map((item) => (
+            <Card key={item.id} className="p-6 bg-gradient-to-br from-card to-muted/20 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="flex items-center gap-4 mb-4">
-                <div className="text-6xl">{producto.imagen}</div>
+                <div className="text-6xl">{item.productos?.emoji || '📦'}</div>
                 <div className="flex-1">
-                  <h3 className="text-xl font-bold text-foreground text-pretty">{producto.nombre}</h3>
+                  <h3 className="text-xl font-bold text-foreground text-pretty">{item.productos?.nombre || 'Producto'}</h3>
                   <p className="text-sm text-muted-foreground mt-1 font-mono">
-                    {newDate[producto.id]
-                      ? `Ingresado: ${formatDateToDDMMYYYY(newDate[producto.id])}`
+                    {newDate[item.id]
+                      ? `Ingresado: ${formatDateToDDMMYYYY(newDate[item.id])}`
                       : "Esperando fecha..."}
                   </p>
                 </div>
@@ -174,16 +218,14 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                   <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                   <Input
                     type="date"
-                    value={newDate[producto.id] || ""}
-                    onChange={(e) => setNewDate((prev) => ({ ...prev, [producto.id]: e.target.value }))}
+                    value={newDate[item.id] || ""}
+                    onChange={(e) => setNewDate((prev) => ({ ...prev, [item.id]: e.target.value }))}
                     className="h-14 pl-12 text-lg font-semibold"
-                    // NOTA: El placeholder en input type="date" no se ve en todos los navegadores,
-                    // pero el formato visual dependerá del idioma del teléfono del usuario (DD/MM/AAAA en español)
                   />
                 </div>
                 <Button
-                  onClick={() => handleAddDate(producto.id)}
-                  disabled={!newDate[producto.id]}
+                  onClick={() => handleAddDate(item.id)}
+                  disabled={!newDate[item.id]}
                   className="w-full h-14 text-lg font-bold shadow-md active:scale-95 transition-transform"
                   size="lg"
                 >
@@ -214,18 +256,22 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
         <h1 className="text-3xl font-bold mb-2">Hola, Equipo 👋</h1>
         <p className="text-accent-foreground/80">Tus misiones del día</p>
         
-        {/* Barra de progreso dinámica basada en las listas */}
+        {/* CORRECCIÓN AQUÍ: Usamos w-[30%] en lugar de style={{ width... }} */}
         <div className="mt-4 bg-accent-foreground/20 rounded-full h-3 overflow-hidden">
-          <div className="bg-chart-4 h-full rounded-full transition-all duration-1000" style={{ width: "30%" }} />
+          <div className="bg-chart-4 h-full rounded-full transition-all duration-1000 w-[30%]" />
         </div>
-        <p className="text-sm text-accent-foreground/90 mt-2">Avance del día</p>
+        <p className="text-sm text-accent-foreground/90 mt-2">Nivel 5 - Aprendiz Ágil</p>
       </div>
 
       <div className="p-4 space-y-4">
+        {loading ? (
+            <div className="flex justify-center p-8">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+        ) : (
         <div>
           <h2 className="text-xl font-bold text-foreground mb-3 flex items-center gap-2">
             <ClipboardList className="h-6 w-6 text-primary" />
-            {/* AQUÍ ESTÁ LA FECHA DINÁMICA */}
             Tareas de Hoy {fechaHoy}
           </h2>
 
@@ -242,8 +288,8 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                   <h3 className="text-xl font-bold text-foreground">🎯 Caza-Vencimientos</h3>
                   <p className="text-sm text-muted-foreground mt-1">
                     {productosVencimiento.length > 0 
-                        ? `${productosVencimiento.length} productos para revisar` 
-                        : "¡Todo completado!"}
+                        ? `${productosVencimiento.length} productos en riesgo` 
+                        : "¡Zona segura!"}
                   </p>
                 </div>
                 {productosVencimiento.length > 0 && (
@@ -283,6 +329,7 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
             </Card>
           </div>
         </div>
+        )}
       </div>
       <BottomNav active={activeTab} onChange={setActiveTab} />
     </div>

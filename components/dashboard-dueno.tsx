@@ -1,13 +1,11 @@
 "use client"
 
 import { useState, useEffect } from "react"
-// CORRECCIÓN AQUÍ: Eliminamos la importación fallida y usamos el cliente central
 import { supabase } from "@/lib/supabase"
-
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ArrowLeft, AlertTriangle, TrendingUp, Package, Search, Plus, Loader2, ShieldCheck } from "lucide-react"
+import { ArrowLeft, AlertTriangle, TrendingUp, Package, Search, Plus, Loader2, ShieldCheck, DollarSign, CalendarRange } from "lucide-react"
 import { BottomNav } from "@/components/bottom-nav"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import CrearProducto from "@/components/crear-producto"
@@ -18,21 +16,24 @@ interface DashboardDuenoProps {
 }
 
 export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
-  const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks" | "catalog">("alerts")
+  // CAMBIO: Agregamos 'sales' al estado y lo ponemos como default para verlo al entrar
+  const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks" | "catalog" | "sales">("sales")
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(false)
 
-  // --- ESTADOS DE DATOS REALES ---
+  // --- ESTADOS DE DATOS ---
   const [productos, setProductos] = useState<any[]>([])
 
-  // --- ESTADOS PARA MÉTRICAS FINANCIERAS ---
+  // --- MÉTRICAS DE STOCK ---
   const [capitalEnRiesgo, setCapitalEnRiesgo] = useState(0)
   const [capitalSaludable, setCapitalSaludable] = useState(0)
   const [vencimientosCriticos, setVencimientosCriticos] = useState<any[]>([])
 
-  // CORRECCIÓN AQUÍ: Eliminado 'const supabase = ...' porque ya lo importamos arriba
+  // --- MÉTRICAS DE VENTAS (NUEVO) ---
+  const [ventasHoy, setVentasHoy] = useState<any[]>([])
+  const [totalVendidoHoy, setTotalVendidoHoy] = useState(0)
 
-  // --- CARGAR DATOS Y CALCULAR MÉTRICAS ---
+  // --- CARGAR DATOS ---
   const fetchData = async () => {
     setLoading(true)
     
@@ -44,20 +45,36 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     
     setProductos(dataProductos || [])
 
-    // 2. Traer STOCK PENDIENTE
+    // 2. Traer STOCK PENDIENTE (Para calcular riesgos)
     const { data: dataStock } = await supabase
       .from('stock')
       .select('*, productos(nombre, precio_venta, emoji)')
       .eq('estado', 'pendiente')
 
     if (dataStock) {
-      calcularMetricas(dataStock)
+      calcularMetricasStock(dataStock)
+    }
+
+    // 3. TRAER VENTAS (Items con estado 'vendido')
+    // Nota: En un futuro filtraremos por fecha "hoy", por ahora traemos las últimas 50 ventas.
+    const { data: dataVentas } = await supabase
+      .from('stock')
+      .select('*, productos(nombre, precio_venta, emoji)')
+      .eq('estado', 'vendido')
+      .order('id', { ascending: false }) // Los más recientes primero
+      .limit(50)
+
+    if (dataVentas) {
+      setVentasHoy(dataVentas)
+      // Sumamos el precio de todo lo vendido
+      const total = dataVentas.reduce((acc, item) => acc + (item.productos?.precio_venta || 0), 0)
+      setTotalVendidoHoy(total)
     }
 
     setLoading(false)
   }
 
-  const calcularMetricas = (stock: any[]) => {
+  const calcularMetricasStock = (stock: any[]) => {
     let riesgo = 0
     let saludable = 0
     let listaCritica: any[] = []
@@ -107,7 +124,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     item.nombre.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  // Gráfico estático
+  // Gráfico estático (Placeholder)
   const preciosTendencia = [
     { mes: "Sep", precio: 1000 }, { mes: "Oct", precio: 1100 }, { mes: "Nov", precio: 1150 }, { mes: "Dic", precio: 1200 },
   ]
@@ -122,42 +139,111 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         </Button>
         <h1 className="text-3xl font-bold mb-2">Dashboard del Dueño</h1>
         <p className="text-primary-foreground/80">
-          {activeTab === "alerts" && "Finanzas y Alertas"}
+          {activeTab === "sales" && "Caja y Ventas"}
+          {activeTab === "alerts" && "Riesgos y Vencimientos"}
           {activeTab === "inventory" && "Gestión de Stock"}
-          {activeTab === "tasks" && "Equipo"}
-          {activeTab === "catalog" && "Catálogo"}
+          {activeTab === "catalog" && "Catálogo Maestro"}
         </p>
 
-        <div className="flex gap-2 mt-4 overflow-x-auto pb-2">
+        {/* Menú de Navegación Superior (Scrollable) */}
+        <div className="flex gap-2 mt-4 overflow-x-auto pb-2 scrollbar-hide">
           <Button 
-            onClick={() => setActiveTab("catalog")} 
-            variant={activeTab === "catalog" ? "secondary" : "default"}
+            onClick={() => setActiveTab("sales")} 
+            variant={activeTab === "sales" ? "secondary" : "default"}
             size="sm"
             className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"
           >
-            <Plus className="mr-2 h-4 w-4" /> Nuevo Producto
+            <DollarSign className="mr-2 h-4 w-4" /> Ventas
           </Button>
-          <Button 
-            onClick={() => setActiveTab("inventory")} 
-            variant={activeTab === "inventory" ? "secondary" : "default"}
-            size="sm"
-            className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"
-          >
-            <Package className="mr-2 h-4 w-4" /> Inventario
-          </Button>
+
           <Button 
             onClick={() => setActiveTab("alerts")} 
             variant={activeTab === "alerts" ? "secondary" : "default"}
             size="sm"
             className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"
           >
-            <TrendingUp className="mr-2 h-4 w-4" /> Métricas
+            <TrendingUp className="mr-2 h-4 w-4" /> Riesgos
+          </Button>
+
+          <Button 
+            onClick={() => setActiveTab("inventory")} 
+            variant={activeTab === "inventory" ? "secondary" : "default"}
+            size="sm"
+            className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"
+          >
+            <Package className="mr-2 h-4 w-4" /> Stock
+          </Button>
+
+          <Button 
+            onClick={() => setActiveTab("catalog")} 
+            variant={activeTab === "catalog" ? "secondary" : "default"}
+            size="sm"
+            className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"
+          >
+            <Plus className="mr-2 h-4 w-4" /> Catálogo
           </Button>
         </div>
       </div>
 
       <div className="p-4 space-y-4">
         
+        {/* PESTAÑA: VENTAS (NUEVO) */}
+        {activeTab === "sales" && (
+            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+                {/* TARJETA TOTAL VENDIDO */}
+                <Card className="p-6 bg-emerald-600 text-white shadow-lg border-0">
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <p className="text-emerald-100 font-medium text-sm mb-1">Total Vendido (Reciente)</p>
+                            <h2 className="text-4xl font-bold">{formatMoney(totalVendidoHoy)}</h2>
+                        </div>
+                        <div className="p-3 bg-white/20 rounded-xl">
+                            <DollarSign className="h-8 w-8 text-white" />
+                        </div>
+                    </div>
+                    <div className="mt-4 pt-4 border-t border-white/20 flex gap-4 text-sm text-emerald-50">
+                        <span className="flex items-center gap-1">
+                            <Package className="h-4 w-4" /> {ventasHoy.length} ítems vendidos
+                        </span>
+                    </div>
+                </Card>
+
+                {/* LISTA DE ÚLTIMOS MOVIMIENTOS */}
+                <div>
+                    <h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
+                       <CalendarRange className="h-5 w-5 text-muted-foreground" /> Últimos Movimientos
+                    </h3>
+                    <div className="space-y-2">
+                        {ventasHoy.length === 0 ? (
+                            <div className="text-center py-8 text-muted-foreground bg-muted/20 rounded-lg border-dashed border">
+                                <p>No hay ventas registradas aún.</p>
+                            </div>
+                        ) : (
+                            ventasHoy.map((venta) => (
+                                <Card key={venta.id} className="p-3 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-2xl bg-muted p-2 rounded-full h-10 w-10 flex items-center justify-center">
+                                            {venta.productos?.emoji || '💵'}
+                                        </span>
+                                        <div>
+                                            <p className="font-bold text-sm">{venta.productos?.nombre}</p>
+                                            <p className="text-xs text-muted-foreground">ID Lote: ...{venta.id.toString().slice(-4)}</p>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="font-bold text-emerald-600">
+                                            + {formatMoney(venta.productos?.precio_venta)}
+                                        </p>
+                                        <p className="text-[10px] text-muted-foreground uppercase font-bold">Vendido</p>
+                                    </div>
+                                </Card>
+                            ))
+                        )}
+                    </div>
+                </div>
+            </div>
+        )}
+
         {/* PESTAÑA: CATÁLOGO */}
         {activeTab === "catalog" && (
           <div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -197,7 +283,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                       <span className="text-lg font-bold text-primary">{formatMoney(item.precio_venta)}</span>
                     </div>
 
-                    {/* Botón de Acción (Ahora integrado) */}
+                    {/* Botón de Acción */}
                     <div>
                       <AgregarStock 
                         producto={item} 
@@ -249,7 +335,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                 </Card>
              </div>
 
-             {/* Lista de Vencimientos Críticos Real */}
+             {/* Lista de Vencimientos Críticos */}
              <div>
                 <h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
                    <AlertTriangle className="h-5 w-5 text-destructive" /> Prioridad Alta
@@ -301,7 +387,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       </div>
 
       <BottomNav 
-        active={activeTab === "catalog" ? "inventory" : activeTab} 
+        active={activeTab === "catalog" ? "inventory" : activeTab as any} 
         onChange={(val) => setActiveTab(val as any)} 
       />
     </div>

@@ -1,16 +1,21 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ArrowLeft, AlertTriangle, TrendingUp, Package, Search, Plus, Loader2, ShieldCheck, DollarSign, CalendarRange, CreditCard, Repeat2, Wallet } from "lucide-react" 
+// 🚨 CAMBIOS: Importamos CalendarIcon, Popover y tipos de date-fns
+import { ArrowLeft, AlertTriangle, TrendingUp, Package, Search, Plus, Loader2, ShieldCheck, DollarSign, CalendarRange, CreditCard, Repeat2, Wallet, Calendar as CalendarIcon } from "lucide-react" 
 import { BottomNav } from "@/components/bottom-nav"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import CrearProducto from "@/components/crear-producto"
 import { AgregarStock } from "@/components/agregar-stock"
 import { cn } from "@/lib/utils"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Calendar } from "@/components/ui/calendar"
+import { DateRange } from "react-day-picker"
+import { format, subDays, startOfDay } from "date-fns" // Para manejar fechas
 
 interface DashboardDuenoProps {
   onBack: () => void
@@ -22,16 +27,16 @@ interface MetricaStock {
   criticos: any[]
 }
 
-// 🚨 CAMBIO: Interfaz para el desglose de ventas, ahora incluye billetera_virtual
+// Interfaz para el desglose de ventas, ahora incluye billetera_virtual
 interface PaymentBreakdown {
   efectivo: number
   tarjeta: number
   transferencia: number
   otro: number
-  billetera_virtual: number // <-- Nuevo
+  billetera_virtual: number
 }
 
-// 🚨 CAMBIO: Mapeo de iconos actualizado para billetera_virtual
+// Mapeo de iconos
 const PAYMENT_ICONS = {
     efectivo: DollarSign,
     tarjeta: CreditCard,
@@ -44,28 +49,32 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks" | "catalog" | "sales">("sales")
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(false)
+  
+  // 🚨 NUEVO ESTADO: Rango de fechas para filtrar ventas (Default: Últimos 7 días)
+  const [dateRange, setDateRange] = useState<DateRange | undefined>({
+    from: startOfDay(subDays(new Date(), 7)),
+    to: startOfDay(new Date()),
+  })
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false)
 
-  // --- ESTADOS DE DATOS ---
+
   const [productos, setProductos] = useState<any[]>([])
   const [productosConStock, setProductosConStock] = useState<any[]>([])
 
-  // --- MÉTRICAS DE STOCK ---
   const [capitalEnRiesgo, setCapitalEnRiesgo] = useState<MetricaStock>({ capital: 0, unidades: 0, criticos: [] })
   const [capitalSaludable, setCapitalSaludable] = useState<MetricaStock>({ capital: 0, unidades: 0, criticos: [] })
 
-  // --- MÉTRICAS DE VENTAS (ACTUALIZADO) ---
   const [ventasRecientes, setVentasRecientes] = useState<any[]>([])
   const [totalVendido, setTotalVendido] = useState(0)
-  // 🚨 CAMBIO: Inicialización con el nuevo campo billetera_virtual
   const [paymentBreakdown, setPaymentBreakdown] = useState<PaymentBreakdown>({
       efectivo: 0, tarjeta: 0, transferencia: 0, otro: 0, billetera_virtual: 0 
   })
 
-  // --- CARGAR DATOS ---
-  const fetchData = async () => {
+  // 🚨 REFACTORIZACIÓN: fetchData ahora depende del dateRange (vía useCallback)
+  const fetchData = useCallback(async () => {
     setLoading(true)
     
-    // 1. Traer PRODUCTOS (Catálogo Maestro)
+    // 1. Fetch de Catálogo e Inventario (sin cambios)
     const { data: dataProductos } = await supabase
       .from('productos')
       .select('*')
@@ -73,7 +82,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     
     setProductos(dataProductos || [])
 
-    // 2. Traer STOCK PENDIENTE (Para calcular riesgos)
     const { data: dataStock } = await supabase
       .from('stock')
       .select('*, productos(nombre, precio_venta, emoji)')
@@ -83,7 +91,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       calcularMetricasStock(dataStock)
     }
 
-    // 2b. Recalcular stock disponible para el tab de Inventario
     const productosConStockCalculado = await Promise.all((dataProductos || []).map(async (p) => {
         const { count } = await supabase
           .from('stock')
@@ -96,33 +103,51 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     setProductosConStock(productosConStockCalculado)
 
 
-    // 3. TRAER VENTAS RECIENTES (Items con estado 'vendido')
-    const { data: dataVentas } = await supabase
-      // Incluimos 'metodo_pago' en el select
+    // 3. TRAER VENTAS RECIENTES (Items con estado 'vendido') - FILTRADO POR FECHA
+    let ventasQuery = supabase
       .from('stock')
       .select('id, fecha_venta, metodo_pago, productos(nombre, precio_venta, emoji)') 
       .eq('estado', 'vendido')
-      // Ordenamos por fecha_venta (el más nuevo arriba)
-      .order('fecha_venta', { ascending: false, nullsFirst: false }) 
-      .limit(50)
+      
+    // 🚨 CAMBIO CRÍTICO: Aplicar filtros de rango de fechas
+    if (dateRange?.from) {
+        // Aseguramos que se incluye la fecha de inicio
+        ventasQuery = ventasQuery.gte('fecha_venta', format(dateRange.from, 'yyyy-MM-dd'))
+    }
+    if (dateRange?.to) {
+        // Aseguramos que se incluye la fecha final (hasta el final del día 23:59:59)
+        const endOfDay = format(dateRange.to, 'yyyy-MM-dd 23:59:59')
+        ventasQuery = ventasQuery.lte('fecha_venta', endOfDay)
+    }
 
-    if (dataVentas) {
+    const { data: dataVentas, error: errorVentas } = await ventasQuery
+      .order('fecha_venta', { ascending: false, nullsFirst: false }) 
+      .limit(50) // Mantenemos el límite para la lista de movimientos
+
+    if (errorVentas) {
+        console.error("Error fetching ventas:", errorVentas)
+        setVentasRecientes([])
+        setTotalVendido(0)
+    } else if (dataVentas) {
       setVentasRecientes(dataVentas)
-      calcularMetricasVentas(dataVentas) // Calculamos métricas de ventas
+      calcularMetricasVentas(dataVentas) 
     }
 
     setLoading(false)
-  }
+  }, [dateRange]) // 🚨 Dependencia: Recargar cuando cambie el rango de fechas
 
-  // 🚨 CAMBIO: Lógica para calcular el total y el desglose de ventas
+  useEffect(() => {
+    fetchData()
+  }, [fetchData]) // Llamar cuando fetchData cambie (es decir, cuando dateRange cambie)
+
+
+  // --- LÓGICA DE CÁLCULO (Mantenida y corregida) ---
   const calcularMetricasVentas = (ventas: any[]) => {
     let total = 0
-    // 🚨 CAMBIO: Inicialización del breakdown para el cálculo
     const breakdown: PaymentBreakdown = { efectivo: 0, tarjeta: 0, transferencia: 0, otro: 0, billetera_virtual: 0 } 
 
     ventas.forEach(item => {
         const precio = parseFloat(item.productos?.precio_venta || 0)
-        // Usa el valor de la DB (que ahora puede ser billetera_virtual) o 'efectivo' como default
         const metodo = item.metodo_pago || 'efectivo' as keyof PaymentBreakdown
         
         total += precio
@@ -138,7 +163,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     setPaymentBreakdown(breakdown)
   }
   
-  // Función de cálculo de stock (Mantenida)
   const calcularMetricasStock = (stock: any[]) => {
     let riesgo: MetricaStock = { capital: 0, unidades: 0, criticos: [] }
     let saludable: MetricaStock = { capital: 0, unidades: 0, criticos: [] }
@@ -190,10 +214,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     setCapitalSaludable(saludable)
   }
 
-  useEffect(() => {
-    fetchData()
-  }, [])
-
+  // --- Helpers UX (Actualizados) ---
   const formatMoney = (amount: number) => {
     const numericAmount = isNaN(amount) ? 0 : amount;
     return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(numericAmount)
@@ -206,12 +227,23 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     const month = (date.getMonth() + 1).toString().padStart(2, '0')
     return `${day}/${month}`
   }
+  
+  // 🚨 NUEVO: Label para el rango de fechas en la UI
+  const dateRangeLabel = useMemo(() => {
+    if (!dateRange?.from) return "Selecciona Rango"
+    const from = format(dateRange.from, 'dd/MM')
+    if (!dateRange.to || dateRange.from.getTime() === dateRange.to.getTime()) {
+      return `Día: ${from}`
+    }
+    const to = format(dateRange.to, 'dd/MM')
+    return `${from} - ${to}`
+  }, [dateRange])
+
 
   const inventarioFiltrado = productosConStock.filter((item) =>
     item.nombre.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  // Gráfico estático (Placeholder)
   const preciosTendencia = [
     { mes: "Sep", precio: 1000 }, { mes: "Oct", precio: 1100 }, { mes: "Nov", precio: 1150 }, { mes: "Dic", precio: 1200 },
   ]
@@ -277,11 +309,42 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         {/* PESTAÑA: VENTAS */}
         {activeTab === "sales" && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+                
+                {/* 🚨 NUEVO: Selector de Rango de Fechas */}
+                <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                    <PopoverTrigger asChild>
+                        <Button 
+                            id="date" 
+                            variant={"outline"} 
+                            className={cn(
+                                "w-full justify-start text-left font-normal h-12 text-base",
+                                !dateRange && "text-muted-foreground"
+                            )}
+                        >
+                            <CalendarIcon className="mr-2 h-5 w-5" />
+                            {dateRangeLabel}
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                            initialFocus
+                            mode="range"
+                            defaultMonth={dateRange?.from}
+                            selected={dateRange}
+                            onSelect={(range) => { 
+                                setDateRange(range)
+                                setIsCalendarOpen(false) 
+                            }}
+                            numberOfMonths={1}
+                        />
+                    </PopoverContent>
+                </Popover>
+
                 {/* TARJETA TOTAL VENDIDO */}
                 <Card className="p-6 bg-emerald-600 text-white shadow-lg border-0">
                     <div className="flex justify-between items-start">
                         <div>
-                            <p className="text-emerald-100 font-medium text-sm mb-1">Total Vendido (Reciente)</p>
+                            <p className="text-emerald-100 font-medium text-sm mb-1">Total Vendido ({dateRangeLabel})</p>
                             <h2 className="text-4xl font-bold">{formatMoney(totalVendido)}</h2>
                         </div>
                         <div className="p-3 bg-white/20 rounded-xl">
@@ -295,7 +358,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                     </div>
                 </Card>
                 
-                {/* 🚨 DESGLOSE POR MÉTODO DE PAGO */}
+                {/* DESGLOSE POR MÉTODO DE PAGO */}
                 <div className="space-y-2">
                     <h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
                        <CreditCard className="h-5 w-5 text-muted-foreground" /> Desglose de Pagos
@@ -307,7 +370,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                             let label = method.replace('_', ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
                             const Icon = PAYMENT_ICONS[method as keyof typeof PAYMENT_ICONS];
                             
-                            // Ocultar métodos con 0 ventas para una vista limpia
                             if (amount === 0) return null; 
 
                             return (
@@ -315,7 +377,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                     key={method} 
                                     className={cn(
                                         "p-3 flex items-center justify-between shadow-sm",
-                                        // Estilo resaltado para el efectivo
                                         method === 'efectivo' ? 'border-primary/50 bg-primary/5' : 'bg-muted/50'
                                     )}
                                 >
@@ -343,7 +404,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                     <div className="space-y-2">
                         {ventasRecientes.length === 0 ? (
                             <div className="text-center py-8 text-muted-foreground bg-muted/20 rounded-lg border-dashed border">
-                                <p>No hay ventas registradas aún.</p>
+                                <p>No hay ventas registradas aún para este período.</p>
                             </div>
                         ) : (
                             ventasRecientes.map((venta) => (
@@ -466,6 +527,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                         <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight mt-1">
                             {capitalSaludable.unidades} unidad{capitalSaludable.unidades !== 1 ? 'es' : ''} saludables
                         </span>
+                        
                     </div>
                 </Card>
              </div>

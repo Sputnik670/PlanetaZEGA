@@ -12,6 +12,7 @@ import { format, parseISO, addDays } from "date-fns"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils" 
+import { triggerConfetti } from "@/components/confetti-trigger" // <--- NUEVO IMPORT
 
 // Tipado para las misiones activas
 interface Mision {
@@ -178,6 +179,7 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
             toast.success("Mermado Registrado ✅", { description: `Se procesaron ${unidadesMermadas} unidades en riesgo.` })
             
             if (misionCompletada) {
+                triggerConfetti() // <--- ¡DISPARO DE CONFETTI! 🎉
                 toast.success(`✨ ¡MISIÓN COMPLETADA!`, { 
                     description: `Excelente trabajo. Ganaste +${misionVencimiento.puntos} puntos.`,
                     duration: 5000
@@ -287,7 +289,7 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
                 })
             )}
 
-            {/* Modal de Mermar Stock (Sin cambios en lógica, solo contexto) */}
+            {/* Modal de Mermar Stock */}
             <Dialog open={showMermarModal} onOpenChange={setShowMermarModal}>
                 <DialogContent className="sm:max-w-[425px]">
                     <DialogHeader>

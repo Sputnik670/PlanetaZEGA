@@ -9,12 +9,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { 
   ArrowLeft, AlertTriangle, TrendingUp, Package, Search, Plus, 
-  Loader2, ShieldCheck, DollarSign, CalendarRange, CreditCard, 
+  Loader2, ShieldCheck, DollarSign, CreditCard, 
   Repeat2, Wallet, Calendar as CalendarIcon, BarChart3, 
-  Eye, CheckCircle2, XCircle, User 
+  Eye, CheckCircle2, XCircle, User, TrendingDown 
 } from "lucide-react" 
 import { BottomNav } from "@/components/bottom-nav"
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts" 
+import { BarChart, Bar, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts" 
 import CrearProducto from "@/components/crear-producto"
 import { AgregarStock } from "@/components/agregar-stock"
 import { cn } from "@/lib/utils"
@@ -23,6 +23,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { DateRange } from "react-day-picker"
 import { format, subDays, startOfDay, parseISO } from "date-fns" 
 import { es } from "date-fns/locale" 
+import AsignarMision from "@/components/asignar-mision" // <--- IMPORTACIÓN DEL NUEVO COMPONENTE
 
 // --- Interfaces ---
 interface DashboardDuenoProps {
@@ -56,13 +57,21 @@ interface PaymentBreakdown {
   billetera_virtual: number
 }
 
-// --- NUEVAS Interfaces para Fase 4 (Supervisión) ---
+// --- Interfaces para Fase 4 (Supervisión) ---
 interface MisionAudit {
   id: string
   descripcion: string
   tipo: string
   es_completada: boolean
   puntos: number
+}
+
+interface MovimientoCaja {
+  id: string
+  monto: number
+  descripcion: string
+  tipo: 'ingreso' | 'egreso'
+  created_at: string
 }
 
 interface TurnoAudit {
@@ -74,6 +83,7 @@ interface TurnoAudit {
   empleado_id: string
   perfiles: { nombre: string } | null // Join con tabla perfiles
   misiones: MisionAudit[]
+  movimientos_caja: MovimientoCaja[]
 }
 
 const PAYMENT_ICONS = {
@@ -85,7 +95,7 @@ const PAYMENT_ICONS = {
 }
 
 export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
-  // 1. Estado actualizado con "supervision"
+  // 1. Estado
   const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks" | "catalog" | "sales" | "supervision">("sales")
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(false)
@@ -166,18 +176,17 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       calcularMetricasVentas(dataVentas) 
     }
 
-    // --- C. Supervisión (NUEVO para Fase 4) ---
-    // Traemos las cajas (turnos) con el perfil del empleado y sus misiones
+    // --- C. Supervisión ---
     let cajasQuery = supabase
         .from('caja_diaria')
         .select(`
             *,
             perfiles(nombre),
-            misiones(*)
+            misiones(*),
+            movimientos_caja(*)
         `)
         .order('fecha_apertura', { ascending: false })
 
-    // Filtramos cajas por fecha de apertura si hay rango seleccionado
     if (dateRange?.from) {
         cajasQuery = cajasQuery.gte('fecha_apertura', format(dateRange.from, 'yyyy-MM-dd'))
     }
@@ -295,7 +304,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
           <Button onClick={() => setActiveTab("sales")} variant={activeTab === "sales" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap">
             <BarChart3 className="mr-2 h-4 w-4" /> Reportes
           </Button>
-          {/* NUEVO BOTÓN SUPERVISIÓN */}
           <Button onClick={() => setActiveTab("supervision")} variant={activeTab === "supervision" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap">
             <Eye className="mr-2 h-4 w-4" /> Supervisión
           </Button>
@@ -313,7 +321,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
 
       <div className="p-4 space-y-4">
         
-        {/* FILTRO COMÚN DE FECHA (Visible en Sales y Supervision) */}
+        {/* FILTRO COMÚN DE FECHA */}
         {(activeTab === "sales" || activeTab === "supervision") && (
              <div className="flex gap-2 items-center mb-4">
                 <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
@@ -334,7 +342,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             </div>
         )}
 
-        {/* 3. PESTAÑA: SUPERVISIÓN (NUEVA) */}
+        {/* 3. PESTAÑA: SUPERVISIÓN */}
         {activeTab === "supervision" && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
                 <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
@@ -350,9 +358,11 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                     turnosAudit.map((turno) => {
                         const diferencia = (turno.monto_final || 0) - turno.monto_inicial
                         const isOpen = !turno.fecha_cierre
-                        const isLoss = diferencia < -100 // Pérdida mayor a 100
-                        const isGain = diferencia > 100 // Sobrante mayor a 100
+                        const isLoss = diferencia < -100 
+                        const isGain = diferencia > 100 
                         
+                        const totalGastos = turno.movimientos_caja?.filter(m => m.tipo === 'egreso').reduce((acc, curr) => acc + curr.monto, 0) || 0
+
                         return (
                             <Card key={turno.id} className="overflow-hidden border-2 shadow-sm">
                                 {/* Header del Turno */}
@@ -366,6 +376,18 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                     </div>
                                     <span>{format(parseISO(turno.fecha_apertura), 'dd/MM HH:mm')}</span>
                                 </div>
+
+                                {/* --- BARRA DE ACCIONES (SOLO SI ESTÁ ABIERTO) --- */}
+                                {isOpen && (
+                                    <div className="p-2 bg-blue-50/50 flex justify-end border-b border-blue-100">
+                                        <AsignarMision 
+                                            turnoId={turno.id}
+                                            empleadoId={turno.empleado_id}
+                                            empleadoNombre={turno.perfiles?.nombre || "Empleado"}
+                                            onMisionCreated={fetchData} 
+                                        />
+                                    </div>
+                                )}
 
                                 <div className="p-4 grid grid-cols-2 gap-4">
                                     {/* Finanzas */}
@@ -395,6 +417,26 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                     )}
                                 </div>
 
+                                {/* MOVIMIENTOS / GASTOS */}
+                                {turno.movimientos_caja && turno.movimientos_caja.length > 0 && (
+                                    <div className="bg-red-50/50 p-3 border-t border-red-100">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <p className="text-xs font-bold text-red-700 uppercase flex items-center gap-1">
+                                                <TrendingDown className="h-3 w-3" /> Salidas de Caja
+                                            </p>
+                                            <span className="text-xs font-bold text-red-700">Total: -{formatMoney(totalGastos)}</span>
+                                        </div>
+                                        <div className="space-y-1">
+                                            {turno.movimientos_caja.map(mov => (
+                                                <div key={mov.id} className="flex justify-between text-xs text-red-600/80">
+                                                    <span>{format(parseISO(mov.created_at), 'HH:mm')} - {mov.descripcion}</span>
+                                                    <span className="font-mono font-medium">-{formatMoney(mov.monto)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
                                 {/* Misiones y Acciones */}
                                 {turno.misiones && turno.misiones.length > 0 && (
                                     <div className="bg-slate-50 p-3 border-t">
@@ -410,10 +452,14 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                                         <span className={cn(m.es_completada ? "text-foreground font-medium" : "text-muted-foreground")}>
                                                             {m.descripcion}
                                                         </span>
-                                                        {/* Alerta si retiró mercadería */}
                                                         {m.tipo === 'vencimiento' && m.es_completada && (
                                                             <div className="text-xs text-orange-600 font-bold ml-1 mt-0.5">
                                                                 🛠️ Acción Crítica: Se retiró mercadería vencida.
+                                                            </div>
+                                                        )}
+                                                        {m.tipo === 'manual' && (
+                                                            <div className="text-xs text-blue-600 font-bold ml-1 mt-0.5">
+                                                                🎮 Tarea Especial
                                                             </div>
                                                         )}
                                                     </div>

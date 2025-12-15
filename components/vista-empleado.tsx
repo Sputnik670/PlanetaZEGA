@@ -6,15 +6,13 @@ import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-// IMPORTACIÓN REVISADA
-import { DollarSign, LogOut, Loader2, ShoppingCart, Target, TrendingUp, AlertTriangle, Star } from "lucide-react" 
+import { LogOut, Loader2, ShoppingCart, Target, TrendingUp, AlertTriangle, Star } from "lucide-react" 
 import { toast } from "sonner"
 import CajaVentas from "@/components/caja-ventas" 
 import ArqueoCaja, { CajaDiaria } from "@/components/arqueo-caja" 
 import MisionesEmpleado from "@/components/misiones-empleado"
+import RegistrarGasto from "@/components/registrar-gasto" // <--- Importación correcta
 
-
-// INTERFAZ REVISADA
 interface UserProfile {
     id: string
     rol: "dueño" | "empleado"
@@ -47,7 +45,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
             console.error("Error al obtener perfil:", error)
         }
     }, [])
-
 
     // FETCH TURNO ACTIVO
     const checkTurnoActivo = useCallback(async () => {
@@ -88,7 +85,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
         checkTurnoActivo()
     }, [checkTurnoActivo, refreshKey])
 
-
     // Handlers para ArqueoCaja
     const handleCajaAbierta = () => {
         setRefreshKey(prev => prev + 1)
@@ -105,7 +101,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
     const handleMisionesUpdated = () => {
         setRefreshKey(prev => prev + 1) // Forzar re-fetch de XP/perfil
     }
-
 
     // --- Renderizado ---
 
@@ -202,6 +197,19 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                                         onCajaCerrada={handleCajaCerrada}
                                         turnoActivo={turnoActivo}
                                     />
+                                    
+                                    {/* --- AQUÍ ESTABA EL FALTANTE --- */}
+                                    {/* BOTÓN DE GASTOS (Solo si hay turno activo y perfil cargado) */}
+                                    {userProfile && (
+                                        <div className="mt-4">
+                                            <RegistrarGasto 
+                                                turnoId={turnoActivo.id} 
+                                                empleadoId={userProfile.id} 
+                                            />
+                                        </div>
+                                    )}
+                                    {/* ---------------------------------- */}
+
                                     <div className="mt-4">
                                         <CajaVentas turnoId={turnoActivo.id} />
                                     </div>

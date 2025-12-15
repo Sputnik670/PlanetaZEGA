@@ -1,12 +1,20 @@
+// app/page.tsx
+
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
-import { Store, User } from "lucide-react"
+import { Store, User, Loader2, LogOut } from "lucide-react"
 import DashboardDueno from "@/components/dashboard-dueno"
 import VistaEmpleado from "@/components/vista-empleado"
+import AuthForm from "@/components/auth-form" // <-- Importamos el componente de autenticación
+import { Button } from "@/components/ui/button"
+import { toast } from "sonner"
 
-export default function HomePage() {
+
+// Componente que muestra la selección de rol después del login (antes era HomePage)
+function UserSelectionPage({ onLogout }: { onLogout: () => void }) {
   const [userRole, setUserRole] = useState<"none" | "owner" | "employee">("none")
 
   if (userRole === "owner") {
@@ -20,9 +28,21 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 flex items-center justify-center p-4">
       <div className="w-full max-w-md space-y-8">
-        <div className="text-center space-y-2">
-          <h1 className="text-4xl font-bold text-balance text-foreground">Kiosco App</h1>
-          <p className="text-muted-foreground text-lg">Selecciona tu perfil para continuar</p>
+        
+        {/* Barra Superior con Logout */}
+        <div className="flex justify-between items-start w-full">
+            <div className="text-center space-y-2 flex-1">
+                <h1 className="text-4xl font-bold text-balance text-foreground">Kiosco App</h1>
+                <p className="text-muted-foreground text-lg">Selecciona tu perfil para continuar</p>
+            </div>
+            <Button 
+                variant="outline" 
+                size="icon-sm"
+                onClick={onLogout}
+                className="flex-shrink-0 ml-4 mt-2"
+            >
+                <LogOut className="h-4 w-4 text-destructive" />
+            </Button>
         </div>
 
         <div className="space-y-4">
@@ -59,4 +79,57 @@ export default function HomePage() {
       </div>
     </div>
   )
+}
+
+
+export default function HomePage() {
+  const [session, setSession] = useState<any>(null)
+  const [loadingSession, setLoadingSession] = useState(true)
+
+  // Manejo de la sesión y el estado de autenticación
+  useEffect(() => {
+    // 1. Obtener sesión inicial
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      setLoadingSession(false)
+    })
+
+    // 2. Suscribirse a cambios de estado de autenticación
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+      setLoadingSession(false)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const handleLogout = async () => {
+    setLoadingSession(true)
+    const { error } = await supabase.auth.signOut()
+    if (error) {
+        console.error(error)
+        toast.error('Error al cerrar sesión')
+        setLoadingSession(false)
+    } else {
+        toast.info('Sesión cerrada correctamente')
+    }
+  }
+
+  if (loadingSession) {
+    return (
+        <div className="min-h-screen flex items-center justify-center">
+            <Loader2 className="h-10 w-10 animate-spin text-primary" />
+        </div>
+    )
+  }
+
+  // Si no hay sesión, mostramos el formulario de autenticación
+  if (!session) {
+    return <AuthForm />
+  }
+
+  // Si hay sesión, mostramos la selección de rol y pasamos la función de logout
+  return <UserSelectionPage onLogout={handleLogout} />
 }

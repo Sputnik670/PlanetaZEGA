@@ -7,9 +7,9 @@ import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Loader2, DollarSign, LogOut, Check, X, AlertTriangle } from "lucide-react"
+import { Loader2, DollarSign, Lock } from "lucide-react"
 import { toast } from "sonner"
-import { format } from "date-fns"
+import { format, addDays } from "date-fns"
 
 interface ArqueoCajaProps {
   onCajaAbierta: (turnoId: string) => void
@@ -17,7 +17,6 @@ interface ArqueoCajaProps {
   turnoActivo: CajaDiaria | null 
 }
 
-// 🚨 CORRECCIÓN: Exportamos el tipo y añadimos monto_final y monto_inicial
 export interface CajaDiaria {
     id: string
     monto_inicial: number
@@ -26,21 +25,20 @@ export interface CajaDiaria {
     monto_final: number | null; 
 }
 
-// 🚨 CAMBIO: Exportamos por defecto
 export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }: ArqueoCajaProps) {
   const [montoInicial, setMontoInicial] = useState<string>("")
   const [montoFinal, setMontoFinal] = useState<string>("")
   const [loading, setLoading] = useState(false)
-  // Usamos CajaDiaria aquí
-  const [caja, setCaja] = useState<CajaDiaria | null>(turnoActivo as CajaDiaria | null)
+  
+  // Estado local para manejar la UI de caja abierta/cerrada
+  const [caja, setCaja] = useState<CajaDiaria | null>(turnoActivo)
 
-
-  // 🚨 Función Central: Generar misiones al abrir caja (Lógica simplificada en este snippet para enfocar en el Fix)
+  // 🎲 Lógica de Gamificación Dinámica (Motor de Misiones)
   const generarMisiones = async (cajaId: string, empleadoId: string) => {
-    // ... (lógica de generación de misiones, sin cambios)
     try {
       const hoy = new Date()
-      const fechaLimite = format(hoy.setDate(hoy.getDate() + 7), 'yyyy-MM-dd') // Próximos 7 días
+      // Buscamos productos que vencen en los próximos 7 días
+      const fechaLimite = format(addDays(hoy, 7), 'yyyy-MM-dd')
 
       const { data: stockCritico, error: stockError } = await supabase
         .from('stock')
@@ -50,6 +48,7 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       
       if (stockError) throw stockError
 
+      // Agrupamos para contar cuántas unidades hay de cada producto en riesgo
       const productosEnRiesgo: { [key: string]: number } = {}
       stockCritico?.forEach(item => {
         productosEnRiesgo[item.producto_id] = (productosEnRiesgo[item.producto_id] || 0) + 1
@@ -58,24 +57,31 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       const misionesABulkInsert = []
       const totalUnidadesRiesgo = Object.values(productosEnRiesgo).reduce((sum, count) => sum + count, 0)
       
+      // 1. Misión Condicional: Solo si hay riesgo real en el inventario
       if (totalUnidadesRiesgo > 0) {
         misionesABulkInsert.push({
           empleado_id: empleadoId,
           caja_diaria_id: cajaId,
           tipo: 'vencimiento',
-          descripcion: `Mover/Verificar ${totalUnidadesRiesgo} unidades con fecha de vencimiento próxima (< 7 días).`,
+          descripcion: `Gestionar ${totalUnidadesRiesgo} productos con vencimiento próximo.`,
           objetivo_unidades: totalUnidadesRiesgo,
-          puntos: Math.min(10 + Math.floor(totalUnidadesRiesgo / 5) * 5, 50),
+          unidades_completadas: 0,
+          es_completada: false,
+          // Fórmula de puntos mejorada: Base 10 + bonos, tope 100 pts.
+          puntos: Math.min(10 + Math.floor(totalUnidadesRiesgo / 2) * 5, 100), 
         })
       }
       
+      // 2. Misión Fija: Cierre de Caja Perfecto (Incentivo diario)
       misionesABulkInsert.push({
         empleado_id: empleadoId,
         caja_diaria_id: cajaId,
         tipo: 'arqueo_cierre',
-        descripcion: 'Realizar el cierre de caja con un desvío de <= $100.',
+        descripcion: 'Realizar el cierre de caja con un desvío menor a $100.',
         objetivo_unidades: 1,
-        puntos: 15,
+        unidades_completadas: 0,
+        es_completada: false,
+        puntos: 20, // 20 Puntos fijos por buen cierre
       })
 
       if (misionesABulkInsert.length > 0) {
@@ -85,37 +91,38 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
         
         if (insertError) throw insertError
         
-        const misionVencimientoCount = misionesABulkInsert.filter(m => m.tipo === 'vencimiento').length
-        if (misionVencimientoCount > 0) {
-            toast.info("🚨 ¡Misión de Vencimiento Activa!", { description: `Hay ${totalUnidadesRiesgo} unidades en riesgo. Revisa la pestaña 'Misiones'.` })
+        if (totalUnidadesRiesgo > 0) {
+            toast.warning("⚠️ Misión de Riesgo Activada", { description: `Se detectaron ${totalUnidadesRiesgo} unidades por vencer.` })
         }
       }
 
     } catch (error: any) {
       console.error("Error generando misiones:", error)
-      toast.error("Error de Misiones", { description: "No se pudieron crear las tareas de turno." })
+      // No bloqueamos la apertura si fallan las misiones, pero avisamos para debug
+      toast.error("Advertencia del Sistema", { description: "La caja se abrió, pero hubo un error generando las tareas automáticas." })
     }
   }
 
-  // --- Lógica de Apertura de Caja ---
+  // --- Apertura ---
   const handleAbrirCaja = async () => {
     const monto = parseFloat(montoInicial)
     if (isNaN(monto) || monto < 0) {
-      toast.error("Monto Inválido", { description: "Ingresa un monto inicial de caja válido." })
+      toast.error("Monto Inválido", { description: "Ingresa el efectivo inicial para abrir la caja." })
       return
     }
 
     setLoading(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error("Usuario no autenticado.")
+      if (!user) throw new Error("Sesión inválida")
       
-      // 1. Insertar nuevo registro de caja diaria (Abrir Turno)
+      // 1. Crear el registro de Turno (Caja Diaria)
       const { data, error } = await supabase
         .from('caja_diaria')
         .insert({
           monto_inicial: monto,
           empleado_id: user.id,
+          fecha_apertura: new Date().toISOString()
         })
         .select()
         .single()
@@ -125,31 +132,25 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       const nuevoTurno = data as CajaDiaria
       setCaja(nuevoTurno)
       
-      // 2. Generar Misiones después de abrir la caja
+      // 2. Generar Misiones AUTOMÁTICAS (Esto ocurre en segundo plano)
       await generarMisiones(nuevoTurno.id, user.id)
 
       onCajaAbierta(nuevoTurno.id)
-      toast.success("Caja Abierta", { description: `Turno iniciado con ${formatMoney(monto)}.` })
+      toast.success("Turno Iniciado", { description: "¡A vender! Revisa la pestaña de Misiones." })
 
     } catch (error: any) {
-      console.error("Error al abrir caja:", error)
-      
-        // 🚨 MEJORA DE ERROR INTEGRADA: Diagnóstico de RLS/Permisos
-        const errorMessage = error.message || (error.code ? `DB Error Code: ${error.code}` : "No se pudo iniciar el turno de caja. (Posible RLS/Permisos)")
-      
-      toast.error("Error de Operación", { description: errorMessage })
+      toast.error("Error al abrir caja", { description: error.message })
     } finally {
       setLoading(false)
     }
   }
 
-  // --- Lógica de Cierre de Caja ---
+  // --- Cierre ---
   const handleCerrarCaja = async () => {
     if (!caja) return
-
     const monto = parseFloat(montoFinal)
     if (isNaN(monto) || monto < 0) {
-      toast.error("Monto Inválido", { description: "Ingresa el monto final de caja." })
+      toast.error("Monto Inválido", { description: "Ingresa el monto final que hay en la caja." })
       return
     }
 
@@ -158,13 +159,11 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error("Usuario no autenticado.")
 
-      // Calcular Desvío
-      const desvioMonetario = Math.abs(monto - caja.monto_inicial) 
-      
-      // Determinar si la misión de arqueo_cierre fue exitosa
-      const exitoArqueo = desvioMonetario <= 100 
+      // 1. Cálculo de Desvío para validar la Misión
+      const desvio = Math.abs(monto - caja.monto_inicial) 
+      const exitoArqueo = desvio <= 100 
 
-      // 3. Actualizar registro de caja diaria (Cerrar Turno)
+      // 2. Actualizar registro de Caja (Cierre)
       const { error } = await supabase
         .from('caja_diaria')
         .update({ 
@@ -175,99 +174,107 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       
       if (error) throw error
 
-      // 4. Actualizar Misión de Arqueo
+      // 3. Completar Misión de Arqueo automáticamente
+      // Actualizamos la misión generada al inicio
       await supabase
           .from('misiones')
           .update({
               es_completada: exitoArqueo,
-              unidades_completadas: 1,
-              puntos: exitoArqueo ? 15 : 0
+              unidades_completadas: 1, // Se marca como intento realizado
           })
           .eq('caja_diaria_id', caja.id)
           .eq('tipo', 'arqueo_cierre')
-          .eq('empleado_id', user.id)
-
 
       setCaja(null)
       onCajaCerrada()
-      toast.success("Caja Cerrada", { description: `Turno finalizado. Monto de cierre: ${formatMoney(monto)}. Desvío: ${formatMoney(desvioMonetario)}.` })
+      
       if (exitoArqueo) {
-        toast.success("✨ Misión Arqueo Completada", { description: "Ganaste 15 puntos por un cierre preciso." })
+        toast.success("🏆 Cierre Perfecto", { description: "¡Ganaste 20 puntos de experiencia por precisión!" })
+      } else {
+        toast.success("Turno Cerrado", { description: `Caja cerrada. Desvío: ${formatMoney(desvio)}` })
       }
 
     } catch (error: any) {
-      console.error("Error al cerrar caja:", error)
-      toast.error("Error de Operación", { description: error.message || "No se pudo cerrar el turno de caja." })
+      console.error(error)
+      toast.error("Error al cerrar", { description: error.message })
     } finally {
       setLoading(false)
     }
   }
 
-  const formatMoney = (amount: number) => {
-    const numericAmount = isNaN(amount) ? 0 : amount;
-    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(numericAmount)
-  }
+  const formatMoney = (val: number) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(val)
 
-  // --- Renderizado (sin cambios) ---
-
-  // Si la caja ya está abierta, muestra el formulario de cierre
+  // --- Renderizado UI ---
+  
+  // A. Si la caja ya está abierta -> Muestra Formulario de CIERRE
   if (caja) {
     return (
-      <Card className="p-6 space-y-4 shadow-xl border-2 border-destructive/20 bg-destructive/5">
-        <h2 className="text-xl font-bold flex items-center gap-2 text-destructive">
-          <DollarSign className="h-6 w-6" /> Cerrar Turno
+      <Card className="p-6 border-2 border-red-100 bg-red-50/50 dark:bg-red-950/10 dark:border-red-900/50">
+        <h2 className="text-xl font-bold flex items-center gap-2 text-red-600 mb-4">
+          <Lock className="h-5 w-5" /> Cerrar Turno
         </h2>
-        <div className="text-sm text-muted-foreground border-b pb-3 mb-3">
-            <p>Turno abierto desde: {format(new Date(caja.fecha_apertura), 'HH:mm - dd/MM/yyyy')}</p>
-            <p className="font-semibold text-foreground">Monto Inicial: {formatMoney(caja.monto_inicial)}</p>
+        <div className="space-y-4">
+            <div className="text-sm text-muted-foreground flex justify-between bg-white/50 p-3 rounded-md">
+                <span>Inicio: {format(new Date(caja.fecha_apertura), 'HH:mm')}</span>
+                <span className="font-bold text-foreground">Base: {formatMoney(caja.monto_inicial)}</span>
+            </div>
+            
+            <div className="space-y-2">
+                <label className="text-xs font-bold uppercase text-muted-foreground">Efectivo en Caja</label>
+                <div className="relative">
+                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                        type="number"
+                        placeholder="0.00"
+                        className="pl-9 h-12 text-lg bg-white"
+                        value={montoFinal}
+                        onChange={(e) => setMontoFinal(e.target.value)}
+                        disabled={loading}
+                    />
+                </div>
+            </div>
+            
+            <Button 
+                onClick={handleCerrarCaja} 
+                disabled={loading}
+                className="w-full h-12 bg-red-600 hover:bg-red-700 font-bold shadow-sm"
+            >
+                {loading ? <Loader2 className="animate-spin mr-2" /> : "FINALIZAR DÍA"}
+            </Button>
         </div>
-        
-        <Input
-          type="number"
-          placeholder="Monto Final en Caja"
-          className="h-12 text-lg"
-          value={montoFinal}
-          onChange={(e) => setMontoFinal(e.target.value)}
-          disabled={loading}
-          autoFocus
-        />
-        
-        <Button 
-          onClick={handleCerrarCaja} 
-          disabled={loading}
-          className="w-full h-12 text-lg bg-destructive hover:bg-destructive/90"
-        >
-          {loading ? <Loader2 className="animate-spin mr-2 h-5 w-5" /> : "CERRAR CAJA"}
-        </Button>
       </Card>
     )
   }
 
-  // Si la caja está cerrada, muestra el formulario de apertura
+  // B. Si la caja está cerrada -> Muestra Formulario de APERTURA
   return (
-    <Card className="p-6 space-y-4 shadow-xl border-2 border-emerald-600/20 bg-emerald-600/5">
-      <h2 className="text-xl font-bold flex items-center gap-2 text-emerald-600">
-        <DollarSign className="h-6 w-6" /> Abrir Turno
+    <Card className="p-6 border-2 border-emerald-100 bg-emerald-50/50 dark:bg-emerald-950/10 dark:border-emerald-900/50">
+      <h2 className="text-xl font-bold flex items-center gap-2 text-emerald-700 mb-4">
+        <DollarSign className="h-5 w-5" /> Apertura de Caja
       </h2>
-      <p className="text-sm text-muted-foreground">Ingresa el monto inicial de la caja para comenzar a operar.</p>
-      
-      <Input
-        type="number"
-        placeholder="Monto Inicial de Caja"
-        className="h-12 text-lg"
-        value={montoInicial}
-        onChange={(e) => setMontoInicial(e.target.value)}
-        disabled={loading}
-        autoFocus
-      />
-      
-      <Button 
-        onClick={handleAbrirCaja} 
-        disabled={loading}
-        className="w-full h-12 text-lg bg-emerald-600 hover:bg-emerald-700"
-      >
-        {loading ? <Loader2 className="animate-spin mr-2 h-5 w-5" /> : "ABRIR TURNO"}
-      </Button>
+      <div className="space-y-4">
+        <p className="text-sm text-muted-foreground">Ingresa el monto base para comenzar a vender y recibir tus misiones.</p>
+        
+        <div className="relative">
+            <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-emerald-600" />
+            <Input
+                type="number"
+                placeholder="Monto Inicial (Ej: 5000)"
+                className="pl-9 h-12 text-lg border-emerald-200 focus-visible:ring-emerald-500 bg-white"
+                value={montoInicial}
+                onChange={(e) => setMontoInicial(e.target.value)}
+                disabled={loading}
+            />
+        </div>
+        
+        <Button 
+            onClick={handleAbrirCaja} 
+            disabled={loading}
+            className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 font-bold shadow-sm"
+        >
+            {loading ? <Loader2 className="animate-spin mr-2" /> : "ABRIR TURNO"}
+        </Button>
+      </div>
     </Card>
   )
 }

@@ -8,6 +8,7 @@ import { ArrowLeft, Check, X, Target, ClipboardList, Calendar, Loader2, Shopping
 import { BottomNav } from "@/components/bottom-nav"
 import { supabase } from "@/lib/supabase"
 import CajaVentas from "@/components/caja-ventas"
+import { toast } from "sonner" // <--- AGREGADO: Importamos toast
 
 interface VistaEmpleadoProps {
   onBack: () => void
@@ -21,6 +22,17 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
   // --- FECHA DINÁMICA ---
   const [fechaHoy, setFechaHoy] = useState("")
 
+  // --- ESTADO DE DATOS (AHORA REALES) ---
+  const [productosVencimiento, setProductosVencimiento] = useState<any[]>([])
+  const [productosSinFecha, setProductosSinFecha] = useState<any[]>([])
+  // FIX: Usamos string para las claves, ya que los IDs de Supabase son strings.
+  const [newDate, setNewDate] = useState<Record<string, string>>({}) 
+
+  // NUEVO: Estados para el conteo de unidades totales
+  const [unidadesEnRiesgo, setUnidadesEnRiesgo] = useState(0)
+  const [unidadesSinFecha, setUnidadesSinFecha] = useState(0)
+
+
   useEffect(() => {
     const hoy = new Date()
     const opciones: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'numeric' }
@@ -29,11 +41,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
     // Al cargar la pantalla, traemos los datos de Supabase
     fetchDatos()
   }, [])
-
-  // --- ESTADO DE DATOS (AHORA REALES) ---
-  const [productosVencimiento, setProductosVencimiento] = useState<any[]>([])
-  const [productosSinFecha, setProductosSinFecha] = useState<any[]>([])
-  const [newDate, setNewDate] = useState<Record<number, string>>({})
 
   // --- FUNCIÓN PARA TRAER DATOS DE SUPABASE ---
   const fetchDatos = async () => {
@@ -48,19 +55,27 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
         .lte('fecha_vencimiento', new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString())
 
       if (errorV) console.error("Error vencimientos:", errorV)
-      else setProductosVencimiento(dataVencimientos || [])
+      else {
+          setProductosVencimiento(dataVencimientos || [])
+          setUnidadesEnRiesgo(dataVencimientos?.length || 0) // <--- NUEVO: Contamos las unidades
+      }
 
       // 2. Buscar productos SIN fecha (para completar)
       const { data: dataSinFecha, error: errorS } = await supabase
         .from('stock')
         .select('*, productos(*)')
         .is('fecha_vencimiento', null)
+        .eq('estado', 'pendiente') // Aseguramos que solo buscamos stock pendiente
       
       if (errorS) console.error("Error sin fecha:", errorS)
-      else setProductosSinFecha(dataSinFecha || [])
+      else {
+          setProductosSinFecha(dataSinFecha || [])
+          setUnidadesSinFecha(dataSinFecha?.length || 0) // <--- NUEVO: Contamos las unidades
+      }
 
     } catch (error) {
       console.error("Error general:", error)
+      toast.error("Error de conexión", { description: "No se pudieron cargar las tareas desde Supabase." })
     } finally {
       setLoading(false)
     }
@@ -68,30 +83,36 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
 
   // --- LÓGICA DE BOTONES (ACCIONES REALES) ---
 
-  const handleCheckExpiration = async (stockId: number, isGood: boolean) => {
-    // 1. Feedback Visual Inmediato
+  const handleCheckExpiration = async (stockId: string, isGood: boolean) => {
+    // 1. Feedback Visual Inmediato y actualización de conteo
     setProductosVencimiento((prev) => prev.filter((p) => p.id !== stockId))
-
+    setUnidadesEnRiesgo((prev) => prev - 1) 
+    
     // 2. Actualizar en Supabase
     const nuevoEstado = isGood ? 'verificado' : 'mermado'
     const { error } = await supabase
       .from('stock')
-      .update({ estado: nuevoEstado })
+      // AGREGADO: fecha_auditoria para trazar la acción
+      .update({ estado: nuevoEstado, fecha_auditoria: new Date().toISOString() }) 
       .eq('id', stockId)
 
     if (error) {
       console.error("Error al actualizar:", error)
+      toast.error("Error al registrar tarea.", { description: "Hubo un problema con la base de datos." })
     } else {
-      console.log(`Stock ${stockId} actualizado a: ${nuevoEstado}`)
+      toast.success(`Ítem ${isGood ? 'Aprobado' : 'Mermado'}`, { 
+        description: `El producto fue marcado como '${nuevoEstado}'.` 
+      })
     }
   }
 
-  const handleAddDate = async (stockId: number) => {
+  const handleAddDate = async (stockId: string) => {
     if (newDate[stockId]) {
       const fechaIngresada = newDate[stockId]
 
-      // 1. Feedback Visual
+      // 1. Feedback Visual y actualización de conteo
       setProductosSinFecha((prev) => prev.filter((p) => p.id !== stockId))
+      setUnidadesSinFecha((prev) => prev - 1) 
       
       // 2. Actualizar en Supabase
       const { error } = await supabase
@@ -101,8 +122,9 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
 
       if (error) {
         console.error("Error al guardar fecha:", error)
+        toast.error("Error al guardar la fecha.", { description: "Hubo un problema con la base de datos." })
       } else {
-        console.log(`Stock ${stockId} fecha guardada: ${fechaIngresada}`)
+        toast.success("Fecha Guardada", { description: `Fecha de vencimiento registrada para el producto.` })
         const { [stockId]: _, ...rest } = newDate
         setNewDate(rest)
       }
@@ -111,12 +133,16 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
 
   const formatDateToDDMMYYYY = (dateString: string) => {
     if (!dateString) return ""
-    const [year, month, day] = dateString.split("-")
+    const date = new Date(dateString)
+    const day = date.getDate().toString().padStart(2, '0')
+    const month = (date.getMonth() + 1).toString().padStart(2, '0')
+    const year = date.getFullYear()
     return `${day}/${month}/${year}`
   }
 
   // --- RENDERIZADO ---
 
+  // Vista para la tarea de Vencimientos
   if (selectedTask === "expiration") {
     return (
       <div className="min-h-screen bg-background pb-20">
@@ -130,11 +156,14 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
             <ArrowLeft className="h-6 w-6" />
           </Button>
           <h1 className="text-3xl font-bold mb-2">🎯 Caza-Vencimientos</h1>
-          <p className="text-accent-foreground/80">Revisa estos productos en la góndola</p>
+          {/* NUEVO: Mostrar unidades en el subtítulo */}
+          <p className="text-accent-foreground/80">
+            Revisa {unidadesEnRiesgo} unidad{unidadesEnRiesgo !== 1 ? 'es' : ''} en la góndola
+          </p>
         </div>
 
         <div className="p-4 space-y-4">
-          {productosVencimiento.length === 0 ? (
+          {unidadesEnRiesgo === 0 ? ( // Usamos el contador de unidades
             <div className="text-center p-10 text-muted-foreground">
                 <p>¡Todo limpio! No hay más vencimientos críticos por hoy. 🎉</p>
             </div>
@@ -167,7 +196,7 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                   size="lg"
                 >
                   <X className="mr-2 h-6 w-6" />
-                  Tirar
+                  Tirar (Merma)
                 </Button>
               </div>
             </Card>
@@ -178,6 +207,7 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
     )
   }
 
+  // Vista para la tarea de Completar Datos
   if (selectedTask === "data") {
     return (
       <div className="min-h-screen bg-background pb-20">
@@ -191,25 +221,26 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
             <ArrowLeft className="h-6 w-6" />
           </Button>
           <h1 className="text-3xl font-bold mb-2">📝 Completar Datos</h1>
-          <p className="text-primary-foreground/80">Productos nuevos sin fecha</p>
+          {/* NUEVO: Mostrar unidades en el subtítulo */}
+          <p className="text-primary-foreground/80">
+            {unidadesSinFecha} unidad{unidadesSinFecha !== 1 ? 'es' : ''} sin fecha de vencimiento
+          </p>
         </div>
 
         <div className="p-4 space-y-4">
-        {productosSinFecha.length === 0 ? (
+        {unidadesSinFecha === 0 ? ( // Usamos el contador de unidades
             <div className="text-center p-10 text-muted-foreground">
                 <p>¡Excelente! Todos los productos tienen fecha. ✅</p>
             </div>
           ) : (
           productosSinFecha.map((item) => (
-            <Card key={item.id} className="p-6 bg-gradient-to-br from-card to-muted/20 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <Card key={item.id} className="p-6 bg-gradient-to-br from-card to-chart-1/5 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="flex items-center gap-4 mb-4">
                 <div className="text-6xl">{item.productos?.emoji || '📦'}</div>
                 <div className="flex-1">
                   <h3 className="text-xl font-bold text-foreground text-pretty">{item.productos?.nombre || 'Producto'}</h3>
                   <p className="text-sm text-muted-foreground mt-1 font-mono">
-                    {newDate[item.id]
-                      ? `Ingresado: ${formatDateToDDMMYYYY(newDate[item.id])}`
-                      : "Esperando fecha..."}
+                    ID Lote: ...{item.id.toString().slice(-4)}
                   </p>
                 </div>
               </div>
@@ -290,15 +321,16 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                     <div className="flex-1">
                       <h3 className="text-xl font-bold text-foreground">🎯 Caza-Vencimientos</h3>
                       <p className="text-sm text-muted-foreground mt-1">
-                        {productosVencimiento.length > 0 
-                            ? `${productosVencimiento.length} productos en riesgo` 
+                        {/* NUEVO: Muestra la cantidad de unidades en riesgo */}
+                        {unidadesEnRiesgo > 0 
+                            ? `${unidadesEnRiesgo} unidad${unidadesEnRiesgo !== 1 ? 'es' : ''} en riesgo` 
                             : "¡Zona segura!"}
                       </p>
                     </div>
-                    {productosVencimiento.length > 0 && (
+                    {unidadesEnRiesgo > 0 && (
                     <div className="flex-shrink-0">
                       <div className="h-8 w-8 rounded-full bg-destructive text-destructive-foreground font-bold flex items-center justify-center text-sm animate-pulse">
-                        {productosVencimiento.length}
+                        {unidadesEnRiesgo} {/* NUEVO: Badge con el conteo */}
                       </div>
                     </div>
                     )}
@@ -316,15 +348,16 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                     <div className="flex-1">
                       <h3 className="text-xl font-bold text-foreground">📝 Completar Datos</h3>
                       <p className="text-sm text-muted-foreground mt-1">
-                        {productosSinFecha.length > 0 
-                            ? `${productosSinFecha.length} productos sin fecha` 
+                        {/* NUEVO: Muestra la cantidad de unidades sin fecha */}
+                        {unidadesSinFecha > 0 
+                            ? `${unidadesSinFecha} unidad${unidadesSinFecha !== 1 ? 'es' : ''} sin fecha` 
                             : "¡Al día!"}
                       </p>
                     </div>
-                    {productosSinFecha.length > 0 && (
+                    {unidadesSinFecha > 0 && (
                     <div className="flex-shrink-0">
                       <div className="h-8 w-8 rounded-full bg-chart-1 text-primary-foreground font-bold flex items-center justify-center text-sm">
-                        {productosSinFecha.length}
+                        {unidadesSinFecha} {/* NUEVO: Badge con el conteo */}
                       </div>
                     </div>
                     )}

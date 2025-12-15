@@ -15,21 +15,29 @@ interface DashboardDuenoProps {
   onBack: () => void
 }
 
+// Interfaz para la métrica de stock que incluye el conteo de unidades
+interface MetricaStock {
+  capital: number
+  unidades: number
+  criticos: any[]
+}
+
 export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
-  // CAMBIO: Agregamos 'sales' al estado y lo ponemos como default para verlo al entrar
   const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks" | "catalog" | "sales">("sales")
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(false)
 
   // --- ESTADOS DE DATOS ---
   const [productos, setProductos] = useState<any[]>([])
+  // Estado para productos con el conteo de stock disponible
+  const [productosConStock, setProductosConStock] = useState<any[]>([])
 
   // --- MÉTRICAS DE STOCK ---
-  const [capitalEnRiesgo, setCapitalEnRiesgo] = useState(0)
-  const [capitalSaludable, setCapitalSaludable] = useState(0)
-  const [vencimientosCriticos, setVencimientosCriticos] = useState<any[]>([])
+  // Inicializamos con la nueva estructura de MetricaStock (capital + unidades)
+  const [capitalEnRiesgo, setCapitalEnRiesgo] = useState<MetricaStock>({ capital: 0, unidades: 0, criticos: [] })
+  const [capitalSaludable, setCapitalSaludable] = useState<MetricaStock>({ capital: 0, unidades: 0, criticos: [] })
 
-  // --- MÉTRICAS DE VENTAS (NUEVO) ---
+  // --- MÉTRICAS DE VENTAS ---
   const [ventasHoy, setVentasHoy] = useState<any[]>([])
   const [totalVendidoHoy, setTotalVendidoHoy] = useState(0)
 
@@ -37,7 +45,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   const fetchData = async () => {
     setLoading(true)
     
-    // 1. Traer PRODUCTOS
+    // 1. Traer PRODUCTOS (Catálogo Maestro)
     const { data: dataProductos } = await supabase
       .from('productos')
       .select('*')
@@ -55,13 +63,26 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       calcularMetricasStock(dataStock)
     }
 
+    // 2b. Recalcular stock disponible para el tab de Inventario
+    const productosConStockCalculado = await Promise.all((dataProductos || []).map(async (p) => {
+        const { count } = await supabase
+          .from('stock')
+          .select('*', { count: 'exact', head: true })
+          .eq('producto_id', p.id)
+          .eq('estado', 'pendiente')
+        
+        return { ...p, stock_disponible: count || 0 }
+      }))
+    setProductosConStock(productosConStockCalculado)
+
+
     // 3. TRAER VENTAS (Items con estado 'vendido')
-    // Nota: En un futuro filtraremos por fecha "hoy", por ahora traemos las últimas 50 ventas.
+    // FIX: Usamos `order('id', { ascending: false })` para que el último vendido esté arriba.
     const { data: dataVentas } = await supabase
       .from('stock')
       .select('*, productos(nombre, precio_venta, emoji)')
       .eq('estado', 'vendido')
-      .order('id', { ascending: false }) // Los más recientes primero
+      .order('id', { ascending: false }) // FIX: El más reciente primero
       .limit(50)
 
     if (dataVentas) {
@@ -75,41 +96,58 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   }
 
   const calcularMetricasStock = (stock: any[]) => {
-    let riesgo = 0
-    let saludable = 0
-    let listaCritica: any[] = []
+    // Inicializamos las métricas con conteo de unidades a 0
+    let riesgo: MetricaStock = { capital: 0, unidades: 0, criticos: [] }
+    let saludable: MetricaStock = { capital: 0, unidades: 0, criticos: [] }
 
     const hoy = new Date()
     const fechaLimite = new Date()
+    // Vencimientos críticos: en los próximos 10 días
     fechaLimite.setDate(hoy.getDate() + 10)
 
+    // Objeto para agrupar ítems críticos por producto (para una visualización más limpia en la alerta)
+    const criticosAgrupados: { [key: string]: { nombre: string, emoji: string, unidades: number, precioTotal: number, fechaVenc: string } } = {}
+
+
     stock.forEach(item => {
-      const precio = item.productos?.precio_venta || 0
+      const precio = parseFloat(item.productos?.precio_venta || 0)
       
       if (!item.fecha_vencimiento) {
-        saludable += precio
+        saludable.capital += precio
+        saludable.unidades += 1 // Suma 1 unidad al saludable
         return
       }
 
       const fechaVenc = new Date(item.fecha_vencimiento)
+      const productoId = item.producto_id
 
       if (fechaVenc <= fechaLimite) {
-        riesgo += precio
-        listaCritica.push({
-          id: item.id,
-          nombre: item.productos?.nombre || "Desconocido",
-          vencimiento: item.fecha_vencimiento,
-          precio: precio,
-          emoji: item.productos?.emoji || "📦"
-        })
+        riesgo.capital += precio
+        riesgo.unidades += 1 // Suma 1 unidad al riesgo
+
+        if (!criticosAgrupados[productoId]) {
+             criticosAgrupados[productoId] = {
+                nombre: item.productos?.nombre || "Desconocido",
+                emoji: item.productos?.emoji || "📦",
+                unidades: 0,
+                precioTotal: 0,
+                fechaVenc: item.fecha_vencimiento // Usar la fecha del primer ítem encontrado
+             }
+        }
+        criticosAgrupados[productoId].unidades += 1
+        criticosAgrupados[productoId].precioTotal += precio
+
       } else {
-        saludable += precio
+        saludable.capital += precio
+        saludable.unidades += 1 // Suma 1 unidad al saludable
       }
     })
 
+    // Convertir el objeto agrupado a un array para la visualización
+    riesgo.criticos = Object.values(criticosAgrupados).sort((a, b) => new Date(a.fechaVenc).getTime() - new Date(b.fechaVenc).getTime())
+
     setCapitalEnRiesgo(riesgo)
     setCapitalSaludable(saludable)
-    setVencimientosCriticos(listaCritica)
   }
 
   useEffect(() => {
@@ -117,10 +155,12 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   }, [])
 
   const formatMoney = (amount: number) => {
-    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(amount)
+    // Aseguramos que el precio_venta sea un número para el cálculo
+    const numericAmount = isNaN(amount) ? 0 : amount;
+    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(numericAmount)
   }
 
-  const inventarioFiltrado = productos.filter((item) =>
+  const inventarioFiltrado = productosConStock.filter((item) =>
     item.nombre.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
@@ -187,7 +227,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
 
       <div className="p-4 space-y-4">
         
-        {/* PESTAÑA: VENTAS (NUEVO) */}
+        {/* PESTAÑA: VENTAS */}
         {activeTab === "sales" && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
                 {/* TARJETA TOTAL VENDIDO */}
@@ -280,7 +320,13 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                           <p className="text-xs text-muted-foreground mt-0.5">{item.categoria}</p>
                         </div>
                       </div>
-                      <span className="text-lg font-bold text-primary">{formatMoney(item.precio_venta)}</span>
+                      {/* DETALLE DE STOCK EN INVENTARIO (CONTEO DE UNIDADES) */}
+                      <div className="text-right">
+                        <span className="text-lg font-bold text-primary block">{formatMoney(item.precio_venta)}</span>
+                        <span className="text-xs text-muted-foreground font-semibold mt-0.5">
+                            Stock: <span className={item.stock_disponible > 0 ? "text-emerald-600" : "text-destructive"}>{item.stock_disponible} u.</span>
+                        </span>
+                      </div>
                     </div>
 
                     {/* Botón de Acción */}
@@ -310,10 +356,11 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                             <span className="text-xs font-bold uppercase">En Riesgo</span>
                         </div>
                         <span className="text-2xl font-black text-gray-800 dark:text-gray-100 tracking-tight">
-                            {formatMoney(capitalEnRiesgo)}
+                            {formatMoney(capitalEnRiesgo.capital)}
                         </span>
                         <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight mt-1">
-                            Vence en &lt; 10 días
+                            {/* MOSTRAR UNIDADES EN RIESGO */}
+                            {capitalEnRiesgo.unidades} unidad{capitalEnRiesgo.unidades !== 1 ? 'es' : ''} &lt; 10 días
                         </span>
                     </div>
                 </Card>
@@ -326,10 +373,11 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                             <span className="text-xs font-bold uppercase">Activo</span>
                         </div>
                         <span className="text-2xl font-black text-gray-800 dark:text-gray-100 tracking-tight">
-                            {formatMoney(capitalSaludable)}
+                            {formatMoney(capitalSaludable.capital)}
                         </span>
                         <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight mt-1">
-                            Stock saludable
+                            {/* MOSTRAR UNIDADES SALUDABLES */}
+                            {capitalSaludable.unidades} unidad{capitalSaludable.unidades !== 1 ? 'es' : ''} saludables
                         </span>
                     </div>
                 </Card>
@@ -338,28 +386,29 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
              {/* Lista de Vencimientos Críticos */}
              <div>
                 <h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
-                   <AlertTriangle className="h-5 w-5 text-destructive" /> Prioridad Alta
+                   <AlertTriangle className="h-5 w-5 text-destructive" /> Prioridad Alta ({capitalEnRiesgo.criticos.length} productos afectados)
                 </h3>
                 
-                {vencimientosCriticos.length === 0 ? (
+                {capitalEnRiesgo.criticos.length === 0 ? (
                     <Card className="p-6 text-center text-muted-foreground bg-muted/20 border-dashed">
                         <p>🎉 ¡Todo tranquilo! No hay capital en riesgo inmediato.</p>
                     </Card>
                 ) : (
                     <div className="space-y-3">
-                        {vencimientosCriticos.map((item, idx) => (
+                        {capitalEnRiesgo.criticos.map((item, idx) => (
                             <Card key={idx} className="p-3 border-l-4 border-l-destructive flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <span className="text-2xl">{item.emoji}</span>
                                     <div>
-                                        <p className="font-bold text-sm">{item.nombre}</p>
+                                        {/* MOSTRAR UNIDADES AGRUPADAS */}
+                                        <p className="font-bold text-sm">{item.nombre} <span className="font-normal text-muted-foreground">({item.unidades} u.)</span></p>
                                         <p className="text-xs text-destructive font-medium">
-                                            Vence: {new Date(item.vencimiento).toLocaleDateString()}
+                                            Vence: {new Date(item.fechaVenc).toLocaleDateString()}
                                         </p>
                                     </div>
                                 </div>
                                 <div className="text-right">
-                                    <p className="font-bold text-sm">{formatMoney(item.precio)}</p>
+                                    <p className="font-bold text-sm">{formatMoney(item.precioTotal)}</p>
                                 </div>
                             </Card>
                         ))}

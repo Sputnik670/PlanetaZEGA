@@ -1,108 +1,168 @@
 "use client"
 
 import { useState } from "react"
-import { supabase } from "@/lib/supabase"
-import { Card } from "@/components/ui/card"
+// ELIMINADO: import { createClientComponentClient } ...
+// AGREGADO: Importamos tu cliente centralizado
+import { supabase } from "@/lib/supabase" 
+
+import { CalendarIcon, PlusIcon, MinusIcon, PackagePlus } from "lucide-react" 
+import { format } from "date-fns"
+import { es } from "date-fns/locale"
+import { toast } from "sonner" 
+
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Loader2, Save, X, Calendar, Hash } from "lucide-react"
+import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Calendar } from "@/components/ui/calendar"
+import { cn } from "@/lib/utils"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 
-interface AgregarStockProps {
-  productoId: number
-  nombreProducto: string
-  onClose: () => void
-  onSaved: () => void
+interface Producto {
+  id: string
+  nombre: string
 }
 
-export default function AgregarStock({ productoId, nombreProducto, onClose, onSaved }: AgregarStockProps) {
-  const [loading, setLoading] = useState(false)
-  const [fechaVencimiento, setFechaVencimiento] = useState("")
-  const [cantidad, setCantidad] = useState("1") // Nuevo estado para cantidad
+interface AgregarStockProps {
+  producto: Producto
+  onStockAdded?: () => void 
+}
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  
+  // Estado local para el formulario
+  const [cantidad, setCantidad] = useState(1)
+  const [fechaVencimiento, setFechaVencimiento] = useState<Date | undefined>(undefined)
+  
+  // ELIMINADO: const supabase = createClientComponentClient() 
+  // (Ya no hace falta inicializarlo aquí, usamos el importado arriba)
+
+  // Helpers para botones grandes (+ / -)
+  const incrementar = () => setCantidad((prev) => prev + 1)
+  const decrementar = () => setCantidad((prev) => (prev > 1 ? prev - 1 : 1))
+
+  const handleGuardar = async () => {
+    // 1. Validaciones
+    if (!fechaVencimiento) {
+      toast.error("Falta fecha", { description: "Selecciona cuándo vence el producto." })
+      return
+    }
+    if (cantidad < 1) {
+      toast.error("Error", { description: "La cantidad debe ser mayor a 0." })
+      return
+    }
+
     setLoading(true)
 
     try {
-      const qty = parseInt(cantidad)
-      if (qty < 1) throw new Error("La cantidad debe ser al menos 1")
-
-      // 1. Creamos un ARRAY con tantos elementos como diga la cantidad
-      // Esto genera múltiples filas idénticas en la base de datos (cada una representa un producto físico)
-      const loteAInsertar = Array.from({ length: qty }).map(() => ({
-        producto_id: productoId,
-        fecha_vencimiento: fechaVencimiento || null, // Si está vacío, va null
+      // 2. Lógica de "Bulk Insert"
+      const stockItems = Array.from({ length: cantidad }).map(() => ({
+        producto_id: producto.id,
+        fecha_vencimiento: format(fechaVencimiento, 'yyyy-MM-dd'),
         estado: 'pendiente'
       }))
 
-      // 2. Insertamos todo el lote de una sola vez
-      const { error } = await supabase.from('stock').insert(loteAInsertar)
+      // 3. Enviamos todo junto a Supabase (usando 'supabase' importado)
+      const { error } = await supabase
+        .from('stock')
+        .insert(stockItems)
 
       if (error) throw error
 
-      onSaved() // Avisamos al padre que recargue
-      onClose() // Cerramos modal
+      // 4. Éxito
+      toast.success("Stock guardado", { 
+        description: `Se ingresaron ${cantidad} unidades de ${producto.nombre}.` 
+      })
+      
+      // Reset del formulario
+      setCantidad(1)
+      setFechaVencimiento(undefined)
+      setOpen(false)
+      
+      if (onStockAdded) onStockAdded()
 
-    } catch (error) {
-      console.error("Error cargando stock:", error)
-      alert("Error al cargar stock")
+    } catch (error: any) {
+      console.error(error)
+      toast.error("Error al guardar", { description: error.message })
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
-      <Card className="w-full max-w-sm p-6 bg-background shadow-2xl relative animate-in zoom-in-95 duration-200">
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          className="absolute right-2 top-2 hover:bg-muted"
-          onClick={onClose}
-        >
-          <X className="h-4 w-4" />
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button className="w-full gap-2 bg-slate-900 text-white hover:bg-slate-800">
+          <PackagePlus className="h-4 w-4" />
+          Ingresar Lote
         </Button>
-
-        <h3 className="text-lg font-bold mb-1">Ingreso de Mercadería</h3>
-        <p className="text-sm text-muted-foreground mb-4">Producto: <span className="text-primary font-semibold">{nombreProducto}</span></p>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
+      </DialogTrigger>
+      
+      <DialogContent className="sm:max-w-md bg-white">
+        <DialogHeader>
+          <DialogTitle>Ingresar: {producto.nombre}</DialogTitle>
+        </DialogHeader>
+        
+        <div className="flex flex-col gap-6 py-4">
           
-          {/* Input de Cantidad */}
+          {/* CONTROL DE CANTIDAD */}
           <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
-              <Hash className="h-4 w-4" /> Cantidad a ingresar
-            </label>
-            <Input 
-              type="number" 
-              min="1"
-              value={cantidad}
-              onChange={(e) => setCantidad(e.target.value)}
-              className="text-lg font-bold"
-              required
-            />
+            <Label className="text-center block">Cantidad a ingresar</Label>
+            <div className="flex items-center justify-center gap-4">
+              <Button variant="outline" size="icon" onClick={decrementar} className="h-12 w-12 rounded-full">
+                <MinusIcon className="h-6 w-6" />
+              </Button>
+              
+              <Input
+                type="number"
+                min="1"
+                value={cantidad}
+                onChange={(e) => setCantidad(parseInt(e.target.value) || 0)}
+                className="h-12 w-24 text-center text-xl font-bold"
+              />
+              
+              <Button variant="outline" size="icon" onClick={incrementar} className="h-12 w-12 rounded-full">
+                <PlusIcon className="h-6 w-6" />
+              </Button>
+            </div>
           </div>
 
-          {/* Input de Fecha */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
-              <Calendar className="h-4 w-4" /> Fecha de Vencimiento
-            </label>
-            <p className="text-xs text-muted-foreground">Déjalo vacío si no la encuentras.</p>
-            <Input 
-              type="date" 
-              value={fechaVencimiento}
-              onChange={(e) => setFechaVencimiento(e.target.value)}
-              className="text-lg"
-            />
+          {/* FECHA DE VENCIMIENTO */}
+          <div className="flex flex-col gap-2">
+            <Label>Fecha de Vencimiento</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant={"outline"}
+                  className={cn(
+                    "h-12 w-full justify-start text-left font-normal",
+                    !fechaVencimiento && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-5 w-5" />
+                  {fechaVencimiento ? format(fechaVencimiento, "PPP", { locale: es }) : "Seleccionar fecha"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={fechaVencimiento}
+                  onSelect={setFechaVencimiento}
+                  initialFocus
+                  locale={es}
+                />
+              </PopoverContent>
+            </Popover>
           </div>
 
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />}
-            Confirmar Ingreso ({cantidad})
+          <Button onClick={handleGuardar} disabled={loading} size="lg" className="w-full text-lg mt-2">
+            {loading ? "Guardando..." : "Confirmar"}
           </Button>
-        </form>
-      </Card>
-    </div>
+
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

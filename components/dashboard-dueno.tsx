@@ -1,7 +1,9 @@
 "use client"
 
 import { useState, useEffect } from "react"
+// CORRECCIÓN AQUÍ: Eliminamos la importación fallida y usamos el cliente central
 import { supabase } from "@/lib/supabase"
+
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,7 +11,7 @@ import { ArrowLeft, AlertTriangle, TrendingUp, Package, Search, Plus, Loader2, S
 import { BottomNav } from "@/components/bottom-nav"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import CrearProducto from "@/components/crear-producto"
-import AgregarStock from "@/components/agregar-stock"
+import { AgregarStock } from "@/components/agregar-stock"
 
 interface DashboardDuenoProps {
   onBack: () => void
@@ -22,18 +24,19 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
 
   // --- ESTADOS DE DATOS REALES ---
   const [productos, setProductos] = useState<any[]>([])
-  const [selectedProductForStock, setSelectedProductForStock] = useState<{id: number, nombre: string} | null>(null)
 
   // --- ESTADOS PARA MÉTRICAS FINANCIERAS ---
   const [capitalEnRiesgo, setCapitalEnRiesgo] = useState(0)
   const [capitalSaludable, setCapitalSaludable] = useState(0)
   const [vencimientosCriticos, setVencimientosCriticos] = useState<any[]>([])
 
+  // CORRECCIÓN AQUÍ: Eliminado 'const supabase = ...' porque ya lo importamos arriba
+
   // --- CARGAR DATOS Y CALCULAR MÉTRICAS ---
   const fetchData = async () => {
     setLoading(true)
     
-    // 1. Traer PRODUCTOS (Catálogo) para la lista de inventario
+    // 1. Traer PRODUCTOS
     const { data: dataProductos } = await supabase
       .from('productos')
       .select('*')
@@ -41,9 +44,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     
     setProductos(dataProductos || [])
 
-    // 2. Traer STOCK PENDIENTE (Para calcular dinero y riesgos)
-    // Traemos todo el stock que no se ha vendido ('pendiente')
-    // y pedimos el precio del producto asociado usando la relación (foreign key)
+    // 2. Traer STOCK PENDIENTE
     const { data: dataStock } = await supabase
       .from('stock')
       .select('*, productos(nombre, precio_venta, emoji)')
@@ -62,15 +63,12 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     let listaCritica: any[] = []
 
     const hoy = new Date()
-    // Definimos "Riesgo" como productos que vencen en los próximos 10 días
     const fechaLimite = new Date()
     fechaLimite.setDate(hoy.getDate() + 10)
 
     stock.forEach(item => {
-      // El precio viene de la tabla relacionada 'productos'. Si es null, usamos 0.
       const precio = item.productos?.precio_venta || 0
       
-      // Si no tiene fecha de vencimiento, asumimos que es saludable
       if (!item.fecha_vencimiento) {
         saludable += precio
         return
@@ -79,7 +77,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       const fechaVenc = new Date(item.fecha_vencimiento)
 
       if (fechaVenc <= fechaLimite) {
-        // ¡RIESGO! (Vence pronto)
         riesgo += precio
         listaCritica.push({
           id: item.id,
@@ -89,7 +86,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
           emoji: item.productos?.emoji || "📦"
         })
       } else {
-        // SALUDABLE (Vence lejos)
         saludable += precio
       }
     })
@@ -99,12 +95,10 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     setVencimientosCriticos(listaCritica)
   }
 
-  // Cargar datos al iniciar el componente
   useEffect(() => {
     fetchData()
   }, [])
 
-  // Formateador de dinero (Ej: $ 1.500)
   const formatMoney = (amount: number) => {
     return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(amount)
   }
@@ -113,7 +107,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     item.nombre.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  // Gráfico estático (Placeholder hasta tener historial de ventas)
+  // Gráfico estático
   const preciosTendencia = [
     { mes: "Sep", precio: 1000 }, { mes: "Oct", precio: 1100 }, { mes: "Nov", precio: 1150 }, { mes: "Dic", precio: 1200 },
   ]
@@ -121,19 +115,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   return (
     <div className="min-h-screen bg-background pb-20">
       
-      {/* MODAL DE AGREGAR STOCK */}
-      {selectedProductForStock && (
-        <AgregarStock 
-          productoId={selectedProductForStock.id}
-          nombreProducto={selectedProductForStock.nombre}
-          onClose={() => setSelectedProductForStock(null)}
-          onSaved={() => {
-            fetchData() // Recargamos todo para ver el impacto financiero inmediato
-            alert("¡Stock cargado y métricas actualizadas!")
-          }}
-        />
-      )}
-
       {/* Header */}
       <div className="bg-gradient-to-br from-primary via-primary to-chart-1 text-primary-foreground p-6 rounded-b-3xl shadow-xl">
         <Button variant="ghost" size="icon" onClick={onBack} className="mb-4 hover:bg-primary-foreground/20 text-primary-foreground">
@@ -201,27 +182,27 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             {loading ? (
                <div className="flex justify-center py-10"><Loader2 className="animate-spin h-8 w-8 text-primary"/></div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {inventarioFiltrado.map((item) => (
-                  <Card key={item.id} className="p-4 flex items-center justify-between gap-4 shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                  <Card key={item.id} className="p-4 flex flex-col gap-4 shadow-sm">
+                    {/* Encabezado de la tarjeta */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
                         <span className="text-2xl">{item.emoji || '📦'}</span>
                         <div>
                           <h3 className="font-bold text-foreground text-pretty leading-tight">{item.nombre}</h3>
                           <p className="text-xs text-muted-foreground mt-0.5">{item.categoria}</p>
                         </div>
                       </div>
+                      <span className="text-lg font-bold text-primary">{formatMoney(item.precio_venta)}</span>
                     </div>
-                    <div className="flex flex-col items-end gap-2">
-                         <span className="text-sm font-bold text-primary">{formatMoney(item.precio_venta)}</span>
-                         <Button 
-                            size="sm" 
-                            onClick={() => setSelectedProductForStock({ id: item.id, nombre: item.nombre })}
-                            className="h-8 bg-primary/10 text-primary hover:bg-primary/20 border-0 font-semibold"
-                            >
-                            <Plus className="h-3 w-3 mr-1" /> Stock
-                        </Button>
+
+                    {/* Botón de Acción (Ahora integrado) */}
+                    <div>
+                      <AgregarStock 
+                        producto={item} 
+                        onStockAdded={fetchData} 
+                      />
                     </div>
                   </Card>
                 ))}
@@ -230,11 +211,10 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
           </>
         )}
 
-        {/* PESTAÑA: ALERTAS (AHORA CON DATOS REALES) */}
+        {/* PESTAÑA: ALERTAS */}
         {activeTab === "alerts" && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
             
-             {/* Tarjetas Financieras Dinámicas */}
              <div className="grid grid-cols-2 gap-4">
                 {/* TARJETA NARANJA: RIESGO */}
                 <Card className="p-4 bg-orange-50 border-l-4 border-l-orange-500 shadow-sm dark:bg-orange-950/20">
@@ -301,7 +281,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                 )}
              </div>
 
-             {/* Gráfico (Placeholder - Se queda estático por ahora como acordamos) */}
+             {/* Gráfico */}
              <Card className="p-6">
               <h2 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
                 <TrendingUp className="h-5 w-5 text-chart-1" /> Proyección

@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Loader2, Save, X, Calendar } from "lucide-react"
+import { Loader2, Save, X, Calendar, Hash } from "lucide-react"
 
 interface AgregarStockProps {
   productoId: number
@@ -17,25 +17,26 @@ interface AgregarStockProps {
 export default function AgregarStock({ productoId, nombreProducto, onClose, onSaved }: AgregarStockProps) {
   const [loading, setLoading] = useState(false)
   const [fechaVencimiento, setFechaVencimiento] = useState("")
-  // Si no pones fecha, asumimos que es NULL (para la misión "Completar Datos")
-  
+  const [cantidad, setCantidad] = useState("1") // Nuevo estado para cantidad
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
     try {
-      // Insertamos UN lote. 
-      // NOTA: Si quisieras agregar cantidad "10", deberíamos hacer un loop o cambiar la DB para soportar cantidad.
-      // Por simplicidad del MVP gamificado, asumimos que cada ingreso es un lote/unidad clave o modificaremos esto luego.
-      // Para este paso, insertaremos 1 registro de stock con esa fecha.
-      
-      const payload = {
+      const qty = parseInt(cantidad)
+      if (qty < 1) throw new Error("La cantidad debe ser al menos 1")
+
+      // 1. Creamos un ARRAY con tantos elementos como diga la cantidad
+      // Esto genera múltiples filas idénticas en la base de datos (cada una representa un producto físico)
+      const loteAInsertar = Array.from({ length: qty }).map(() => ({
         producto_id: productoId,
         fecha_vencimiento: fechaVencimiento || null, // Si está vacío, va null
         estado: 'pendiente'
-      }
+      }))
 
-      const { error } = await supabase.from('stock').insert([payload])
+      // 2. Insertamos todo el lote de una sola vez
+      const { error } = await supabase.from('stock').insert(loteAInsertar)
 
       if (error) throw error
 
@@ -66,6 +67,23 @@ export default function AgregarStock({ productoId, nombreProducto, onClose, onSa
         <p className="text-sm text-muted-foreground mb-4">Producto: <span className="text-primary font-semibold">{nombreProducto}</span></p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          
+          {/* Input de Cantidad */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium flex items-center gap-2">
+              <Hash className="h-4 w-4" /> Cantidad a ingresar
+            </label>
+            <Input 
+              type="number" 
+              min="1"
+              value={cantidad}
+              onChange={(e) => setCantidad(e.target.value)}
+              className="text-lg font-bold"
+              required
+            />
+          </div>
+
+          {/* Input de Fecha */}
           <div className="space-y-2">
             <label className="text-sm font-medium flex items-center gap-2">
               <Calendar className="h-4 w-4" /> Fecha de Vencimiento
@@ -81,7 +99,7 @@ export default function AgregarStock({ productoId, nombreProducto, onClose, onSa
 
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />}
-            Confirmar Ingreso
+            Confirmar Ingreso ({cantidad})
           </Button>
         </form>
       </Card>

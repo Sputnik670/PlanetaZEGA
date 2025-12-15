@@ -6,11 +6,11 @@ import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, Zap, Target, CheckCheck, AlertTriangle, Package, X, Wallet } from "lucide-react" // Añadimos Wallet si fuera necesario
+import { Loader2, Zap, Target, CheckCheck, AlertTriangle, Package, X, Wallet } from "lucide-react" 
 import { toast } from "sonner"
 import { format, parseISO } from "date-fns"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { cn } from "@/lib/utils" // 🚨 CORRECCIÓN: Importar cn
+import { cn } from "@/lib/utils" 
 
 // Tipado para las misiones activas (mantenido)
 interface Mision {
@@ -24,7 +24,25 @@ interface Mision {
     created_at: string
 }
 
-// 🚨 CORRECCIÓN: Adaptar el tipado de StockCritico si el select retorna todo junto
+// 🚨 CORRECCIÓN DE TIPADO PARA EVITAR EL ERROR DEL COMPILADOR
+
+// 1. Define la forma de los datos anidados de la tabla 'productos'
+interface ProductoJoin {
+    nombre: string
+    emoji: string
+}
+
+// 2. Define la forma de la fila retornada por el JOIN de Supabase (stock + productos)
+interface StockJoin {
+    id: string
+    producto_id: string
+    fecha_vencimiento: string
+    precio_venta: number
+    // La propiedad 'productos' es el objeto anidado, puede ser null si no hay join o el tipo de RLS.
+    productos: ProductoJoin | null 
+}
+
+// Tipado para el estado local StockCritico (formato final)
 interface StockCritico {
     id: string
     producto_id: string
@@ -81,12 +99,11 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
         setProcesando(true)
 
         try {
-            // Buscamos el stock que está pendiente y que vence en los próximos 7 días (misma lógica que al generar la misión)
+            // Buscamos el stock que está pendiente y que vence en los próximos 7 días 
             const hoy = new Date()
             const fechaLimite = format(hoy.setDate(hoy.getDate() + 7), 'yyyy-MM-dd') 
 
-            // Nota: Aquí se usa el select anidado 'productos(nombre, emoji)'
-            const { data: stockItems, error } = await supabase
+            const { data, error } = await supabase
                 .from('stock')
                 .select(`
                     id, 
@@ -98,14 +115,18 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
                 .eq('estado', 'pendiente')
                 .lt('fecha_vencimiento', fechaLimite)
                 .order('fecha_vencimiento', { ascending: true })
+                .returns<StockJoin[]>() // Aplicamos el tipo explícito aquí
             
             if (error) throw error
             
-            // 🚨 CORRECCIÓN: Acceder a los campos anidados de Supabase (item.productos.nombre)
-            const stockCriticoFormateado: StockCritico[] = (stockItems || []).map(item => ({
+            const stockItems = data || []
+
+            // El mapeo ahora es seguro gracias a la interfaz StockJoin
+            const stockCriticoFormateado: StockCritico[] = stockItems.map(item => ({
                 id: item.id,
                 producto_id: item.producto_id,
-                nombre_producto: item.productos?.nombre || 'Producto Desconocido',
+                // Acceso seguro y con fallback si el join falla por alguna razón
+                nombre_producto: item.productos?.nombre || 'Producto Desconocido', 
                 emoji_producto: item.productos?.emoji || '📦',
                 fecha_vencimiento: item.fecha_vencimiento,
                 precio_venta: item.precio_venta

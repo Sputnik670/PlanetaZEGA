@@ -1,3 +1,5 @@
+// components/dashboard-dueno.tsx
+
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
@@ -5,7 +7,6 @@ import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-// 🚨 CAMBIOS: Importamos CalendarIcon, Popover y tipos de date-fns
 import { ArrowLeft, AlertTriangle, TrendingUp, Package, Search, Plus, Loader2, ShieldCheck, DollarSign, CalendarRange, CreditCard, Repeat2, Wallet, Calendar as CalendarIcon } from "lucide-react" 
 import { BottomNav } from "@/components/bottom-nav"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
@@ -15,7 +16,7 @@ import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
 import { DateRange } from "react-day-picker"
-import { format, subDays, startOfDay } from "date-fns" // Para manejar fechas
+import { format, subDays, startOfDay } from "date-fns" 
 
 interface DashboardDuenoProps {
   onBack: () => void
@@ -26,6 +27,21 @@ interface MetricaStock {
   unidades: number
   criticos: any[]
 }
+
+// TIPADO: Definición de la estructura de retorno de la query de ventas
+interface ProductoVentaJoin {
+    nombre: string
+    precio_venta: number 
+    emoji: string
+}
+
+interface VentaJoin {
+    id: string
+    fecha_venta: string
+    metodo_pago: string
+    productos: ProductoVentaJoin | null 
+}
+// FIN TIPADO
 
 // Interfaz para el desglose de ventas, ahora incluye billetera_virtual
 interface PaymentBreakdown {
@@ -50,7 +66,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(false)
   
-  // 🚨 NUEVO ESTADO: Rango de fechas para filtrar ventas (Default: Últimos 7 días)
+  // Rango de fechas para filtrar ventas (Default: Últimos 7 días)
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: startOfDay(subDays(new Date(), 7)),
     to: startOfDay(new Date()),
@@ -64,13 +80,14 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   const [capitalEnRiesgo, setCapitalEnRiesgo] = useState<MetricaStock>({ capital: 0, unidades: 0, criticos: [] })
   const [capitalSaludable, setCapitalSaludable] = useState<MetricaStock>({ capital: 0, unidades: 0, criticos: [] })
 
-  const [ventasRecientes, setVentasRecientes] = useState<any[]>([])
+  // USO DEL TIPO
+  const [ventasRecientes, setVentasRecientes] = useState<VentaJoin[]>([])
   const [totalVendido, setTotalVendido] = useState(0)
   const [paymentBreakdown, setPaymentBreakdown] = useState<PaymentBreakdown>({
       efectivo: 0, tarjeta: 0, transferencia: 0, otro: 0, billetera_virtual: 0 
   })
 
-  // 🚨 REFACTORIZACIÓN: fetchData ahora depende del dateRange (vía useCallback)
+  // REFACTORIZACIÓN: fetchData ahora depende del dateRange (vía useCallback)
   const fetchData = useCallback(async () => {
     setLoading(true)
     
@@ -109,7 +126,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       .select('id, fecha_venta, metodo_pago, productos(nombre, precio_venta, emoji)') 
       .eq('estado', 'vendido')
       
-    // 🚨 CAMBIO CRÍTICO: Aplicar filtros de rango de fechas
+    // APLICACIÓN DE FILTROS DE RANGO DE FECHAS
     if (dateRange?.from) {
         // Aseguramos que se incluye la fecha de inicio
         ventasQuery = ventasQuery.gte('fecha_venta', format(dateRange.from, 'yyyy-MM-dd'))
@@ -120,9 +137,11 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         ventasQuery = ventasQuery.lte('fecha_venta', endOfDay)
     }
 
+    // USO DEL NUEVO TIPO EN EL RETORNO DE SUPABASE
     const { data: dataVentas, error: errorVentas } = await ventasQuery
       .order('fecha_venta', { ascending: false, nullsFirst: false }) 
-      .limit(50) // Mantenemos el límite para la lista de movimientos
+      .limit(50)
+      .returns<VentaJoin[]>()
 
     if (errorVentas) {
         console.error("Error fetching ventas:", errorVentas)
@@ -134,20 +153,21 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     }
 
     setLoading(false)
-  }, [dateRange]) // 🚨 Dependencia: Recargar cuando cambie el rango de fechas
+  }, [dateRange]) 
 
   useEffect(() => {
     fetchData()
-  }, [fetchData]) // Llamar cuando fetchData cambie (es decir, cuando dateRange cambie)
+  }, [fetchData]) 
 
 
-  // --- LÓGICA DE CÁLCULO (Mantenida y corregida) ---
-  const calcularMetricasVentas = (ventas: any[]) => {
+  // --- LÓGICA DE CÁLCULO (Tipado mejorado) ---
+  const calcularMetricasVentas = (ventas: VentaJoin[]) => { 
     let total = 0
     const breakdown: PaymentBreakdown = { efectivo: 0, tarjeta: 0, transferencia: 0, otro: 0, billetera_virtual: 0 } 
 
     ventas.forEach(item => {
-        const precio = parseFloat(item.productos?.precio_venta || 0)
+        // Usamos una cadena de llamadas opcionales para acceder al precio de forma segura
+        const precio = parseFloat(item.productos?.precio_venta?.toString() ?? '0')
         const metodo = item.metodo_pago || 'efectivo' as keyof PaymentBreakdown
         
         total += precio
@@ -214,7 +234,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     setCapitalSaludable(saludable)
   }
 
-  // --- Helpers UX (Actualizados) ---
+  // --- Helpers UX ---
   const formatMoney = (amount: number) => {
     const numericAmount = isNaN(amount) ? 0 : amount;
     return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(numericAmount)
@@ -228,7 +248,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     return `${day}/${month}`
   }
   
-  // 🚨 NUEVO: Label para el rango de fechas en la UI
+  // Label para el rango de fechas en la UI
   const dateRangeLabel = useMemo(() => {
     if (!dateRange?.from) return "Selecciona Rango"
     const from = format(dateRange.from, 'dd/MM')
@@ -310,7 +330,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         {activeTab === "sales" && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
                 
-                {/* 🚨 NUEVO: Selector de Rango de Fechas */}
+                {/* Selector de Rango de Fechas */}
                 <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                     <PopoverTrigger asChild>
                         <Button 
@@ -422,7 +442,8 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                     </div>
                                     <div className="text-right">
                                         <p className="font-bold text-emerald-600">
-                                            + {formatMoney(venta.productos?.precio_venta)}
+                                            {/* 🚨 CORRECCIÓN: Usar ?? 0 para manejar el caso undefined/null */}
+                                            + {formatMoney(venta.productos?.precio_venta ?? 0)}
                                         </p>
                                         <p className="text-[10px] text-muted-foreground uppercase font-bold">Vendido</p>
                                     </div>

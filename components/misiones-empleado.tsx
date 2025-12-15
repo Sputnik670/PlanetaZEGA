@@ -308,7 +308,8 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
                                         <span className="text-xl bg-slate-100 p-1 rounded">{item.emoji_producto}</span>
                                         <div className="flex flex-col">
                                             <span className="font-bold text-sm">{item.nombre_producto}</span>
-                                            <span className="text-[10px] text-muted-foreground">ID: ...{item.id.slice(-4)}</span>
+                                            {/* SOLUCIÓN: Convertimos ID a String por seguridad antes de cortar */}
+                                            <span className="text-[10px] text-muted-foreground">ID: ...{String(item.id).slice(-4)}</span>
                                         </div>
                                     </div>
                                     <div className="text-right">

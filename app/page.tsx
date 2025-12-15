@@ -4,120 +4,139 @@
 
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
-import { Card } from "@/components/ui/card"
-import { Store, User, Loader2, LogOut } from "lucide-react"
+import { Store, User, Loader2, LogOut, Package } from "lucide-react"
 import DashboardDueno from "@/components/dashboard-dueno"
 import VistaEmpleado from "@/components/vista-empleado"
-import AuthForm from "@/components/auth-form" // <-- Importamos el componente de autenticación
+import AuthForm from "@/components/auth-form"
+import ProfileSetup from "@/components/profile-setup" // <-- Importamos el setup de perfil
 import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
 import { toast } from "sonner"
 
 
-// Componente que muestra la selección de rol después del login (antes era HomePage)
-function UserSelectionPage({ onLogout }: { onLogout: () => void }) {
-  const [userRole, setUserRole] = useState<"none" | "owner" | "employee">("none")
+interface UserProfile {
+    id: string
+    rol: "dueño" | "empleado"
+    nombre: string
+}
 
-  if (userRole === "owner") {
-    return <DashboardDueno onBack={() => setUserRole("none")} />
-  }
+// Componente que maneja el ruteo interno (ya no es selección de rol, sino el Dashboard real)
+function AppRouter({ userProfile, onLogout }: { userProfile: UserProfile, onLogout: () => void }) {
+    
+    // Función para mostrar un mensaje de error si alguien intenta acceder al dashboard equivocado
+    const showAccessDenied = () => {
+        toast.error("Acceso Denegado", { 
+            description: `Tu rol actual es: ${userProfile.rol.toUpperCase()}. No puedes acceder a este dashboard.`,
+            duration: 5000
+        })
+    }
 
-  if (userRole === "employee") {
-    return <VistaEmpleado onBack={() => setUserRole("none")} />
-  }
+    // El ruteo es automático basado en el rol del perfil
+    if (userProfile.rol === "dueño") {
+        return (
+            <DashboardDueno onBack={onLogout} /> 
+        )
+    }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20 flex items-center justify-center p-4">
-      <div className="w-full max-w-md space-y-8">
-        
-        {/* Barra Superior con Logout */}
-        <div className="flex justify-between items-start w-full">
-            <div className="text-center space-y-2 flex-1">
-                <h1 className="text-4xl font-bold text-balance text-foreground">Kiosco App</h1>
-                <p className="text-muted-foreground text-lg">Selecciona tu perfil para continuar</p>
-            </div>
-            <Button 
-                variant="outline" 
-                size="icon-sm"
-                onClick={onLogout}
-                className="flex-shrink-0 ml-4 mt-2"
-            >
-                <LogOut className="h-4 w-4 text-destructive" />
-            </Button>
+    if (userProfile.rol === "empleado") {
+        return (
+            <VistaEmpleado onBack={onLogout} />
+        )
+    }
+
+    // Fallback: Debería ser inaccesible si el rol está tipado correctamente.
+    return (
+        <div className="min-h-screen flex items-center justify-center p-4">
+            <Card className="p-6 text-center">
+                <p className="text-xl font-bold text-destructive">Error de Rol</p>
+                <p className="text-muted-foreground mt-2">Tu perfil está corrupto. Por favor, contacta al administrador.</p>
+                <Button onClick={onLogout} className="mt-4" variant="destructive"><LogOut className="h-4 w-4 mr-2"/> Cerrar Sesión</Button>
+            </Card>
         </div>
-
-        <div className="space-y-4">
-          <Card
-            className="p-6 hover:shadow-xl transition-shadow duration-300 cursor-pointer border-2 hover:border-primary/50"
-            onClick={() => setUserRole("owner")}
-          >
-            <div className="flex items-center gap-4">
-              <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary to-chart-1 flex items-center justify-center flex-shrink-0">
-                <Store className="h-8 w-8 text-primary-foreground" />
-              </div>
-              <div className="flex-1">
-                <h2 className="text-2xl font-bold text-foreground">Dueño</h2>
-                <p className="text-sm text-muted-foreground mt-1">Gestión completa del negocio</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card
-            className="p-6 hover:shadow-xl transition-shadow duration-300 cursor-pointer border-2 hover:border-accent/50"
-            onClick={() => setUserRole("employee")}
-          >
-            <div className="flex items-center gap-4">
-              <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-accent to-chart-2 flex items-center justify-center flex-shrink-0">
-                <User className="h-8 w-8 text-accent-foreground" />
-              </div>
-              <div className="flex-1">
-                <h2 className="text-2xl font-bold text-foreground">Empleado</h2>
-                <p className="text-sm text-muted-foreground mt-1">Tareas del día a día</p>
-              </div>
-            </div>
-          </Card>
-        </div>
-      </div>
-    </div>
-  )
+    )
 }
 
 
 export default function HomePage() {
   const [session, setSession] = useState<any>(null)
-  const [loadingSession, setLoadingSession] = useState(true)
+  const [loading, setLoading] = useState(true)
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [hasProfile, setHasProfile] = useState(false)
 
-  // Manejo de la sesión y el estado de autenticación
+
+  const fetchProfile = async (userId: string) => {
+    setLoading(true)
+    try {
+        const { data, error } = await supabase
+            .from('perfiles')
+            .select('*')
+            .eq('id', userId)
+            .single()
+
+        if (error && error.code === 'PGRST116') {
+            // No row found: El usuario está logueado pero no tiene perfil.
+            setHasProfile(false)
+            setUserProfile(null)
+            return
+        }
+
+        if (error) throw error
+
+        setUserProfile(data as UserProfile)
+        setHasProfile(true)
+
+    } catch (error) {
+        console.error("Error fetching profile:", error)
+        toast.error('Error de Perfil', { description: 'No se pudo cargar tu rol. Intenta de nuevo.' })
+        await supabase.auth.signOut()
+    } finally {
+        setLoading(false)
+    }
+  }
+
+  // Hook principal para manejar la sesión y el perfil
   useEffect(() => {
+    const handleSessionChange = (session: any) => {
+        setSession(session)
+        if (session?.user) {
+            fetchProfile(session.user.id)
+        } else {
+            setLoading(false) // Si no hay sesión, terminamos la carga
+            setUserProfile(null)
+            setHasProfile(false)
+        }
+    }
+    
     // 1. Obtener sesión inicial
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setLoadingSession(false)
+        handleSessionChange(session)
     })
 
     // 2. Suscribirse a cambios de estado de autenticación
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      setLoadingSession(false)
+      handleSessionChange(session)
     })
 
     return () => subscription.unsubscribe()
   }, [])
 
   const handleLogout = async () => {
-    setLoadingSession(true)
+    setLoading(true)
     const { error } = await supabase.auth.signOut()
     if (error) {
         console.error(error)
         toast.error('Error al cerrar sesión')
-        setLoadingSession(false)
     } else {
         toast.info('Sesión cerrada correctamente')
     }
+    setLoading(false)
   }
 
-  if (loadingSession) {
+  // --- Renderizado Condicional ---
+
+  if (loading) {
     return (
         <div className="min-h-screen flex items-center justify-center">
             <Loader2 className="h-10 w-10 animate-spin text-primary" />
@@ -125,11 +144,34 @@ export default function HomePage() {
     )
   }
 
-  // Si no hay sesión, mostramos el formulario de autenticación
+  // 1. Sin Sesión -> Muestra Login
   if (!session) {
     return <AuthForm />
   }
 
-  // Si hay sesión, mostramos la selección de rol y pasamos la función de logout
-  return <UserSelectionPage onLogout={handleLogout} />
+  // 2. Con Sesión, pero sin Perfil -> Muestra Configuración Inicial
+  if (session && !hasProfile) {
+    return (
+        <ProfileSetup 
+            user={session.user} 
+            onProfileCreated={() => fetchProfile(session.user.id)}
+        />
+    )
+  }
+
+  // 3. Con Sesión y con Perfil -> Muestra el Router (Dashboard)
+  if (session && userProfile) {
+    return <AppRouter userProfile={userProfile} onLogout={handleLogout} />
+  }
+
+  // Fallback final
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+        <Card className="p-6 text-center">
+            <Package className="h-10 w-10 mx-auto text-destructive" />
+            <p className="mt-4">Ocurrió un error inesperado al cargar la aplicación.</p>
+            <Button onClick={handleLogout} className="mt-4">Reiniciar</Button>
+        </Card>
+    </div>
+  )
 }

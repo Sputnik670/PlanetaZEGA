@@ -5,21 +5,39 @@ import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ArrowLeft, AlertTriangle, TrendingUp, Package, Search, Plus, Loader2, ShieldCheck, DollarSign, CalendarRange } from "lucide-react"
+import { ArrowLeft, AlertTriangle, TrendingUp, Package, Search, Plus, Loader2, ShieldCheck, DollarSign, CalendarRange, CreditCard, Repeat2, Wallet } from "lucide-react" 
 import { BottomNav } from "@/components/bottom-nav"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import CrearProducto from "@/components/crear-producto"
 import { AgregarStock } from "@/components/agregar-stock"
+import { cn } from "@/lib/utils"
 
 interface DashboardDuenoProps {
   onBack: () => void
 }
 
-// Interfaz para la métrica de stock que incluye el conteo de unidades
 interface MetricaStock {
   capital: number
   unidades: number
   criticos: any[]
+}
+
+// 🚨 CAMBIO: Interfaz para el desglose de ventas, ahora incluye billetera_virtual
+interface PaymentBreakdown {
+  efectivo: number
+  tarjeta: number
+  transferencia: number
+  otro: number
+  billetera_virtual: number // <-- Nuevo
+}
+
+// 🚨 CAMBIO: Mapeo de iconos actualizado para billetera_virtual
+const PAYMENT_ICONS = {
+    efectivo: DollarSign,
+    tarjeta: CreditCard,
+    transferencia: Repeat2,
+    otro: Wallet,
+    billetera_virtual: Wallet, 
 }
 
 export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
@@ -29,17 +47,19 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
 
   // --- ESTADOS DE DATOS ---
   const [productos, setProductos] = useState<any[]>([])
-  // Estado para productos con el conteo de stock disponible
   const [productosConStock, setProductosConStock] = useState<any[]>([])
 
   // --- MÉTRICAS DE STOCK ---
-  // Inicializamos con la nueva estructura de MetricaStock (capital + unidades)
   const [capitalEnRiesgo, setCapitalEnRiesgo] = useState<MetricaStock>({ capital: 0, unidades: 0, criticos: [] })
   const [capitalSaludable, setCapitalSaludable] = useState<MetricaStock>({ capital: 0, unidades: 0, criticos: [] })
 
-  // --- MÉTRICAS DE VENTAS ---
-  const [ventasHoy, setVentasHoy] = useState<any[]>([])
-  const [totalVendidoHoy, setTotalVendidoHoy] = useState(0)
+  // --- MÉTRICAS DE VENTAS (ACTUALIZADO) ---
+  const [ventasRecientes, setVentasRecientes] = useState<any[]>([])
+  const [totalVendido, setTotalVendido] = useState(0)
+  // 🚨 CAMBIO: Inicialización con el nuevo campo billetera_virtual
+  const [paymentBreakdown, setPaymentBreakdown] = useState<PaymentBreakdown>({
+      efectivo: 0, tarjeta: 0, transferencia: 0, otro: 0, billetera_virtual: 0 
+  })
 
   // --- CARGAR DATOS ---
   const fetchData = async () => {
@@ -76,36 +96,57 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     setProductosConStock(productosConStockCalculado)
 
 
-    // 3. TRAER VENTAS (Items con estado 'vendido')
-    // FIX: Usamos `order('id', { ascending: false })` para que el último vendido esté arriba.
+    // 3. TRAER VENTAS RECIENTES (Items con estado 'vendido')
     const { data: dataVentas } = await supabase
+      // Incluimos 'metodo_pago' en el select
       .from('stock')
-      .select('*, productos(nombre, precio_venta, emoji)')
+      .select('id, fecha_venta, metodo_pago, productos(nombre, precio_venta, emoji)') 
       .eq('estado', 'vendido')
-      .order('id', { ascending: false }) // FIX: El más reciente primero
+      // Ordenamos por fecha_venta (el más nuevo arriba)
+      .order('fecha_venta', { ascending: false, nullsFirst: false }) 
       .limit(50)
 
     if (dataVentas) {
-      setVentasHoy(dataVentas)
-      // Sumamos el precio de todo lo vendido
-      const total = dataVentas.reduce((acc, item) => acc + (item.productos?.precio_venta || 0), 0)
-      setTotalVendidoHoy(total)
+      setVentasRecientes(dataVentas)
+      calcularMetricasVentas(dataVentas) // Calculamos métricas de ventas
     }
 
     setLoading(false)
   }
 
+  // 🚨 CAMBIO: Lógica para calcular el total y el desglose de ventas
+  const calcularMetricasVentas = (ventas: any[]) => {
+    let total = 0
+    // 🚨 CAMBIO: Inicialización del breakdown para el cálculo
+    const breakdown: PaymentBreakdown = { efectivo: 0, tarjeta: 0, transferencia: 0, otro: 0, billetera_virtual: 0 } 
+
+    ventas.forEach(item => {
+        const precio = parseFloat(item.productos?.precio_venta || 0)
+        // Usa el valor de la DB (que ahora puede ser billetera_virtual) o 'efectivo' como default
+        const metodo = item.metodo_pago || 'efectivo' as keyof PaymentBreakdown
+        
+        total += precio
+        
+        if (breakdown.hasOwnProperty(metodo)) {
+            breakdown[metodo as keyof PaymentBreakdown] += precio
+        } else {
+            breakdown.otro += precio 
+        }
+    })
+
+    setTotalVendido(total)
+    setPaymentBreakdown(breakdown)
+  }
+  
+  // Función de cálculo de stock (Mantenida)
   const calcularMetricasStock = (stock: any[]) => {
-    // Inicializamos las métricas con conteo de unidades a 0
     let riesgo: MetricaStock = { capital: 0, unidades: 0, criticos: [] }
     let saludable: MetricaStock = { capital: 0, unidades: 0, criticos: [] }
 
     const hoy = new Date()
     const fechaLimite = new Date()
-    // Vencimientos críticos: en los próximos 10 días
     fechaLimite.setDate(hoy.getDate() + 10)
 
-    // Objeto para agrupar ítems críticos por producto (para una visualización más limpia en la alerta)
     const criticosAgrupados: { [key: string]: { nombre: string, emoji: string, unidades: number, precioTotal: number, fechaVenc: string } } = {}
 
 
@@ -114,7 +155,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       
       if (!item.fecha_vencimiento) {
         saludable.capital += precio
-        saludable.unidades += 1 // Suma 1 unidad al saludable
+        saludable.unidades += 1
         return
       }
 
@@ -123,7 +164,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
 
       if (fechaVenc <= fechaLimite) {
         riesgo.capital += precio
-        riesgo.unidades += 1 // Suma 1 unidad al riesgo
+        riesgo.unidades += 1
 
         if (!criticosAgrupados[productoId]) {
              criticosAgrupados[productoId] = {
@@ -131,7 +172,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                 emoji: item.productos?.emoji || "📦",
                 unidades: 0,
                 precioTotal: 0,
-                fechaVenc: item.fecha_vencimiento // Usar la fecha del primer ítem encontrado
+                fechaVenc: item.fecha_vencimiento
              }
         }
         criticosAgrupados[productoId].unidades += 1
@@ -139,11 +180,10 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
 
       } else {
         saludable.capital += precio
-        saludable.unidades += 1 // Suma 1 unidad al saludable
+        saludable.unidades += 1
       }
     })
 
-    // Convertir el objeto agrupado a un array para la visualización
     riesgo.criticos = Object.values(criticosAgrupados).sort((a, b) => new Date(a.fechaVenc).getTime() - new Date(b.fechaVenc).getTime())
 
     setCapitalEnRiesgo(riesgo)
@@ -155,9 +195,16 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   }, [])
 
   const formatMoney = (amount: number) => {
-    // Aseguramos que el precio_venta sea un número para el cálculo
     const numericAmount = isNaN(amount) ? 0 : amount;
     return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(numericAmount)
+  }
+  
+  const formatDateToDDMM = (dateString: string) => {
+    if (!dateString) return "Sin fecha"
+    const date = new Date(dateString)
+    const day = date.getDate().toString().padStart(2, '0')
+    const month = (date.getMonth() + 1).toString().padStart(2, '0')
+    return `${day}/${month}`
   }
 
   const inventarioFiltrado = productosConStock.filter((item) =>
@@ -235,7 +282,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                     <div className="flex justify-between items-start">
                         <div>
                             <p className="text-emerald-100 font-medium text-sm mb-1">Total Vendido (Reciente)</p>
-                            <h2 className="text-4xl font-bold">{formatMoney(totalVendidoHoy)}</h2>
+                            <h2 className="text-4xl font-bold">{formatMoney(totalVendido)}</h2>
                         </div>
                         <div className="p-3 bg-white/20 rounded-xl">
                             <DollarSign className="h-8 w-8 text-white" />
@@ -243,10 +290,50 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                     </div>
                     <div className="mt-4 pt-4 border-t border-white/20 flex gap-4 text-sm text-emerald-50">
                         <span className="flex items-center gap-1">
-                            <Package className="h-4 w-4" /> {ventasHoy.length} ítems vendidos
+                            <Package className="h-4 w-4" /> {ventasRecientes.length} ítems vendidos
                         </span>
                     </div>
                 </Card>
+                
+                {/* 🚨 DESGLOSE POR MÉTODO DE PAGO */}
+                <div className="space-y-2">
+                    <h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
+                       <CreditCard className="h-5 w-5 text-muted-foreground" /> Desglose de Pagos
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3">
+                        {/* Mapeamos el desglose de pagos */}
+                        {Object.entries(paymentBreakdown).map(([method, amount]) => {
+                            // Formatea la clave para mostrarla (ej: billetera_virtual -> Billetera Virtual)
+                            let label = method.replace('_', ' ').split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                            const Icon = PAYMENT_ICONS[method as keyof typeof PAYMENT_ICONS];
+                            
+                            // Ocultar métodos con 0 ventas para una vista limpia
+                            if (amount === 0) return null; 
+
+                            return (
+                                <Card 
+                                    key={method} 
+                                    className={cn(
+                                        "p-3 flex items-center justify-between shadow-sm",
+                                        // Estilo resaltado para el efectivo
+                                        method === 'efectivo' ? 'border-primary/50 bg-primary/5' : 'bg-muted/50'
+                                    )}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <Icon className={cn("h-4 w-4", method === 'efectivo' ? 'text-primary' : 'text-muted-foreground')} />
+                                        <span className="text-xs font-semibold uppercase">{label}</span>
+                                    </div>
+                                    <p className="font-bold text-sm">{formatMoney(amount)}</p>
+                                </Card>
+                            )
+                        })}
+                    </div>
+                    {totalVendido === 0 && (
+                        <div className="text-center py-4 text-muted-foreground bg-muted/20 rounded-lg border-dashed border">
+                            <p className="text-sm">Sin ventas para mostrar el desglose.</p>
+                        </div>
+                    )}
+                </div>
 
                 {/* LISTA DE ÚLTIMOS MOVIMIENTOS */}
                 <div>
@@ -254,12 +341,12 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                        <CalendarRange className="h-5 w-5 text-muted-foreground" /> Últimos Movimientos
                     </h3>
                     <div className="space-y-2">
-                        {ventasHoy.length === 0 ? (
+                        {ventasRecientes.length === 0 ? (
                             <div className="text-center py-8 text-muted-foreground bg-muted/20 rounded-lg border-dashed border">
                                 <p>No hay ventas registradas aún.</p>
                             </div>
                         ) : (
-                            ventasHoy.map((venta) => (
+                            ventasRecientes.map((venta) => (
                                 <Card key={venta.id} className="p-3 flex justify-between items-center shadow-sm hover:shadow-md transition-shadow">
                                     <div className="flex items-center gap-3">
                                         <span className="text-2xl bg-muted p-2 rounded-full h-10 w-10 flex items-center justify-center">
@@ -267,7 +354,9 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                         </span>
                                         <div>
                                             <p className="font-bold text-sm">{venta.productos?.nombre}</p>
-                                            <p className="text-xs text-muted-foreground">ID Lote: ...{venta.id.toString().slice(-4)}</p>
+                                            <p className="text-xs text-muted-foreground">
+                                                {venta.fecha_venta ? formatDateToDDMM(venta.fecha_venta) : 'Sin fecha'} - {venta.metodo_pago ? venta.metodo_pago.charAt(0).toUpperCase() + venta.metodo_pago.slice(1).replace('_', ' ') : 'Efectivo'}
+                                            </p>
                                         </div>
                                     </div>
                                     <div className="text-right">
@@ -359,7 +448,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                             {formatMoney(capitalEnRiesgo.capital)}
                         </span>
                         <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight mt-1">
-                            {/* MOSTRAR UNIDADES EN RIESGO */}
                             {capitalEnRiesgo.unidades} unidad{capitalEnRiesgo.unidades !== 1 ? 'es' : ''} &lt; 10 días
                         </span>
                     </div>
@@ -376,7 +464,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                             {formatMoney(capitalSaludable.capital)}
                         </span>
                         <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight mt-1">
-                            {/* MOSTRAR UNIDADES SALUDABLES */}
                             {capitalSaludable.unidades} unidad{capitalSaludable.unidades !== 1 ? 'es' : ''} saludables
                         </span>
                     </div>
@@ -400,7 +487,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                 <div className="flex items-center gap-3">
                                     <span className="text-2xl">{item.emoji}</span>
                                     <div>
-                                        {/* MOSTRAR UNIDADES AGRUPADAS */}
                                         <p className="font-bold text-sm">{item.nombre} <span className="font-normal text-muted-foreground">({item.unidades} u.)</span></p>
                                         <p className="text-xs text-destructive font-medium">
                                             Vence: {new Date(item.fechaVenc).toLocaleDateString()}

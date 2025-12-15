@@ -1,11 +1,11 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { supabase } from "@/lib/supabase" // Importamos la conexión real
+import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ArrowLeft, AlertTriangle, TrendingUp, Package, Search, Plus, Loader2 } from "lucide-react"
+import { ArrowLeft, AlertTriangle, TrendingUp, Package, Search, Plus, Loader2, ShieldCheck } from "lucide-react"
 import { BottomNav } from "@/components/bottom-nav"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import CrearProducto from "@/components/crear-producto"
@@ -22,59 +22,114 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
 
   // --- ESTADOS DE DATOS REALES ---
   const [productos, setProductos] = useState<any[]>([])
-  // Estado para controlar el modal de agregar stock
   const [selectedProductForStock, setSelectedProductForStock] = useState<{id: number, nombre: string} | null>(null)
 
-  // --- CARGAR DATOS DE SUPABASE ---
-  const fetchProductos = async () => {
+  // --- ESTADOS PARA MÉTRICAS FINANCIERAS ---
+  const [capitalEnRiesgo, setCapitalEnRiesgo] = useState(0)
+  const [capitalSaludable, setCapitalSaludable] = useState(0)
+  const [vencimientosCriticos, setVencimientosCriticos] = useState<any[]>([])
+
+  // --- CARGAR DATOS Y CALCULAR MÉTRICAS ---
+  const fetchData = async () => {
     setLoading(true)
-    // Traemos productos de la base de datos real
-    const { data, error } = await supabase
+    
+    // 1. Traer PRODUCTOS (Catálogo) para la lista de inventario
+    const { data: dataProductos } = await supabase
       .from('productos')
       .select('*')
       .order('nombre', { ascending: true })
     
-    if (error) console.error("Error productos:", error)
-    else setProductos(data || [])
-    
+    setProductos(dataProductos || [])
+
+    // 2. Traer STOCK PENDIENTE (Para calcular dinero y riesgos)
+    // Traemos todo el stock que no se ha vendido ('pendiente')
+    // y pedimos el precio del producto asociado usando la relación (foreign key)
+    const { data: dataStock } = await supabase
+      .from('stock')
+      .select('*, productos(nombre, precio_venta, emoji)')
+      .eq('estado', 'pendiente')
+
+    if (dataStock) {
+      calcularMetricas(dataStock)
+    }
+
     setLoading(false)
   }
 
-  // Cargar datos automáticamente cuando entramos a la pestaña de inventario
+  const calcularMetricas = (stock: any[]) => {
+    let riesgo = 0
+    let saludable = 0
+    let listaCritica: any[] = []
+
+    const hoy = new Date()
+    // Definimos "Riesgo" como productos que vencen en los próximos 10 días
+    const fechaLimite = new Date()
+    fechaLimite.setDate(hoy.getDate() + 10)
+
+    stock.forEach(item => {
+      // El precio viene de la tabla relacionada 'productos'. Si es null, usamos 0.
+      const precio = item.productos?.precio_venta || 0
+      
+      // Si no tiene fecha de vencimiento, asumimos que es saludable
+      if (!item.fecha_vencimiento) {
+        saludable += precio
+        return
+      }
+
+      const fechaVenc = new Date(item.fecha_vencimiento)
+
+      if (fechaVenc <= fechaLimite) {
+        // ¡RIESGO! (Vence pronto)
+        riesgo += precio
+        listaCritica.push({
+          id: item.id,
+          nombre: item.productos?.nombre || "Desconocido",
+          vencimiento: item.fecha_vencimiento,
+          precio: precio,
+          emoji: item.productos?.emoji || "📦"
+        })
+      } else {
+        // SALUDABLE (Vence lejos)
+        saludable += precio
+      }
+    })
+
+    setCapitalEnRiesgo(riesgo)
+    setCapitalSaludable(saludable)
+    setVencimientosCriticos(listaCritica)
+  }
+
+  // Cargar datos al iniciar el componente
   useEffect(() => {
-    if (activeTab === "inventory") {
-      fetchProductos()
-    }
-  }, [activeTab])
+    fetchData()
+  }, [])
 
+  // Formateador de dinero (Ej: $ 1.500)
+  const formatMoney = (amount: number) => {
+    return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(amount)
+  }
 
-  // --- DATOS HARDCODEADOS (Solo quedaron los gráficos y alertas financieras por ahora) ---
-  // El inventario ya no es hardcodeado, ahora viene de 'productos'
-  const preciosTendencia = [
-    { mes: "Sep", precio: 1045 }, { mes: "Oct", precio: 1100 }, { mes: "Nov", precio: 1150 }, { mes: "Dic", precio: 1200 },
-  ]
-  const tareasEmpleado = [
-    { id: 1, tarea: "Caza-Vencimientos", cantidad: 3, tipo: "urgente" },
-    { id: 2, tarea: "Completar Datos", cantidad: 3, tipo: "normal" },
-  ]
-
-  // Filtramos la lista REAL de productos
   const inventarioFiltrado = productos.filter((item) =>
     item.nombre.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
+  // Gráfico estático (Placeholder hasta tener historial de ventas)
+  const preciosTendencia = [
+    { mes: "Sep", precio: 1000 }, { mes: "Oct", precio: 1100 }, { mes: "Nov", precio: 1150 }, { mes: "Dic", precio: 1200 },
+  ]
+
   return (
     <div className="min-h-screen bg-background pb-20">
       
-      {/* MODAL DE AGREGAR STOCK (Se muestra si hay un producto seleccionado) */}
+      {/* MODAL DE AGREGAR STOCK */}
       {selectedProductForStock && (
         <AgregarStock 
           productoId={selectedProductForStock.id}
           nombreProducto={selectedProductForStock.nombre}
           onClose={() => setSelectedProductForStock(null)}
           onSaved={() => {
-            fetchProductos() // Recargamos la lista para ver cambios si hiciera falta
-            alert("¡Stock cargado! El empleado lo verá en su dashboard.")
+            fetchData() // Recargamos todo para ver el impacto financiero inmediato
+            alert("¡Stock cargado y métricas actualizadas!")
           }}
         />
       )}
@@ -86,13 +141,12 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         </Button>
         <h1 className="text-3xl font-bold mb-2">Dashboard del Dueño</h1>
         <p className="text-primary-foreground/80">
-          {activeTab === "alerts" && "Resumen del mes"}
-          {activeTab === "inventory" && "Gestión de Productos"}
-          {activeTab === "tasks" && "Progreso del equipo"}
-          {activeTab === "catalog" && "Gestión del Catálogo"}
+          {activeTab === "alerts" && "Finanzas y Alertas"}
+          {activeTab === "inventory" && "Gestión de Stock"}
+          {activeTab === "tasks" && "Equipo"}
+          {activeTab === "catalog" && "Catálogo"}
         </p>
 
-        {/* Botones de Navegación Rápida */}
         <div className="flex gap-2 mt-4 overflow-x-auto pb-2">
           <Button 
             onClick={() => setActiveTab("catalog")} 
@@ -110,26 +164,34 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
           >
             <Package className="mr-2 h-4 w-4" /> Inventario
           </Button>
+          <Button 
+            onClick={() => setActiveTab("alerts")} 
+            variant={activeTab === "alerts" ? "secondary" : "default"}
+            size="sm"
+            className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"
+          >
+            <TrendingUp className="mr-2 h-4 w-4" /> Métricas
+          </Button>
         </div>
       </div>
 
       <div className="p-4 space-y-4">
         
-        {/* PESTAÑA: CATÁLOGO (Nuevo Producto) */}
+        {/* PESTAÑA: CATÁLOGO */}
         {activeTab === "catalog" && (
           <div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <CrearProducto onProductCreated={() => setActiveTab("inventory")} />
+            <CrearProducto onProductCreated={() => { setActiveTab("inventory"); fetchData(); }} />
           </div>
         )}
 
-        {/* PESTAÑA: INVENTARIO (Ahora Real) */}
+        {/* PESTAÑA: INVENTARIO */}
         {activeTab === "inventory" && (
           <>
             <div className="relative mb-4">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
               <Input
                 type="text"
-                placeholder="Buscar productos reales..."
+                placeholder="Buscar productos..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="h-12 pl-12 text-base"
@@ -151,42 +213,98 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                         </div>
                       </div>
                     </div>
-                    
-                    <Button 
-                      size="sm" 
-                      onClick={() => setSelectedProductForStock({ id: item.id, nombre: item.nombre })}
-                      className="bg-primary/10 text-primary hover:bg-primary/20 border-0 font-semibold"
-                    >
-                      <Plus className="h-4 w-4 mr-1" /> Stock
-                    </Button>
+                    <div className="flex flex-col items-end gap-2">
+                         <span className="text-sm font-bold text-primary">{formatMoney(item.precio_venta)}</span>
+                         <Button 
+                            size="sm" 
+                            onClick={() => setSelectedProductForStock({ id: item.id, nombre: item.nombre })}
+                            className="h-8 bg-primary/10 text-primary hover:bg-primary/20 border-0 font-semibold"
+                            >
+                            <Plus className="h-3 w-3 mr-1" /> Stock
+                        </Button>
+                    </div>
                   </Card>
                 ))}
-                
-                {inventarioFiltrado.length === 0 && (
-                  <Card className="p-8 text-center border-dashed">
-                    <Package className="h-12 w-12 text-muted-foreground mx-auto mb-2 opacity-50" />
-                    <p className="text-muted-foreground">No hay productos aún.</p>
-                    <Button variant="link" onClick={() => setActiveTab("catalog")}>¡Crea el primero!</Button>
-                  </Card>
-                )}
               </div>
             )}
           </>
         )}
 
-        {/* PESTAÑA: ALERTAS (Estáticas por ahora) */}
+        {/* PESTAÑA: ALERTAS (AHORA CON DATOS REALES) */}
         {activeTab === "alerts" && (
-          <div className="space-y-4">
-             <Card className="p-4 border-l-4 border-l-destructive bg-destructive/5">
-                <h3 className="font-bold text-destructive flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4" /> Demo Mode
-                </h3>
-                <p className="text-sm text-muted-foreground">Las alertas financieras se conectarán cuando tengamos más datos históricos.</p>
-             </Card>
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+            
+             {/* Tarjetas Financieras Dinámicas */}
+             <div className="grid grid-cols-2 gap-4">
+                {/* TARJETA NARANJA: RIESGO */}
+                <Card className="p-4 bg-orange-50 border-l-4 border-l-orange-500 shadow-sm dark:bg-orange-950/20">
+                    <div className="flex flex-col">
+                        <div className="flex items-center gap-2 text-orange-600 mb-1">
+                            <AlertTriangle className="h-4 w-4" />
+                            <span className="text-xs font-bold uppercase">En Riesgo</span>
+                        </div>
+                        <span className="text-2xl font-black text-gray-800 dark:text-gray-100 tracking-tight">
+                            {formatMoney(capitalEnRiesgo)}
+                        </span>
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight mt-1">
+                            Vence en &lt; 10 días
+                        </span>
+                    </div>
+                </Card>
 
+                {/* TARJETA VERDE: SALUDABLE */}
+                <Card className="p-4 bg-emerald-50 border-l-4 border-l-emerald-500 shadow-sm dark:bg-emerald-950/20">
+                    <div className="flex flex-col">
+                        <div className="flex items-center gap-2 text-emerald-600 mb-1">
+                            <ShieldCheck className="h-4 w-4" />
+                            <span className="text-xs font-bold uppercase">Activo</span>
+                        </div>
+                        <span className="text-2xl font-black text-gray-800 dark:text-gray-100 tracking-tight">
+                            {formatMoney(capitalSaludable)}
+                        </span>
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight mt-1">
+                            Stock saludable
+                        </span>
+                    </div>
+                </Card>
+             </div>
+
+             {/* Lista de Vencimientos Críticos Real */}
+             <div>
+                <h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2">
+                   <AlertTriangle className="h-5 w-5 text-destructive" /> Prioridad Alta
+                </h3>
+                
+                {vencimientosCriticos.length === 0 ? (
+                    <Card className="p-6 text-center text-muted-foreground bg-muted/20 border-dashed">
+                        <p>🎉 ¡Todo tranquilo! No hay capital en riesgo inmediato.</p>
+                    </Card>
+                ) : (
+                    <div className="space-y-3">
+                        {vencimientosCriticos.map((item, idx) => (
+                            <Card key={idx} className="p-3 border-l-4 border-l-destructive flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <span className="text-2xl">{item.emoji}</span>
+                                    <div>
+                                        <p className="font-bold text-sm">{item.nombre}</p>
+                                        <p className="text-xs text-destructive font-medium">
+                                            Vence: {new Date(item.vencimiento).toLocaleDateString()}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <p className="font-bold text-sm">{formatMoney(item.precio)}</p>
+                                </div>
+                            </Card>
+                        ))}
+                    </div>
+                )}
+             </div>
+
+             {/* Gráfico (Placeholder - Se queda estático por ahora como acordamos) */}
              <Card className="p-6">
               <h2 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-chart-1" /> Tendencias
+                <TrendingUp className="h-5 w-5 text-chart-1" /> Proyección
               </h2>
               <ResponsiveContainer width="100%" height={200}>
                 <LineChart data={preciosTendencia}>
@@ -199,18 +317,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
               </ResponsiveContainer>
             </Card>
           </div>
-        )}
-
-        {/* PESTAÑA: TAREAS (Estáticas por ahora) */}
-        {activeTab === "tasks" && (
-            <div className="space-y-3">
-            {tareasEmpleado.map((tarea) => (
-                <Card key={tarea.id} className="p-4">
-                <h3 className="font-bold">{tarea.tarea}</h3>
-                <p className="text-sm text-muted-foreground">{tarea.cantidad} pendientes</p>
-                </Card>
-            ))}
-            </div>
         )}
       </div>
 

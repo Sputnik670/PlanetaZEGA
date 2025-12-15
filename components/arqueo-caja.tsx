@@ -14,7 +14,7 @@ import { format } from "date-fns"
 interface ArqueoCajaProps {
   onCajaAbierta: (turnoId: string) => void
   onCajaCerrada: () => void
-  turnoActivo: CajaDiaria | null // Usamos el tipo aquí
+  turnoActivo: CajaDiaria | null 
 }
 
 // 🚨 CORRECCIÓN: Exportamos el tipo y añadimos monto_final y monto_inicial
@@ -23,7 +23,7 @@ export interface CajaDiaria {
     monto_inicial: number
     fecha_apertura: string
     empleado_id: string
-    monto_final: number | null; // AÑADIDO: Era el error 'monto_final' does not exist
+    monto_final: number | null; 
 }
 
 // 🚨 CAMBIO: Exportamos por defecto
@@ -133,7 +133,11 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
 
     } catch (error: any) {
       console.error("Error al abrir caja:", error)
-      toast.error("Error de Operación", { description: error.message || "No se pudo iniciar el turno de caja." })
+      
+        // 🚨 MEJORA DE ERROR INTEGRADA: Diagnóstico de RLS/Permisos
+        const errorMessage = error.message || (error.code ? `DB Error Code: ${error.code}` : "No se pudo iniciar el turno de caja. (Posible RLS/Permisos)")
+      
+      toast.error("Error de Operación", { description: errorMessage })
     } finally {
       setLoading(false)
     }

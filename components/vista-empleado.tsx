@@ -4,14 +4,15 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
-import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { LogOut, Loader2, ShoppingCart, Target, TrendingUp, AlertTriangle, Star } from "lucide-react" 
+import { Card } from "@/components/ui/card" 
+import { LogOut, Loader2, ShoppingCart, Target, TrendingUp, AlertTriangle, Star, Trophy } from "lucide-react" 
 import { toast } from "sonner"
 import CajaVentas from "@/components/caja-ventas" 
 import ArqueoCaja, { CajaDiaria } from "@/components/arqueo-caja" 
 import MisionesEmpleado from "@/components/misiones-empleado"
-import RegistrarGasto from "@/components/registrar-gasto" // <--- Importación correcta
+import RegistrarGasto from "@/components/registrar-gasto"
+import { Progress } from "@/components/ui/progress" 
 
 interface UserProfile {
     id: string
@@ -55,7 +56,8 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                 return
             }
             
-            await fetchProfile(user.id) 
+            // Cargamos el perfil en paralelo
+            fetchProfile(user.id) 
 
             const { data, error } = await supabase
                 .from('caja_diaria')
@@ -93,14 +95,26 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
 
     const handleCajaCerrada = () => {
         setTurnoActivo(null)
-        setRefreshKey(prev => prev + 1) // Fuerza re-fetch de XP/perfil
+        setRefreshKey(prev => prev + 1)
         setActiveTab("caja")
     }
     
     // Handler para actualizar XP/misiones
     const handleMisionesUpdated = () => {
-        setRefreshKey(prev => prev + 1) // Forzar re-fetch de XP/perfil
+        setRefreshKey(prev => prev + 1)
     }
+
+    // --- Lógica de Nivel (AJUSTADA A 3000 XP) ---
+    const XP_PER_LEVEL = 3000
+    const currentXP = userProfile?.xp || 0
+    
+    // Nivel 1 = 0-2999, Nivel 2 = 3000-5999, etc.
+    const level = Math.floor(currentXP / XP_PER_LEVEL) + 1
+    const nextLevelXP = level * XP_PER_LEVEL
+    const prevLevelXP = (level - 1) * XP_PER_LEVEL
+    
+    // Porcentaje de progreso dentro del nivel actual
+    const progressPercent = Math.min(((currentXP - prevLevelXP) / XP_PER_LEVEL) * 100, 100)
 
     // --- Renderizado ---
 
@@ -115,39 +129,77 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
     return (
         <div className="min-h-screen bg-background pb-20">
             
-            {/* Header Fijo */}
-            <div className="bg-gradient-to-br from-accent via-accent to-chart-2 text-accent-foreground p-6 rounded-b-3xl shadow-xl">
-                <div className="flex justify-between items-start">
-                    <h1 className="text-3xl font-bold mb-2">{userProfile?.nombre || "Modo Empleado"}</h1>
+            {/* Header Fijo Gamificado */}
+            <div className="bg-gradient-to-br from-accent via-accent to-chart-2 text-accent-foreground p-6 rounded-b-3xl shadow-xl relative overflow-hidden">
+                {/* Elemento decorativo de fondo */}
+                <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
+                    <Trophy className="h-32 w-32 rotate-12" />
+                </div>
+
+                <div className="flex justify-between items-start relative z-10">
+                    <div>
+                        <h1 className="text-3xl font-bold mb-1">{userProfile?.nombre || "Empleado"}</h1>
+                        <p className="text-xs text-accent-foreground/80 font-medium uppercase tracking-wider">
+                            Operador de Kiosco
+                        </p>
+                    </div>
                     <Button variant="ghost" size="icon" onClick={onBack} className="text-accent-foreground hover:bg-accent-foreground/20">
                         <LogOut className="h-6 w-6" />
                     </Button>
                 </div>
                 
-                {/* BARRA DE XP */}
-                <div className="flex items-center gap-2 mt-1 mb-2">
-                    <Star className="h-5 w-5 text-yellow-300 fill-yellow-500" />
-                    <span className="text-sm font-black text-white">
-                        XP TOTAL: {userProfile?.xp || 0}
-                    </span>
+                {/* BARRA DE PROGRESO DE NIVEL */}
+                <div className="mt-4 relative z-10">
+                    <div className="flex justify-between items-end mb-1">
+                        <div className="flex items-center gap-1.5">
+                            <div className="bg-yellow-400 text-yellow-900 font-black text-xs px-1.5 py-0.5 rounded flex items-center gap-1 shadow-sm">
+                                <Star className="h-3 w-3 fill-yellow-900" />
+                                NIVEL {level}
+                            </div>
+                            <span className="text-xs font-bold text-white/90 drop-shadow-sm">
+                                {currentXP} XP
+                            </span>
+                        </div>
+                        <span className="text-[10px] font-medium text-white/70">
+                            Próximo Nivel: {nextLevelXP} XP
+                        </span>
+                    </div>
+                    
+                    {/* SOLUCIÓN A "CSS Inline Styles":
+                        Usamos el componente Progress y le pasamos clases de Tailwind 
+                        para colorear el hijo interno ([&>div]) con el gradiente amarillo.
+                        Esto evita usar style={{ width: ... }} directamente aquí.
+                    */}
+                    <Progress 
+                        value={progressPercent} 
+                        className="h-3 bg-black/20 border border-white/10 [&>div]:bg-gradient-to-r [&>div]:from-yellow-300 [&>div]:to-yellow-500 [&>div]:shadow-[0_0_10px_rgba(234,179,8,0.5)]"
+                    />
                 </div>
                 
-                {turnoActivo ? (
-                    <div className="mt-2 text-sm font-semibold text-accent-foreground/90">
-                        Turno Activo: {new Date(turnoActivo.fecha_apertura).toLocaleTimeString()} | Base: {new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(turnoActivo.monto_inicial)}
-                    </div>
-                ) : (
-                    <div className="mt-2 text-sm font-semibold text-accent-foreground/90">
-                        Caja Cerrada. Debes iniciar turno.
-                    </div>
-                )}
+                {/* Estado del Turno */}
+                <div className="mt-4 pt-3 border-t border-white/10 relative z-10 flex justify-between items-center text-sm">
+                    {turnoActivo ? (
+                        <>
+                            <span className="font-medium text-white/90">
+                                🟢 Turno Activo
+                            </span>
+                            <span className="bg-white/20 px-2 py-0.5 rounded text-xs font-mono">
+                                {new Date(turnoActivo.fecha_apertura).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                            </span>
+                        </>
+                    ) : (
+                        <span className="font-medium text-white/80 flex items-center gap-2">
+                            🔴 Caja Cerrada
+                        </span>
+                    )}
+                </div>
             </div>
 
             <div className="p-4 space-y-4">
                 
                 {/* Si NO hay turno activo, solo mostramos el componente de Arqueo */}
                 {!turnoActivo && (
-                    <div className="animate-in fade-in">
+                    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <ArqueoCaja 
                             onCajaAbierta={handleCajaAbierta}
                             onCajaCerrada={handleCajaCerrada}
@@ -160,12 +212,12 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                 {turnoActivo && (
                     <>
                         {/* Router de Pestañas */}
-                        <div className="flex gap-2 mt-4 overflow-x-auto pb-2 border-b">
+                        <div className="flex gap-2 mt-2 overflow-x-auto pb-2 border-b scrollbar-hide">
                             <Button 
                                 onClick={() => setActiveTab("caja")} 
                                 variant={activeTab === "caja" ? "default" : "outline"}
                                 size="sm"
-                                className="whitespace-nowrap"
+                                className="whitespace-nowrap shadow-sm"
                             >
                                 <ShoppingCart className="mr-2 h-4 w-4" /> Venta
                             </Button>
@@ -173,7 +225,7 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                                 onClick={() => setActiveTab("misiones")} 
                                 variant={activeTab === "misiones" ? "default" : "outline"}
                                 size="sm"
-                                className="whitespace-nowrap"
+                                className="whitespace-nowrap shadow-sm"
                             >
                                 <Target className="mr-2 h-4 w-4" /> Misiones 
                             </Button>
@@ -181,36 +233,36 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                                 onClick={() => setActiveTab("vencimientos")} 
                                 variant={activeTab === "vencimientos" ? "default" : "outline"}
                                 size="sm"
-                                className="whitespace-nowrap"
+                                className="whitespace-nowrap shadow-sm"
                             >
                                 <AlertTriangle className="mr-2 h-4 w-4" /> Vencimientos
                             </Button>
                         </div>
                         
                         {/* Contenido */}
-                        <div className="animate-in fade-in slide-in-from-bottom-2">
+                        <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
                             {activeTab === "caja" && (
                                 <>
-                                    {/* Mostramos el componente ArqueoCaja para CERRAR TURNO */}
-                                    <ArqueoCaja 
-                                        onCajaAbierta={handleCajaAbierta}
-                                        onCajaCerrada={handleCajaCerrada}
-                                        turnoActivo={turnoActivo}
-                                    />
-                                    
-                                    {/* --- AQUÍ ESTABA EL FALTANTE --- */}
-                                    {/* BOTÓN DE GASTOS (Solo si hay turno activo y perfil cargado) */}
-                                    {userProfile && (
-                                        <div className="mt-4">
+                                    <div className="grid gap-4">
+                                        {/* Arqueo / Cierre */}
+                                        <ArqueoCaja 
+                                            onCajaAbierta={handleCajaAbierta}
+                                            onCajaCerrada={handleCajaCerrada}
+                                            turnoActivo={turnoActivo}
+                                        />
+                                        
+                                        {/* SOLUCIÓN AL BOTÓN INVISIBLE:
+                                            Antes dependíamos de que "userProfile" cargara. 
+                                            Ahora usamos "turnoActivo.empleado_id" que es seguro que existe si hay turno.
+                                        */}
+                                        {turnoActivo && (
                                             <RegistrarGasto 
                                                 turnoId={turnoActivo.id} 
-                                                empleadoId={userProfile.id} 
+                                                empleadoId={turnoActivo.empleado_id} 
                                             />
-                                        </div>
-                                    )}
-                                    {/* ---------------------------------- */}
+                                        )}
 
-                                    <div className="mt-4">
+                                        {/* Caja de Ventas */}
                                         <CajaVentas turnoId={turnoActivo.id} />
                                     </div>
                                 </>
@@ -225,9 +277,14 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                             )}
                             
                             {activeTab === "vencimientos" && (
-                                <Card className="p-6 text-center text-muted-foreground">
-                                    <TrendingUp className="h-8 w-8 mx-auto mb-2" />
-                                    <p>Vista de gestión de stock por vencer (próximo paso si se requiere separar de misiones).</p>
+                                <Card className="p-8 text-center text-muted-foreground bg-muted/30 border-dashed border-2">
+                                    <div className="bg-background p-4 rounded-full w-fit mx-auto mb-4 shadow-sm">
+                                        <TrendingUp className="h-8 w-8 text-primary" />
+                                    </div>
+                                    <h3 className="font-bold text-foreground text-lg">Próximamente</h3>
+                                    <p className="max-w-xs mx-auto mt-2 text-sm">
+                                        Aquí podrás gestionar el stock por vencer de manera detallada sin depender de las misiones.
+                                    </p>
                                 </Card>
                             )}
                         </div>

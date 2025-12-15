@@ -23,7 +23,8 @@ import { Calendar } from "@/components/ui/calendar"
 import { DateRange } from "react-day-picker"
 import { format, subDays, startOfDay, parseISO } from "date-fns" 
 import { es } from "date-fns/locale" 
-import AsignarMision from "@/components/asignar-mision" // <--- IMPORTACIÓN DEL NUEVO COMPONENTE
+import AsignarMision from "@/components/asignar-mision" 
+import { toast } from "sonner" // Importamos para notificaciones en vivo
 
 // --- Interfaces ---
 interface DashboardDuenoProps {
@@ -57,7 +58,6 @@ interface PaymentBreakdown {
   billetera_virtual: number
 }
 
-// --- Interfaces para Fase 4 (Supervisión) ---
 interface MisionAudit {
   id: string
   descripcion: string
@@ -81,7 +81,7 @@ interface TurnoAudit {
   monto_inicial: number
   monto_final: number | null
   empleado_id: string
-  perfiles: { nombre: string } | null // Join con tabla perfiles
+  perfiles: { nombre: string } | null 
   misiones: MisionAudit[]
   movimientos_caja: MovimientoCaja[]
 }
@@ -119,11 +119,10 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       efectivo: 0, tarjeta: 0, transferencia: 0, otro: 0, billetera_virtual: 0 
   })
 
-  // 2. Nuevo Estado para Auditoría
   const [turnosAudit, setTurnosAudit] = useState<TurnoAudit[]>([])
 
+  // Función de carga de datos (Optimizada para no mostrar spinner en recargas automáticas)
   const fetchData = useCallback(async () => {
-    setLoading(true)
     
     // --- A. Inventario y Stock ---
     const { data: dataProductos } = await supabase
@@ -197,12 +196,38 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         setTurnosAudit(dataCajas)
     }
 
-    setLoading(false)
   }, [dateRange]) 
 
+  // Efecto inicial de carga (con spinner)
   useEffect(() => {
-    fetchData()
-  }, [fetchData]) 
+    setLoading(true)
+    fetchData().finally(() => setLoading(false))
+  }, [fetchData])
+
+  // --- REALTIME: SUSCRIPCIÓN A CAMBIOS (Gratis en Supabase Free Tier) ---
+  useEffect(() => {
+    const channel = supabase
+      .channel('dashboard_dueno_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock' }, () => {
+         fetchData() // Actualiza inventario y ventas
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'caja_diaria' }, () => {
+         fetchData() // Actualiza estado de cajas
+         toast.info("Actividad de Turno", { description: "Se abrió o cerró una caja." })
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'movimientos_caja' }, () => {
+         fetchData() // Actualiza gastos al instante
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'misiones' }, () => {
+         fetchData() // Actualiza misiones completadas
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [fetchData])
+
 
   // --- Lógica de Métricas ---
   const calcularMetricasVentas = (ventas: VentaJoin[]) => { 
@@ -365,7 +390,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
 
                         return (
                             <Card key={turno.id} className="overflow-hidden border-2 shadow-sm">
-                                {/* Header del Turno */}
                                 <div className={cn(
                                     "p-3 flex justify-between items-center text-sm font-medium border-b",
                                     isOpen ? "bg-blue-50 text-blue-700" : "bg-gray-50 text-gray-700"
@@ -377,7 +401,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                     <span>{format(parseISO(turno.fecha_apertura), 'dd/MM HH:mm')}</span>
                                 </div>
 
-                                {/* --- BARRA DE ACCIONES (SOLO SI ESTÁ ABIERTO) --- */}
+                                {/* BARRA DE ACCIONES (SOLO SI ESTÁ ABIERTO) */}
                                 {isOpen && (
                                     <div className="p-2 bg-blue-50/50 flex justify-end border-b border-blue-100">
                                         <AsignarMision 
@@ -390,7 +414,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                 )}
 
                                 <div className="p-4 grid grid-cols-2 gap-4">
-                                    {/* Finanzas */}
                                     <div className="space-y-1">
                                         <p className="text-xs text-muted-foreground uppercase font-bold">Caja Efectivo</p>
                                         <div className="text-sm">
@@ -403,7 +426,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                         </div>
                                     </div>
 
-                                    {/* Resultado del Arqueo */}
                                     {!isOpen && (
                                         <div className={cn("rounded-lg p-2 text-center flex flex-col justify-center border",
                                             isLoss ? "bg-red-50 border-red-200 text-red-700" :
@@ -479,7 +501,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         {/* PESTAÑA: VENTAS (REPORTING) */}
         {activeTab === "sales" && (
             <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4">
-                {/* KPI Principal */}
                 <Card className="p-6 bg-emerald-600 text-white shadow-lg border-0 relative overflow-hidden">
                     <div className="absolute top-0 right-0 p-4 opacity-10"><DollarSign className="h-32 w-32" /></div>
                     <div className="relative z-10">
@@ -493,7 +514,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                     </div>
                 </Card>
 
-                {/* GRÁFICO */}
                 {chartData.length > 0 && (
                     <Card className="p-5 border-2 border-muted/40 shadow-sm">
                         <h3 className="text-sm font-bold text-muted-foreground mb-4 flex items-center gap-2">
@@ -512,7 +532,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                     </Card>
                 )}
                 
-                {/* Desglose Financiero */}
                 <div className="grid grid-cols-2 gap-3">
                     {Object.entries(paymentBreakdown).map(([method, amount]) => {
                         if (amount === 0) return null; 

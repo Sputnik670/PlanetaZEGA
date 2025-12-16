@@ -84,6 +84,26 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
         puntos: 20, // 20 Puntos fijos por buen cierre
       })
 
+      // 3. NUEVO: Misiones de Rutina Diaria (Automatizadas)
+      const rutinasDiarias = [
+          { descripcion: "🧊 Revisar Heladeras (Reponer faltantes e informar)", puntos: 50 },
+          { descripcion: "🧹 Mantenimiento de Espacios Comunes", puntos: 30 },
+          { descripcion: "🗑️ Revisar y sacar Basura", puntos: 30 }
+      ]
+
+      rutinasDiarias.forEach(rutina => {
+          misionesABulkInsert.push({
+              empleado_id: empleadoId,
+              caja_diaria_id: cajaId,
+              tipo: 'manual', // Usamos 'manual' para tareas generales que se completan con un botón
+              descripcion: rutina.descripcion,
+              objetivo_unidades: 1,
+              unidades_completadas: 0,
+              es_completada: false,
+              puntos: rutina.puntos
+          })
+      })
+
       if (misionesABulkInsert.length > 0) {
         const { error: insertError } = await supabase
           .from('misiones')
@@ -132,11 +152,11 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       const nuevoTurno = data as CajaDiaria
       setCaja(nuevoTurno)
       
-      // 2. Generar Misiones AUTOMÁTICAS (Esto ocurre en segundo plano)
+      // 2. Generar Misiones AUTOMÁTICAS (Incluyendo las nuevas rutinas)
       await generarMisiones(nuevoTurno.id, user.id)
 
       onCajaAbierta(nuevoTurno.id)
-      toast.success("Turno Iniciado", { description: "¡A vender! Revisa la pestaña de Misiones." })
+      toast.success("Turno Iniciado", { description: "¡A vender! Se han asignado tus tareas diarias." })
 
     } catch (error: any) {
       toast.error("Error al abrir caja", { description: error.message })

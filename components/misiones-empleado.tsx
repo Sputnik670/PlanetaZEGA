@@ -6,18 +6,19 @@ import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, Zap, Target, CheckCheck, AlertTriangle, Package, X } from "lucide-react" 
+import { Loader2, Zap, Target, CheckCheck, AlertTriangle, Package, X, ClipboardCheck } from "lucide-react" 
 import { toast } from "sonner"
 import { format, parseISO, addDays } from "date-fns"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils" 
-import { triggerConfetti } from "@/components/confetti-trigger" // <--- NUEVO IMPORT
+import { triggerConfetti } from "@/components/confetti-trigger"
 
 // Tipado para las misiones activas
 interface Mision {
     id: string
-    tipo: 'vencimiento' | 'arqueo_cierre'
+    // Agregamos 'manual' para soportar las tareas del dueño/rutina
+    tipo: 'vencimiento' | 'arqueo_cierre' | 'manual' 
     descripcion: string
     objetivo_unidades: number
     unidades_completadas: number
@@ -26,7 +27,6 @@ interface Mision {
     created_at: string
 }
 
-// CORRECCIÓN: El precio viene dentro del producto
 interface ProductoJoin {
     nombre: string
     emoji: string
@@ -37,7 +37,6 @@ interface StockJoin {
     id: string
     producto_id: string
     fecha_vencimiento: string
-    // Eliminamos precio_venta de la raíz porque no está en la tabla stock
     productos: ProductoJoin | null 
 }
 
@@ -77,9 +76,11 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
 
             if (error) throw error
             
-            setMisiones(data || [])
-            const vencimientoMision = data.find(m => m.tipo === 'vencimiento')
-            setMisionVencimiento(vencimientoMision || null)
+            // Forzamos el tipado correcto asegurando que 'tipo' es válido
+            setMisiones((data as any[]) || [])
+            
+            const vencimientoMision = data?.find(m => m.tipo === 'vencimiento')
+            setMisionVencimiento((vencimientoMision as Mision) || null)
 
         } catch (error) {
             console.error("Error fetching misiones:", error)
@@ -89,7 +90,7 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
         }
     }, [turnoId])
 
-    // 2. Lógica para Abrir el Modal de Mermar (CORREGIDA)
+    // 2. Lógica para Abrir el Modal de Mermar
     const handleOpenMermarModal = async () => {
         if (!misionVencimiento) return
         setProcesando(true)
@@ -98,7 +99,6 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
             const hoy = new Date()
             const fechaLimite = format(addDays(hoy, 7), 'yyyy-MM-dd') 
 
-            // CORRECCIÓN: Solicitamos precio_venta dentro de productos()
             const { data, error } = await supabase
                 .from('stock')
                 .select(`
@@ -122,7 +122,6 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
                 nombre_producto: item.productos?.nombre || 'Producto Desconocido', 
                 emoji_producto: item.productos?.emoji || '📦',
                 fecha_vencimiento: item.fecha_vencimiento,
-                // CORRECCIÓN: Leemos el precio desde el objeto anidado
                 precio_venta: item.productos?.precio_venta || 0
             }))
 
@@ -137,7 +136,33 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
         }
     }
 
-    // 3. Lógica para Mermar Stock
+    // 3. Lógica para Completar Misión MANUAL (NUEVO)
+    const handleCompletarManual = async (mision: Mision) => {
+        setProcesando(true)
+        try {
+            const { error } = await supabase
+                .from('misiones')
+                .update({ 
+                    es_completada: true,
+                    unidades_completadas: 1 
+                })
+                .eq('id', mision.id)
+
+            if (error) throw error
+
+            triggerConfetti() // 🎉 ¡Fiesta!
+            toast.success("¡Excelente!", { description: `Completaste: ${mision.descripcion} (+${mision.puntos} XP)` })
+            
+            onMisionesUpdated() // Actualiza XP en el header
+            fetchMisiones()     // Recarga la lista
+        } catch (error: any) {
+            toast.error("Error", { description: error.message })
+        } finally {
+            setProcesando(false)
+        }
+    }
+
+    // 4. Lógica para Mermar Stock
     const handleMermarStock = async () => {
         if (stockParaMermar.length === 0 || !misionVencimiento) {
             toast.warning("Sin Tareas", { description: "No hay stock crítico para mermar o la misión no está activa." })
@@ -179,7 +204,7 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
             toast.success("Mermado Registrado ✅", { description: `Se procesaron ${unidadesMermadas} unidades en riesgo.` })
             
             if (misionCompletada) {
-                triggerConfetti() // <--- ¡DISPARO DE CONFETTI! 🎉
+                triggerConfetti() // 🎉
                 toast.success(`✨ ¡MISIÓN COMPLETADA!`, { 
                     description: `Excelente trabajo. Ganaste +${misionVencimiento.puntos} puntos.`,
                     duration: 5000
@@ -211,6 +236,9 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
         if (m.es_completada) return { label: "Completada", color: "text-emerald-600", icon: CheckCheck, bg: "bg-emerald-50 border-emerald-200" }
         if (m.tipo === 'vencimiento' && m.unidades_completadas > 0) return { label: "En Progreso", color: "text-orange-600", icon: Target, bg: "bg-orange-50 border-orange-200" }
         if (m.tipo === 'arqueo_cierre') return { label: "Pendiente de Cierre", color: "text-blue-600", icon: Zap, bg: "bg-white" }
+        // Estilo para misiones manuales/rutina
+        if (m.tipo === 'manual') return { label: "Tarea Pendiente", color: "text-indigo-600", icon: ClipboardCheck, bg: "bg-indigo-50 border-indigo-200" }
+        
         return { label: "Activa", color: "text-primary", icon: Target, bg: "bg-white" }
     }
 
@@ -231,18 +259,37 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
                     const status = getMissionStatus(m)
                     const Icon = status.icon
                     const isVencimiento = m.tipo === 'vencimiento'
+                    const isManual = m.tipo === 'manual' // Detectamos si es tarea manual
 
-                    // Botón de acción
-                    const ButtonAction = isVencimiento && !m.es_completada ? (
-                        <Button 
-                            onClick={handleOpenMermarModal}
-                            disabled={procesando}
-                            size="sm"
-                            className="bg-orange-500 hover:bg-orange-600 text-white w-full mt-2"
-                        >
-                            {procesando ? <Loader2 className="animate-spin h-4 w-4" /> : "Gestionar Stock en Riesgo"}
-                        </Button>
-                    ) : null
+                    // Botón de acción dinámico
+                    let ButtonAction = null
+
+                    if (!m.es_completada) {
+                        if (isVencimiento) {
+                            ButtonAction = (
+                                <Button 
+                                    onClick={handleOpenMermarModal}
+                                    disabled={procesando}
+                                    size="sm"
+                                    className="bg-orange-500 hover:bg-orange-600 text-white w-full mt-2"
+                                >
+                                    {procesando ? <Loader2 className="animate-spin h-4 w-4" /> : "Gestionar Stock en Riesgo"}
+                                </Button>
+                            )
+                        } else if (isManual) {
+                            // BOTÓN PARA COMPLETAR TAREA MANUAL
+                            ButtonAction = (
+                                <Button 
+                                    onClick={() => handleCompletarManual(m)}
+                                    disabled={procesando}
+                                    size="sm"
+                                    className="bg-indigo-600 hover:bg-indigo-700 text-white w-full mt-2 shadow-sm"
+                                >
+                                    {procesando ? <Loader2 className="animate-spin h-4 w-4" /> : "Marcar como Hecho ✅"}
+                                </Button>
+                            )
+                        }
+                    }
 
                     // Cálculo de porcentaje para la barra
                     const porcentaje = m.objetivo_unidades > 0 
@@ -270,16 +317,19 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
                                 </div>
                             </div>
 
-                            {/* Barra de Progreso usando el componente Shadcn */}
-                            {isVencimiento && (
+                            {/* Área de Progreso / Botones */}
+                            {(isVencimiento || isManual) && (
                                 <div className="pt-3 mt-2 border-t border-black/5">
-                                    <div className="flex justify-between items-center text-xs font-semibold mb-2">
-                                        <span>Progreso</span>
-                                        <span>{m.unidades_completadas} / {m.objetivo_unidades} u.</span>
-                                    </div>
-                                    
-                                    {/* Componente Progress en lugar de div inline */}
-                                    <Progress value={porcentaje} className="h-2 bg-gray-200 [&>div]:bg-orange-500" />
+                                    {isVencimiento && (
+                                        <>
+                                            <div className="flex justify-between items-center text-xs font-semibold mb-2">
+                                                <span>Progreso</span>
+                                                <span>{m.unidades_completadas} / {m.objetivo_unidades} u.</span>
+                                            </div>
+                                            
+                                            <Progress value={porcentaje} className="h-2 bg-gray-200 [&>div]:bg-orange-500" />
+                                        </>
+                                    )}
                                     
                                     {ButtonAction}
                                 </div>
@@ -289,7 +339,7 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
                 })
             )}
 
-            {/* Modal de Mermar Stock */}
+            {/* Modal de Mermar Stock (Sin cambios) */}
             <Dialog open={showMermarModal} onOpenChange={setShowMermarModal}>
                 <DialogContent className="sm:max-w-[425px]">
                     <DialogHeader>
@@ -310,7 +360,6 @@ export default function MisionesEmpleado({ turnoId, onMisionesUpdated }: Misione
                                         <span className="text-xl bg-slate-100 p-1 rounded">{item.emoji_producto}</span>
                                         <div className="flex flex-col">
                                             <span className="font-bold text-sm">{item.nombre_producto}</span>
-                                            {/* SOLUCIÓN: Convertimos ID a String por seguridad antes de cortar */}
                                             <span className="text-[10px] text-muted-foreground">ID: ...{String(item.id).slice(-4)}</span>
                                         </div>
                                     </div>

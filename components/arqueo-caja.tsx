@@ -1,5 +1,3 @@
-// components/arqueo-caja.tsx
-
 "use client"
 
 import { useState } from "react"
@@ -10,11 +8,13 @@ import { Input } from "@/components/ui/input"
 import { Loader2, DollarSign, Lock } from "lucide-react"
 import { toast } from "sonner"
 import { format, addDays } from "date-fns"
+import { triggerConfetti } from "@/components/confetti-trigger"
 
 interface ArqueoCajaProps {
   onCajaAbierta: (turnoId: string) => void
   onCajaCerrada: () => void
   turnoActivo: CajaDiaria | null 
+  isBottom?: boolean // Prop para saber si está al fondo (opcional para estilos)
 }
 
 export interface CajaDiaria {
@@ -118,7 +118,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
 
     } catch (error: any) {
       console.error("Error generando misiones:", error)
-      // No bloqueamos la apertura si fallan las misiones, pero avisamos para debug
       toast.error("Advertencia del Sistema", { description: "La caja se abrió, pero hubo un error generando las tareas automáticas." })
     }
   }
@@ -152,7 +151,7 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       const nuevoTurno = data as CajaDiaria
       setCaja(nuevoTurno)
       
-      // 2. Generar Misiones AUTOMÁTICAS (Incluyendo las nuevas rutinas)
+      // 2. Generar Misiones AUTOMÁTICAS
       await generarMisiones(nuevoTurno.id, user.id)
 
       onCajaAbierta(nuevoTurno.id)
@@ -195,7 +194,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       if (error) throw error
 
       // 3. Completar Misión de Arqueo automáticamente
-      // Actualizamos la misión generada al inicio
       await supabase
           .from('misiones')
           .update({
@@ -205,15 +203,31 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
           .eq('caja_diaria_id', caja.id)
           .eq('tipo', 'arqueo_cierre')
 
+      // 4. PERSISTENCIA DE PUNTOS (Si hubo éxito)
+      if (exitoArqueo) {
+          // A. Obtener XP actual
+          const { data: perfil } = await supabase
+            .from('perfiles')
+            .select('xp')
+            .eq('id', caja.empleado_id)
+            .single()
+          
+          if (perfil) {
+              // B. Sumar y actualizar
+              await supabase
+                .from('perfiles')
+                .update({ xp: perfil.xp + 20 })
+                .eq('id', caja.empleado_id)
+          }
+          triggerConfetti()
+          toast.success("🏆 Cierre Perfecto", { description: "¡Ganaste +20 XP por precisión!" })
+      } else {
+          toast.success("Turno Cerrado", { description: `Caja cerrada. Desvío: ${formatMoney(desvio)}` })
+      }
+
       setCaja(null)
       onCajaCerrada()
       
-      if (exitoArqueo) {
-        toast.success("🏆 Cierre Perfecto", { description: "¡Ganaste 20 puntos de experiencia por precisión!" })
-      } else {
-        toast.success("Turno Cerrado", { description: `Caja cerrada. Desvío: ${formatMoney(desvio)}` })
-      }
-
     } catch (error: any) {
       console.error(error)
       toast.error("Error al cerrar", { description: error.message })
@@ -226,27 +240,28 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
 
   // --- Renderizado UI ---
   
-  // A. Si la caja ya está abierta -> Muestra Formulario de CIERRE
+  // A. UI DE CIERRE (DISEÑO GRANDE)
   if (caja) {
     return (
-      <Card className="p-6 border-2 border-red-100 bg-red-50/50 dark:bg-red-950/10 dark:border-red-900/50">
-        <h2 className="text-xl font-bold flex items-center gap-2 text-red-600 mb-4">
-          <Lock className="h-5 w-5" /> Cerrar Turno
+      <Card className="p-6 border-4 border-red-100 bg-gradient-to-b from-white to-red-50 shadow-inner animate-in fade-in zoom-in-95 duration-300">
+        <h2 className="text-xl font-black text-red-600 mb-4 flex items-center gap-2 uppercase tracking-wide">
+          <Lock className="h-6 w-6" /> Finalizar Turno
         </h2>
+        
         <div className="space-y-4">
-            <div className="text-sm text-muted-foreground flex justify-between bg-white/50 p-3 rounded-md">
+            <div className="text-sm text-muted-foreground flex justify-between bg-white/50 p-3 rounded-md border border-red-100">
                 <span>Inicio: {format(new Date(caja.fecha_apertura), 'HH:mm')}</span>
                 <span className="font-bold text-foreground">Base: {formatMoney(caja.monto_inicial)}</span>
             </div>
             
             <div className="space-y-2">
-                <label className="text-xs font-bold uppercase text-muted-foreground">Efectivo en Caja</label>
+                <label className="text-xs font-bold uppercase text-red-800">Efectivo Final en Caja</label>
                 <div className="relative">
-                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-red-400" />
                     <Input
                         type="number"
                         placeholder="0.00"
-                        className="pl-9 h-12 text-lg bg-white"
+                        className="pl-10 h-14 text-2xl font-bold bg-white border-red-200 focus-visible:ring-red-500 shadow-sm"
                         value={montoFinal}
                         onChange={(e) => setMontoFinal(e.target.value)}
                         disabled={loading}
@@ -257,18 +272,21 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
             <Button 
                 onClick={handleCerrarCaja} 
                 disabled={loading}
-                className="w-full h-12 bg-red-600 hover:bg-red-700 font-bold shadow-sm"
+                className="w-full h-16 text-xl bg-red-600 hover:bg-red-700 font-black shadow-lg mt-2 transition-transform active:scale-[0.98]"
             >
-                {loading ? <Loader2 className="animate-spin mr-2" /> : "FINALIZAR DÍA"}
+                {loading ? <Loader2 className="animate-spin mr-2" /> : "🔒 CERRAR CAJA AHORA"}
             </Button>
+            <p className="text-[10px] text-center text-red-400 font-medium">
+                Esta acción finaliza tu día y calcula tu puntaje.
+            </p>
         </div>
       </Card>
     )
   }
 
-  // B. Si la caja está cerrada -> Muestra Formulario de APERTURA
+  // B. UI DE APERTURA (Estándar)
   return (
-    <Card className="p-6 border-2 border-emerald-100 bg-emerald-50/50 dark:bg-emerald-950/10 dark:border-emerald-900/50">
+    <Card className="p-6 border-2 border-emerald-100 bg-emerald-50/50">
       <h2 className="text-xl font-bold flex items-center gap-2 text-emerald-700 mb-4">
         <DollarSign className="h-5 w-5" /> Apertura de Caja
       </h2>

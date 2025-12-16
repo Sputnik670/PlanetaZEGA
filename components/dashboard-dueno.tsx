@@ -12,8 +12,8 @@ import {
   ArrowLeft, AlertTriangle, TrendingUp, Package, Search, Plus, 
   Loader2, ShieldCheck, DollarSign, CreditCard, 
   Repeat2, Wallet, Calendar as CalendarIcon, BarChart3, 
-  Eye, CheckCircle2, XCircle, User, TrendingDown, Star,
-  Pencil, Trash2, History, Save
+  Eye, TrendingDown, Star, User, // <--- AÑADIDO: Import User
+  Pencil, Trash2, History, Save, ChevronDown, ChevronUp
 } from "lucide-react" 
 import { BottomNav } from "@/components/bottom-nav"
 import { BarChart, Bar, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts" 
@@ -23,11 +23,12 @@ import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
 import { DateRange } from "react-day-picker"
-import { format, subDays, startOfDay, parseISO } from "date-fns" 
+import { format, subDays, startOfDay, endOfDay, parseISO } from "date-fns" 
 import { es } from "date-fns/locale" 
 import AsignarMision from "@/components/asignar-mision" 
 import { toast } from "sonner" 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
+import { Progress } from "@/components/ui/progress" // <--- AÑADIDO: Usamos el componente nativo
 
 // --- Interfaces ---
 interface DashboardDuenoProps {
@@ -45,7 +46,7 @@ interface Producto {
     nombre: string
     categoria: string
     precio_venta: number
-    costo: number // NUEVO: Costo unitario
+    costo: number
     emoji: string
     stock_disponible?: number
 }
@@ -108,7 +109,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   const [loading, setLoading] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: startOfDay(subDays(new Date(), 7)),
-    to: startOfDay(new Date()),
+    to: endOfDay(new Date()),
   })
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
 
@@ -123,6 +124,9 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   })
   const [topProductos, setTopProductos] = useState<{name: string, count: number}[]>([])
   const [turnosAudit, setTurnosAudit] = useState<TurnoAudit[]>([])
+  
+  // Estado para acordeón manual
+  const [expandedTurnoId, setExpandedTurnoId] = useState<string | null>(null)
 
   // 3. Estados para Modales de Edición/Corrección
   const [editingProduct, setEditingProduct] = useState<Producto | null>(null)
@@ -133,13 +137,11 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   // --- FETCH DATA PRINCIPAL ---
   const fetchData = useCallback(async () => {
     // --- A. Inventario y Stock ---
-    // Obtenemos productos incluyendo el nuevo campo "costo" (viene en *)
     const { data: dataProductos } = await supabase
       .from('productos')
       .select('*')
       .order('nombre', { ascending: true })
     
-    // Calculamos stock disponible para cada producto
     const productosCalculados = await Promise.all((dataProductos || []).map(async (p) => {
         const { count } = await supabase
           .from('stock')
@@ -150,7 +152,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     }))
     setProductos(productosCalculados as Producto[])
 
-    // Calculamos métricas de riesgo
     const { data: dataStock } = await supabase
       .from('stock')
       .select('*, productos(nombre, precio_venta, emoji)')
@@ -164,26 +165,23 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       .select('id, fecha_venta, metodo_pago, productos(nombre, precio_venta, emoji)') 
       .eq('estado', 'vendido')
       
-    let queryLimit = 50;
     if (dateRange?.from) {
-        queryLimit = 10000; 
-        ventasQuery = ventasQuery.gte('fecha_venta', format(dateRange.from, 'yyyy-MM-dd'))
+        const fStart = format(startOfDay(dateRange.from), 'yyyy-MM-dd HH:mm:ss')
+        ventasQuery = ventasQuery.gte('fecha_venta', fStart)
     }
     if (dateRange?.to) {
-        const endOfDay = format(dateRange.to, 'yyyy-MM-dd 23:59:59')
-        ventasQuery = ventasQuery.lte('fecha_venta', endOfDay)
+        const fEnd = format(endOfDay(dateRange.to), 'yyyy-MM-dd HH:mm:ss')
+        ventasQuery = ventasQuery.lte('fecha_venta', fEnd)
     }
 
     const { data: dataVentas } = await ventasQuery
       .order('fecha_venta', { ascending: false })
-      .limit(queryLimit)
       .returns<VentaJoin[]>()
 
     if (dataVentas) {
       setVentasRecientes(dataVentas)
       calcularMetricasVentas(dataVentas)
       
-      // Top 5 Productos
       const conteoProductos: Record<string, number> = {}
       dataVentas.forEach(v => {
           const nombre = v.productos?.nombre || "Varios"
@@ -204,7 +202,12 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         .order('fecha_apertura', { ascending: false })
 
     if (dateRange?.from) {
-        cajasQuery = cajasQuery.gte('fecha_apertura', format(dateRange.from, 'yyyy-MM-dd'))
+        const fStart = format(startOfDay(dateRange.from), 'yyyy-MM-dd HH:mm:ss')
+        cajasQuery = cajasQuery.gte('fecha_apertura', fStart)
+    }
+    if (dateRange?.to) {
+        const fEnd = format(endOfDay(dateRange.to), 'yyyy-MM-dd HH:mm:ss')
+        cajasQuery = cajasQuery.lte('fecha_apertura', fEnd)
     }
     
     const { data: dataCajas, error: errorCajas } = await cajasQuery.returns<TurnoAudit[]>()
@@ -223,9 +226,8 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     fetchData().finally(() => setLoading(false))
   }, [fetchData])
 
-  // --- HANDLERS DE EDICIÓN / CORRECCIÓN ---
+  // --- HANDLERS ---
 
-  // 1. Guardar Edición de Producto (Ahora incluye COSTO)
   const handleSaveProduct = async () => {
       if (!editingProduct) return
       setActionLoading(true)
@@ -234,7 +236,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
               nombre: editingProduct.nombre,
               categoria: editingProduct.categoria,
               precio_venta: editingProduct.precio_venta,
-              costo: editingProduct.costo || 0, // NUEVO
+              costo: editingProduct.costo || 0, 
               emoji: editingProduct.emoji
           }).eq('id', editingProduct.id)
 
@@ -249,7 +251,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       }
   }
 
-  // 2. Eliminar Producto (Catálogo)
   const handleDeleteProduct = async (id: string) => {
       if (!confirm("¿Estás seguro de borrar este producto? Si tiene ventas históricas podría fallar.")) return
       try {
@@ -262,7 +263,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       }
   }
 
-  // 3. Cargar Lotes de Stock (Para corregir)
   const loadStockBatches = async (productId: string) => {
       setManagingStockId(productId)
       const { data } = await supabase
@@ -274,7 +274,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       setStockBatchList(data || [])
   }
 
-  // 4. Borrar un lote de Stock específico (Corrección)
   const handleDeleteStockItem = async (stockId: string) => {
       try {
           const { error } = await supabase.from('stock').delete().eq('id', stockId)
@@ -287,16 +286,17 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       }
   }
 
-  // --- Lógica de Métricas (Helpers) ---
+  // --- Lógica de Métricas ---
   const calcularMetricasVentas = (ventas: VentaJoin[]) => { 
     let total = 0
     const breakdown: PaymentBreakdown = { efectivo: 0, tarjeta: 0, transferencia: 0, otro: 0, billetera_virtual: 0 } 
     ventas.forEach(item => {
         const precio = parseFloat(item.productos?.precio_venta?.toString() ?? '0')
-        const metodo = (item.metodo_pago || 'efectivo') as keyof PaymentBreakdown
+        let metodo = (item.metodo_pago || 'efectivo') as keyof PaymentBreakdown
+        if (!breakdown.hasOwnProperty(metodo)) metodo = 'otro'
+        
         total += precio
-        if (breakdown.hasOwnProperty(metodo)) breakdown[metodo] += precio
-        else breakdown.otro += precio 
+        breakdown[metodo] += precio 
     })
     setTotalVendido(total)
     setPaymentBreakdown(breakdown)
@@ -366,7 +366,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     item.nombre.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  // Helper para margen
   const getMargenInfo = (precio: number, costo: number) => {
       if (!costo || costo === 0) return { margen: 100, ganancia: precio, color: 'text-gray-400' }
       const ganancia = precio - costo
@@ -436,7 +435,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             </div>
         )}
 
-        {/* PESTAÑA: SUPERVISIÓN */}
+        {/* PESTAÑA: SUPERVISIÓN (CON ACORDEÓN) */}
         {activeTab === "supervision" && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
                 <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
@@ -446,79 +445,92 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                 {turnosAudit.length === 0 ? (
                     <Card className="p-8 text-center text-muted-foreground bg-muted/20 border-dashed">
                         <Eye className="h-10 w-10 mx-auto mb-2 opacity-50" />
-                        <p>No hay turnos registrados en estas fechas.</p>
-                        <p className="text-xs mt-2 text-muted-foreground">Si hay una caja abierta, debería aparecer aquí.</p>
+                        <p>No hay turnos registrados en este rango de fechas.</p>
                     </Card>
                 ) : (
-                    turnosAudit.map((turno) => {
-                        const diferencia = (turno.monto_final || 0) - turno.monto_inicial
-                        const isOpen = !turno.fecha_cierre
-                        const isLoss = diferencia < -100 
-                        const isGain = diferencia > 100 
-                        const totalGastos = turno.movimientos_caja?.filter(m => m.tipo === 'egreso').reduce((acc, curr) => acc + curr.monto, 0) || 0
+                    <div className="space-y-3">
+                        {turnosAudit.map((turno) => {
+                            const diferencia = (turno.monto_final || 0) - turno.monto_inicial
+                            const isOpen = !turno.fecha_cierre
+                            const isExpanded = expandedTurnoId === turno.id
+                            const colorClass = isOpen ? "border-blue-200 bg-blue-50/50" : diferencia < -100 ? "border-red-200" : "border-emerald-200"
 
-                        return (
-                            <Card key={turno.id} className="overflow-hidden border-2 shadow-sm">
-                                <div className={cn( "p-3 flex justify-between items-center text-sm font-medium border-b", isOpen ? "bg-blue-50 text-blue-700" : "bg-gray-50 text-gray-700" )}>
-                                    <div className="flex items-center gap-2">
-                                        <User className="h-4 w-4" />
-                                        <span className="font-bold">{turno.perfiles?.nombre || "Empleado Desconocido"}</span>
-                                    </div>
-                                    <span>{format(parseISO(turno.fecha_apertura), 'dd/MM HH:mm')}</span>
-                                </div>
-
-                                {isOpen && (
-                                    <div className="p-2 bg-blue-50/50 flex justify-end border-b border-blue-100">
-                                        <AsignarMision 
-                                            turnoId={turno.id}
-                                            empleadoId={turno.empleado_id}
-                                            empleadoNombre={turno.perfiles?.nombre || "Empleado"}
-                                            onMisionCreated={fetchData} 
-                                        />
-                                    </div>
-                                )}
-
-                                <div className="p-4 grid grid-cols-2 gap-4">
-                                    <div className="space-y-1">
-                                        <p className="text-xs text-muted-foreground uppercase font-bold">Caja Efectivo</p>
-                                        <div className="text-sm">
-                                            <div className="flex justify-between"><span>Inicio:</span> <span>{formatMoney(turno.monto_inicial)}</span></div>
-                                            {turno.monto_final !== null ? (
-                                                <div className="flex justify-between font-bold"><span>Fin:</span> <span>{formatMoney(turno.monto_final)}</span></div>
+                            return (
+                                <div key={turno.id} className={cn("border-2 rounded-lg overflow-hidden transition-all duration-300", colorClass)}>
+                                    {/* Cabecera del Turno (Clickable) */}
+                                    <div 
+                                        className="p-3 flex justify-between items-center cursor-pointer bg-white/50"
+                                        onClick={() => setExpandedTurnoId(isExpanded ? null : turno.id)}
+                                    >
+                                        <div className="flex flex-col">
+                                            <div className="flex items-center gap-2">
+                                                <User className="h-4 w-4 text-muted-foreground" />
+                                                <span className="font-bold text-sm">{turno.perfiles?.nombre || "Empleado"}</span>
+                                            </div>
+                                            <span className="text-xs text-muted-foreground">{format(parseISO(turno.fecha_apertura), 'dd/MM HH:mm')}</span>
+                                        </div>
+                                        
+                                        <div className="flex items-center gap-3">
+                                            {isOpen ? (
+                                                <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-1 rounded-full animate-pulse">
+                                                    EN CURSO
+                                                </span>
                                             ) : (
-                                                <div className="text-blue-600 font-bold italic text-xs mt-1">🔴 Turno en curso</div>
+                                                <div className={cn("text-right", diferencia < -100 ? "text-red-600" : "text-emerald-600")}>
+                                                    <span className="block text-xs font-bold uppercase">Dif.</span>
+                                                    <span className="font-mono font-bold text-sm">{diferencia > 0 ? "+" : ""}{formatMoney(diferencia)}</span>
+                                                </div>
                                             )}
+                                            {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground"/> : <ChevronDown className="h-4 w-4 text-muted-foreground"/>}
                                         </div>
                                     </div>
-                                    {!isOpen && (
-                                        <div className={cn("rounded-lg p-2 text-center flex flex-col justify-center border",
-                                            isLoss ? "bg-red-50 border-red-200 text-red-700" :
-                                            isGain ? "bg-orange-50 border-orange-200 text-orange-700" :
-                                            "bg-emerald-50 border-emerald-200 text-emerald-700"
-                                        )}>
-                                            <span className="text-xs font-bold uppercase">Diferencia</span>
-                                            <span className="text-xl font-black">{diferencia > 0 ? "+" : ""}{formatMoney(diferencia)}</span>
-                                            {isLoss && <span className="text-[10px] font-bold">⚠️ FALTANTE</span>}
+
+                                    {/* Contenido Expandible */}
+                                    {isExpanded && (
+                                        <div className="border-t p-3 bg-white animate-in slide-in-from-top-2">
+                                            <div className="grid grid-cols-2 gap-4 text-sm mb-3">
+                                                <div className="bg-slate-50 p-2 rounded">
+                                                    <span className="text-xs text-muted-foreground block">Apertura</span>
+                                                    <span className="font-bold">{formatMoney(turno.monto_inicial)}</span>
+                                                </div>
+                                                <div className="bg-slate-50 p-2 rounded">
+                                                    <span className="text-xs text-muted-foreground block">Cierre (Decl.)</span>
+                                                    <span className="font-bold">{turno.monto_final ? formatMoney(turno.monto_final) : '---'}</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Gastos */}
+                                            {turno.movimientos_caja?.length > 0 ? (
+                                                <div className="mb-3">
+                                                    <p className="text-xs font-bold text-red-600 mb-1 flex items-center gap-1"><TrendingDown className="h-3 w-3"/> Gastos del Turno</p>
+                                                    {turno.movimientos_caja.map(m => (
+                                                        <div key={m.id} className="flex justify-between text-xs py-1 border-b border-dashed border-gray-100 last:border-0">
+                                                            <span className="text-gray-600">{m.descripcion}</span>
+                                                            <span className="font-mono text-red-500">-{formatMoney(m.monto)}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="text-xs text-muted-foreground italic mb-3">Sin gastos registrados.</p>
+                                            )}
+
+                                            {/* Acciones para turno abierto */}
+                                            {isOpen && (
+                                                <div className="mt-2 pt-2 border-t flex justify-end">
+                                                    <AsignarMision 
+                                                        turnoId={turno.id}
+                                                        empleadoId={turno.empleado_id}
+                                                        empleadoNombre={turno.perfiles?.nombre || "Empleado"}
+                                                        onMisionCreated={fetchData} 
+                                                    />
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
-                                {/* MOVIMIENTOS & MISIONES */}
-                                {turno.movimientos_caja && turno.movimientos_caja.length > 0 && (
-                                    <div className="bg-red-50/50 p-3 border-t border-red-100">
-                                        <div className="flex justify-between items-center mb-2">
-                                            <p className="text-xs font-bold text-red-700 uppercase flex items-center gap-1"><TrendingDown className="h-3 w-3" /> Salidas: -{formatMoney(totalGastos)}</p>
-                                        </div>
-                                        {turno.movimientos_caja.map(mov => (
-                                            <div key={mov.id} className="flex justify-between text-xs text-red-600/80">
-                                                <span>{format(parseISO(mov.created_at), 'HH:mm')} - {mov.descripcion}</span>
-                                                <span className="font-mono font-medium">-{formatMoney(mov.monto)}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </Card>
-                        )
-                    })
+                            )
+                        })}
+                    </div>
                 )}
             </div>
         )}
@@ -527,9 +539,8 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         {activeTab === "sales" && (
             <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4">
                 <Card className="p-6 bg-emerald-600 text-white shadow-lg border-0 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-4 opacity-10"><DollarSign className="h-32 w-32" /></div>
                     <div className="relative z-10">
-                        <p className="text-emerald-100 font-medium text-sm mb-1">Facturación Total</p>
+                        <p className="text-emerald-100 font-medium text-sm mb-1">Facturación Total (Filtrada)</p>
                         <h2 className="text-4xl font-black tracking-tight">{formatMoney(totalVendido)}</h2>
                     </div>
                     <div className="mt-4 pt-4 border-t border-white/20 text-sm text-emerald-50 relative z-10">
@@ -537,6 +548,33 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                     </div>
                 </Card>
 
+                {/* DESGLOSE DE MEDIOS DE PAGO (SOLUCIONADO EL ERROR DE ESTILO) */}
+                <Card className="p-5 border-2 shadow-sm">
+                    <h3 className="text-sm font-bold text-muted-foreground mb-4 flex items-center gap-2">
+                        <Wallet className="h-4 w-4" /> Desglose por Método
+                    </h3>
+                    <div className="space-y-3">
+                        {Object.entries(paymentBreakdown).map(([key, amount]) => {
+                            if (amount === 0) return null
+                            const Icon = PAYMENT_ICONS[key as keyof typeof PAYMENT_ICONS] || Wallet
+                            const percentage = totalVendido > 0 ? (amount / totalVendido) * 100 : 0
+                            return (
+                                <div key={key}>
+                                    <div className="flex justify-between text-sm mb-1">
+                                        <div className="flex items-center gap-2">
+                                            <Icon className="h-3 w-3 text-muted-foreground" />
+                                            <span className="capitalize font-medium text-gray-700">{key.replace('_', ' ')}</span>
+                                        </div>
+                                        <span className="font-mono font-semibold">{formatMoney(amount)}</span>
+                                    </div>
+                                    <Progress value={percentage} className="h-2" />
+                                </div>
+                            )
+                        })}
+                    </div>
+                </Card>
+
+                {/* Gráfico */}
                 {chartData.length > 0 && (
                     <Card className="p-5 border-2 border-muted/40 shadow-sm">
                         <h3 className="text-sm font-bold text-muted-foreground mb-4 flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Evolución Diaria</h3>
@@ -555,7 +593,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                 
                 {/* Ranking */}
                 <Card className="p-5 border-2 shadow-sm mt-4">
-                    <h3 className="text-sm font-bold text-muted-foreground mb-4 flex items-center gap-2"><Star className="h-4 w-4 text-yellow-500" /> Top 5 Más Vendidos</h3>
+                    <h3 className="text-sm font-bold text-muted-foreground mb-4 flex items-center gap-2"><Star className="h-4 w-4 text-yellow-500" /> Top Vendidos</h3>
                     <div className="space-y-3">
                         {topProductos.map((prod, idx) => (
                             <div key={idx} className="flex items-center justify-between">
@@ -578,7 +616,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
           </div>
         )}
 
-        {/* PESTAÑA: INVENTARIO (MEJORADA CON COSTOS) */}
+        {/* PESTAÑA: INVENTARIO */}
         {activeTab === "inventory" && (
           <>
             <div className="relative mb-4">
@@ -591,7 +629,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                     const margenInfo = getMargenInfo(item.precio_venta, item.costo)
                     return (
                         <Card key={item.id} className="p-4 flex flex-col gap-4 shadow-sm relative">
-                            {/* Botones de Gestión */}
                             <div className="absolute top-2 right-2 flex gap-1">
                                 <Button size="icon" variant="ghost" className="h-8 w-8 hover:text-blue-600" onClick={() => setEditingProduct(item)}>
                                     <Pencil className="h-4 w-4" />
@@ -608,7 +645,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                         <h3 className="font-bold text-foreground text-pretty leading-tight">{item.nombre}</h3>
                                         <div className="flex items-center gap-2 mt-1">
                                             <p className="text-xs text-muted-foreground">{item.categoria}</p>
-                                            {/* Indicador de Margen en la lista */}
                                             {item.costo > 0 && (
                                                 <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100", margenInfo.color)}>
                                                     {margenInfo.margen}% Mg.
@@ -691,7 +727,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
 
       <BottomNav active={activeTab === "catalog" ? "inventory" : activeTab as any} onChange={(val) => setActiveTab(val as any)} />
 
-      {/* --- MODAL: EDICIÓN DE PRODUCTO (CON COSTOS) --- */}
+      {/* --- MODAL: EDICIÓN DE PRODUCTO --- */}
       <Dialog open={!!editingProduct} onOpenChange={(open) => !open && setEditingProduct(null)}>
         <DialogContent>
             <DialogHeader>
@@ -699,7 +735,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             </DialogHeader>
             {editingProduct && (
                 <div className="space-y-4 py-2">
-                    {/* Fila 1: Icono y Nombre */}
                     <div className="grid grid-cols-4 gap-4">
                         <div className="col-span-1">
                             <Label>Icono</Label>
@@ -718,7 +753,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                         </div>
                     </div>
 
-                    {/* Fila 2: Precios y Rentabilidad */}
                     <div className="p-3 bg-blue-50 rounded-lg border border-blue-100 space-y-3">
                         <div className="grid grid-cols-2 gap-4">
                             <div>
@@ -731,7 +765,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                             </div>
                         </div>
                         
-                        {/* Margen en tiempo real */}
                         {editingProduct.precio_venta > 0 && (
                             <div className={cn("text-xs flex justify-between px-2 font-medium", 
                                 getMargenInfo(editingProduct.precio_venta, editingProduct.costo).color

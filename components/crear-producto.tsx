@@ -7,9 +7,13 @@ import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Loader2, Package, Save, Plus, DollarSign, TrendingUp } from "lucide-react"
+import { Loader2, Package, Save, Plus, DollarSign, TrendingUp, Smile } from "lucide-react"
 import { toast } from "sonner"
 import { addDays, format } from "date-fns"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+
+// Lista de emojis rápidos para el kiosco
+const QUICK_EMOJIS = ["🍫", "🍬", "🍭", "🍪", "🥤", "🧃", "🍺", "🧊", "🚬", "🔋", "🧼", "🧴", "🥖", "🥐", "🥪", "📦", "🍦", "🍎", "🍌", "⚡"]
 
 export default function CrearProducto({ onProductCreated }: { onProductCreated?: () => void }) {
   const [loading, setLoading] = useState(false)
@@ -19,7 +23,7 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
     nombre: "",
     categoria: "",
     precio_venta: "",
-    costo: "", // NUEVO: Costo unitario
+    costo: "", 
     vida_util_dias: "30",
     cantidad_inicial: "0",
     emoji: "📦"
@@ -48,7 +52,7 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
             nombre: formData.nombre,
             categoria: formData.categoria,
             precio_venta: parseFloat(formData.precio_venta),
-            costo: parseFloat(formData.costo) || 0, // Guardamos el costo
+            costo: parseFloat(formData.costo) || 0,
             vida_util_dias: parseInt(formData.vida_util_dias),
             emoji: formData.emoji
           }
@@ -119,7 +123,7 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
 
       <form onSubmit={handleSubmit} className="space-y-4">
         
-        {/* Nombre y Emoji */}
+        {/* Nombre y Emoji Picker Mejorado */}
         <div className="flex gap-3">
           <div className="flex-1 space-y-1.5">
             <label className="text-xs font-semibold text-muted-foreground uppercase">Nombre</label>
@@ -133,14 +137,38 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
             />
           </div>
           <div className="w-20 space-y-1.5">
-            <label className="text-xs font-semibold text-muted-foreground uppercase">Emoji</label>
-            <Input 
-              name="emoji" 
-              placeholder="🍫" 
-              className="text-center text-xl"
-              value={formData.emoji} 
-              onChange={handleChange} 
-            />
+            <label className="text-xs font-semibold text-muted-foreground uppercase flex items-center gap-1"><Smile className="h-3 w-3"/> Icono</label>
+            <Popover>
+                <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full text-2xl h-10 px-0 shadow-none border-dashed" type="button">
+                        {formData.emoji}
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-3" align="end">
+                    <p className="text-xs font-bold text-muted-foreground mb-2">Selección Rápida</p>
+                    <div className="grid grid-cols-5 gap-2">
+                        {QUICK_EMOJIS.map(em => (
+                            <button 
+                                key={em} 
+                                type="button"
+                                onClick={() => setFormData({...formData, emoji: em})}
+                                className="text-2xl hover:bg-slate-100 p-1 rounded transition-colors"
+                            >
+                                {em}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="mt-3 border-t pt-2">
+                        <label className="text-[10px] text-muted-foreground uppercase font-bold">Manual</label>
+                        <Input 
+                            placeholder="Escribe emoji..." 
+                            className="h-8 text-sm mt-1"
+                            value={formData.emoji}
+                            onChange={(e) => setFormData({...formData, emoji: e.target.value})}
+                        />
+                    </div>
+                </PopoverContent>
+            </Popover>
           </div>
         </div>
 

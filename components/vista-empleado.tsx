@@ -1,12 +1,10 @@
-// components/vista-empleado.tsx
-
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card" 
-import { LogOut, Loader2, ShoppingCart, Target, TrendingUp, AlertTriangle, Star, Trophy } from "lucide-react" 
+import { LogOut, Loader2, ShoppingCart, Target, TrendingUp, Star, Trophy, AlertTriangle } from "lucide-react" 
 import { toast } from "sonner"
 import CajaVentas from "@/components/caja-ventas" 
 import ArqueoCaja, { CajaDiaria } from "@/components/arqueo-caja" 
@@ -107,13 +105,9 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
     // --- Lógica de Nivel (AJUSTADA A 3000 XP) ---
     const XP_PER_LEVEL = 3000
     const currentXP = userProfile?.xp || 0
-    
-    // Nivel 1 = 0-2999, Nivel 2 = 3000-5999, etc.
     const level = Math.floor(currentXP / XP_PER_LEVEL) + 1
     const nextLevelXP = level * XP_PER_LEVEL
     const prevLevelXP = (level - 1) * XP_PER_LEVEL
-    
-    // Porcentaje de progreso dentro del nivel actual
     const progressPercent = Math.min(((currentXP - prevLevelXP) / XP_PER_LEVEL) * 100, 100)
 
     // --- Renderizado ---
@@ -165,11 +159,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                         </span>
                     </div>
                     
-                    {/* SOLUCIÓN A "CSS Inline Styles":
-                        Usamos el componente Progress y le pasamos clases de Tailwind 
-                        para colorear el hijo interno ([&>div]) con el gradiente amarillo.
-                        Esto evita usar style={{ width: ... }} directamente aquí.
-                    */}
                     <Progress 
                         value={progressPercent} 
                         className="h-3 bg-black/20 border border-white/10 [&>div]:bg-gradient-to-r [&>div]:from-yellow-300 [&>div]:to-yellow-500 [&>div]:shadow-[0_0_10px_rgba(234,179,8,0.5)]"
@@ -197,7 +186,7 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
 
             <div className="p-4 space-y-4">
                 
-                {/* Si NO hay turno activo, solo mostramos el componente de Arqueo */}
+                {/* 1. Si NO hay turno activo, solo mostramos APERTURA */}
                 {!turnoActivo && (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <ArqueoCaja 
@@ -208,10 +197,9 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                     </div>
                 )}
                 
-                {/* Si hay turno activo, mostramos el router de pestañas */}
+                {/* 2. Si hay turno activo, mostramos el contenido operativo */}
                 {turnoActivo && (
                     <>
-                        {/* Router de Pestañas */}
                         <div className="flex gap-2 mt-2 overflow-x-auto pb-2 border-b scrollbar-hide">
                             <Button 
                                 onClick={() => setActiveTab("caja")} 
@@ -239,40 +227,36 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                             </Button>
                         </div>
                         
-                        {/* Contenido */}
-                        <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 pb-12">
                             {activeTab === "caja" && (
-                                <>
-                                    <div className="grid gap-4">
-                                        {/* Arqueo / Cierre */}
+                                <div className="flex flex-col gap-6">
+                                    {/* A. Botón de Gastos Arriba */}
+                                    <RegistrarGasto 
+                                        turnoId={turnoActivo.id} 
+                                        empleadoId={turnoActivo.empleado_id} 
+                                    />
+
+                                    {/* B. Caja de Ventas (Carrito) */}
+                                    <CajaVentas turnoId={turnoActivo.id} />
+
+                                    {/* C. Arqueo / Cierre ABAJO DE TODO */}
+                                    <div className="pt-6 border-t border-dashed border-gray-300 mt-4">
+                                        <p className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-4">Fin de Jornada</p>
                                         <ArqueoCaja 
                                             onCajaAbierta={handleCajaAbierta}
                                             onCajaCerrada={handleCajaCerrada}
                                             turnoActivo={turnoActivo}
                                         />
-                                        
-                                        {/* SOLUCIÓN AL BOTÓN INVISIBLE:
-                                            Antes dependíamos de que "userProfile" cargara. 
-                                            Ahora usamos "turnoActivo.empleado_id" que es seguro que existe si hay turno.
-                                        */}
-                                        {turnoActivo && (
-                                            <RegistrarGasto 
-                                                turnoId={turnoActivo.id} 
-                                                empleadoId={turnoActivo.empleado_id} 
-                                            />
-                                        )}
-
-                                        {/* Caja de Ventas */}
-                                        <CajaVentas turnoId={turnoActivo.id} />
                                     </div>
-                                </>
+                                </div>
                             )}
                             
                             {activeTab === "misiones" && (
                                 <MisionesEmpleado 
                                     turnoId={turnoActivo.id}
+                                    empleadoId={turnoActivo.empleado_id} // Nuevo Prop para XP
                                     onMisionesUpdated={handleMisionesUpdated}
-                                    key={turnoActivo.id + refreshKey} // Forzar re-renderizado
+                                    key={turnoActivo.id + refreshKey}
                                 />
                             )}
                             
@@ -283,7 +267,7 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                                     </div>
                                     <h3 className="font-bold text-foreground text-lg">Próximamente</h3>
                                     <p className="max-w-xs mx-auto mt-2 text-sm">
-                                        Aquí podrás gestionar el stock por vencer de manera detallada sin depender de las misiones.
+                                        Gestión detallada de stock por vencer.
                                     </p>
                                 </Card>
                             )}

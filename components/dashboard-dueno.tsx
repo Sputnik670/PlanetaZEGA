@@ -13,7 +13,7 @@ import {
   Loader2, ShieldCheck, DollarSign, CreditCard, 
   Repeat2, Wallet, Calendar as CalendarIcon, BarChart3, 
   Eye, TrendingDown, Star, User, ShoppingBag, Clock, 
-  Pencil, Trash2, History, Save, ChevronDown, ChevronUp 
+  Pencil, Trash2, History, Save, ChevronDown, ChevronUp, Calculator
 } from "lucide-react" 
 import { BottomNav } from "@/components/bottom-nav"
 import { BarChart, Bar, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts" 
@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
 import { DateRange } from "react-day-picker"
-import { format, subDays, startOfDay, endOfDay, parseISO } from "date-fns" 
+import { format, subDays, startOfDay, endOfDay, parseISO, isWithinInterval } from "date-fns" 
 import { es } from "date-fns/locale" 
 import AsignarMision from "@/components/asignar-mision" 
 import { toast } from "sonner" 
@@ -148,7 +148,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   const [showPriceHistoryModal, setShowPriceHistoryModal] = useState(false);
   const [historyData, setHistoryData] = useState<HistorialPrecio[]>([]);
 
-  // --- HELPERS (Definidos antes de fetchData para evitar errores) ---
+  // --- HELPERS ---
   
   const calcularMetricasVentas = (ventas: VentaJoin[]) => { 
     let total = 0
@@ -241,7 +241,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     fetchData().finally(() => setLoading(false))
   }, [fetchData])
 
-  // --- MEMOS (Chart Data y Alertas) ---
+  // --- MEMOS ---
   const chartData = useMemo(() => {
     const agrupado: { [key: string]: number } = {}
     const ventasCronologicas = [...ventasRecientes].reverse()
@@ -393,7 +393,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             </div>
         )}
 
-        {/* --- SUPERVISIÓN --- */}
+        {/* --- SUPERVISIÓN (MEJORADO CON AUDITORÍA DETALLADA) --- */}
         {activeTab === "supervision" && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
                 <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
@@ -407,10 +407,32 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                 ) : (
                     <div className="space-y-3">
                         {turnosAudit.map((turno) => {
-                            const diferencia = (turno.monto_final || 0) - turno.monto_inicial
+                            // 1. Filtrar ventas de este turno específico (por fecha)
+                            // IMPORTANTE: Esto asume que ventasRecientes tiene TODO lo necesario.
+                            // Si hay paginación, solo audita lo cargado.
+                            const ventasTurno = ventasRecientes.filter(v => {
+                                const fechaVenta = parseISO(v.fecha_venta)
+                                const apertura = parseISO(turno.fecha_apertura)
+                                const cierre = turno.fecha_cierre ? parseISO(turno.fecha_cierre) : new Date()
+                                return fechaVenta >= apertura && fechaVenta <= cierre
+                            })
+
+                            // 2. Calcular desglose
+                            const facturacionTotal = ventasTurno.reduce((acc, curr) => acc + (curr.productos?.precio_venta || 0), 0)
+                            const facturacionEfectivo = ventasTurno.filter(v => v.metodo_pago === 'efectivo' || !v.metodo_pago).reduce((acc, curr) => acc + (curr.productos?.precio_venta || 0), 0)
+                            const facturacionDigital = facturacionTotal - facturacionEfectivo
+                            
+                            const totalGastos = turno.movimientos_caja?.filter(m => m.tipo === 'egreso').reduce((acc, curr) => acc + curr.monto, 0) || 0
+                            
+                            // 3. Calcular Diferencia Real (Solo sobre efectivo)
+                            // Esperado = Inicio + Ventas(Efectivo) - Gastos(Efectivo)
+                            // Nota: Asumimos que los gastos salen de caja chica (efectivo)
+                            const cajaEsperada = turno.monto_inicial + facturacionEfectivo - totalGastos
+                            const diferenciaReal = (turno.monto_final || 0) - cajaEsperada
+
                             const isOpen = !turno.fecha_cierre
                             const isExpanded = expandedTurnoId === turno.id
-                            const colorClass = isOpen ? "border-blue-200 bg-blue-50/50" : diferencia < -100 ? "border-red-200" : "border-emerald-200"
+                            const colorClass = isOpen ? "border-blue-200 bg-blue-50/50" : Math.abs(diferenciaReal) > 100 ? "border-red-200 bg-red-50/30" : "border-emerald-200 bg-emerald-50/30"
 
                             return (
                                 <div key={turno.id} className={cn("border-2 rounded-lg overflow-hidden transition-all duration-300", colorClass)}>
@@ -429,29 +451,66 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                             {isOpen ? (
                                                 <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-1 rounded-full animate-pulse">EN CURSO</span>
                                             ) : (
-                                                <div className={cn("text-right", diferencia < -100 ? "text-red-600" : "text-emerald-600")}>
-                                                    <span className="block text-xs font-bold uppercase">Dif.</span>
-                                                    <span className="font-mono font-bold text-sm">{diferencia > 0 ? "+" : ""}{formatMoney(diferencia)}</span>
+                                                <div className="text-right">
+                                                    <span className="block text-[10px] text-muted-foreground uppercase font-bold">Total Venta</span>
+                                                    <span className="font-bold text-sm text-primary">{formatMoney(facturacionTotal)}</span>
                                                 </div>
                                             )}
                                             {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground"/> : <ChevronDown className="h-4 w-4 text-muted-foreground"/>}
                                         </div>
                                     </div>
                                     {isExpanded && (
-                                        <div className="border-t p-3 bg-white animate-in slide-in-from-top-2">
-                                            <div className="grid grid-cols-2 gap-4 text-sm mb-3">
-                                                <div className="bg-slate-50 p-2 rounded">
-                                                    <span className="text-xs text-muted-foreground block">Apertura</span>
-                                                    <span className="font-bold">{formatMoney(turno.monto_inicial)}</span>
+                                        <div className="border-t p-3 bg-white animate-in slide-in-from-top-2 space-y-3">
+                                            
+                                            {/* SECCIÓN 1: DETALLE DE CAJA */}
+                                            <div className="grid grid-cols-2 gap-3 text-sm">
+                                                <div className="p-2 bg-slate-50 rounded border border-slate-100">
+                                                    <span className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Apertura</span>
+                                                    <span className="font-mono font-bold text-lg">{formatMoney(turno.monto_inicial)}</span>
                                                 </div>
-                                                <div className="bg-slate-50 p-2 rounded">
-                                                    <span className="text-xs text-muted-foreground block">Cierre (Decl.)</span>
-                                                    <span className="font-bold">{turno.monto_final ? formatMoney(turno.monto_final) : '---'}</span>
+                                                <div className="p-2 bg-slate-50 rounded border border-slate-100">
+                                                    <span className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Cierre (Decl.)</span>
+                                                    <span className="font-mono font-bold text-lg">{turno.monto_final ? formatMoney(turno.monto_final) : '---'}</span>
                                                 </div>
                                             </div>
-                                            {turno.movimientos_caja?.length > 0 ? (
-                                                <div className="mb-3">
-                                                    <p className="text-xs font-bold text-red-600 mb-1 flex items-center gap-1"><TrendingDown className="h-3 w-3"/> Gastos del Turno</p>
+
+                                            {/* SECCIÓN 2: FACTURACIÓN DEL TURNO */}
+                                            <div className="p-3 bg-blue-50/50 rounded border border-blue-100">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <span className="text-xs font-bold text-blue-800 flex items-center gap-1"><Calculator className="h-3 w-3"/> Facturación Turno</span>
+                                                    <span className="text-sm font-black text-blue-900">{formatMoney(facturacionTotal)}</span>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <div className="flex justify-between text-xs">
+                                                        <span className="text-muted-foreground flex items-center gap-1"><DollarSign className="h-3 w-3"/> Efectivo</span>
+                                                        <span className="font-mono">{formatMoney(facturacionEfectivo)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between text-xs">
+                                                        <span className="text-muted-foreground flex items-center gap-1"><CreditCard className="h-3 w-3"/> Digital (MP/Transf)</span>
+                                                        <span className="font-mono">{formatMoney(facturacionDigital)}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* SECCIÓN 3: RESULTADO (DIFERENCIA) */}
+                                            {!isOpen && (
+                                                <div className={cn("p-2 rounded border flex justify-between items-center", Math.abs(diferenciaReal) > 100 ? "bg-red-50 border-red-200" : "bg-emerald-50 border-emerald-200")}>
+                                                    <div>
+                                                        <span className={cn("text-xs font-bold uppercase block", Math.abs(diferenciaReal) > 100 ? "text-red-700" : "text-emerald-700")}>
+                                                            Diferencia Caja
+                                                        </span>
+                                                        <span className="text-[10px] text-muted-foreground">Esperado: {formatMoney(cajaEsperada)}</span>
+                                                    </div>
+                                                    <span className={cn("text-xl font-black font-mono", diferenciaReal < 0 ? "text-red-600" : "text-emerald-600")}>
+                                                        {diferenciaReal > 0 ? "+" : ""}{formatMoney(diferenciaReal)}
+                                                    </span>
+                                                </div>
+                                            )}
+
+                                            {/* SECCIÓN 4: GASTOS */}
+                                            {turno.movimientos_caja?.length > 0 && (
+                                                <div className="pt-2 border-t border-dashed">
+                                                    <p className="text-xs font-bold text-red-600 mb-1 flex items-center gap-1"><TrendingDown className="h-3 w-3"/> Gastos Registrados</p>
                                                     {turno.movimientos_caja.map(m => (
                                                         <div key={m.id} className="flex justify-between text-xs py-1 border-b border-dashed border-gray-100 last:border-0">
                                                             <span className="text-gray-600">{m.descripcion}</span>
@@ -459,7 +518,8 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                                         </div>
                                                     ))}
                                                 </div>
-                                            ) : <p className="text-xs text-muted-foreground italic mb-3">Sin gastos registrados.</p>}
+                                            )}
+
                                             {isOpen && (
                                                 <div className="mt-2 pt-2 border-t flex justify-end">
                                                     <AsignarMision turnoId={turno.id} empleadoId={turno.empleado_id} empleadoNombre={turno.perfiles?.nombre || "Empleado"} onMisionCreated={fetchData} />
@@ -475,8 +535,8 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             </div>
         )}
 
-        {/* --- SALES --- */}
-        {activeTab === "sales" && (
+        {/* --- SALES (Se mantiene igual) --- */}
+        {activeTab === "sales" && (/* ... Se mantiene igual ... */
             <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4">
                 <Card className="p-6 bg-emerald-600 text-white shadow-lg border-0 relative overflow-hidden">
                     <div className="relative z-10">
@@ -541,12 +601,12 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             </div>
         )}
 
-        {/* --- CATÁLOGO --- */}
+        {/* --- CATÁLOGO (Se mantiene igual) --- */}
         {activeTab === "catalog" && (
           <div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500"><CrearProducto onProductCreated={() => { setActiveTab("inventory"); fetchData(); }} /></div>
         )}
 
-        {/* --- INVENTARIO --- */}
+        {/* --- INVENTARIO (Se mantiene igual) --- */}
         {activeTab === "inventory" && (
           <>
             <div className="relative mb-4"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" /><Input type="text" placeholder="Buscar productos..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="h-12 pl-12 text-base" /></div>
@@ -667,7 +727,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                         </div>
                         {editingProduct.precio_venta > 0 && (<div className={cn("text-xs flex justify-between px-2 font-medium", getMargenInfo(editingProduct.precio_venta, editingProduct.costo).color)}><span>Margen: {getMargenInfo(editingProduct.precio_venta, editingProduct.costo).margen}%</span><span>Ganancia: ${getMargenInfo(editingProduct.precio_venta, editingProduct.costo).ganancia}</span></div>)}
                     </div>
-                    {/* Botón para ver historial */}
                     <div className="flex justify-start">
                          <Button variant="ghost" size="sm" onClick={() => loadPriceHistory(editingProduct.id)} className="text-xs text-primary/80 hover:bg-primary/10">
                             <Clock className="h-4 w-4 mr-1.5" /> Ver Historial de Precios

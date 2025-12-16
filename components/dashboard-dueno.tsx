@@ -45,6 +45,7 @@ interface Producto {
     nombre: string
     categoria: string
     precio_venta: number
+    costo: number // NUEVO: Costo unitario
     emoji: string
     stock_disponible?: number
 }
@@ -132,6 +133,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   // --- FETCH DATA PRINCIPAL ---
   const fetchData = useCallback(async () => {
     // --- A. Inventario y Stock ---
+    // Obtenemos productos incluyendo el nuevo campo "costo" (viene en *)
     const { data: dataProductos } = await supabase
       .from('productos')
       .select('*')
@@ -146,7 +148,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
           .eq('estado', 'pendiente')
         return { ...p, stock_disponible: count || 0 }
     }))
-    setProductos(productosCalculados)
+    setProductos(productosCalculados as Producto[])
 
     // Calculamos métricas de riesgo
     const { data: dataStock } = await supabase
@@ -223,7 +225,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
 
   // --- HANDLERS DE EDICIÓN / CORRECCIÓN ---
 
-  // 1. Guardar Edición de Producto
+  // 1. Guardar Edición de Producto (Ahora incluye COSTO)
   const handleSaveProduct = async () => {
       if (!editingProduct) return
       setActionLoading(true)
@@ -232,6 +234,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
               nombre: editingProduct.nombre,
               categoria: editingProduct.categoria,
               precio_venta: editingProduct.precio_venta,
+              costo: editingProduct.costo || 0, // NUEVO
               emoji: editingProduct.emoji
           }).eq('id', editingProduct.id)
 
@@ -266,7 +269,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         .from('stock')
         .select('*')
         .eq('producto_id', productId)
-        .eq('estado', 'pendiente') // Solo mostramos lo que se puede vender/borrar
+        .eq('estado', 'pendiente') 
         .order('created_at', { ascending: false })
       setStockBatchList(data || [])
   }
@@ -277,9 +280,8 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
           const { error } = await supabase.from('stock').delete().eq('id', stockId)
           if (error) throw error
           toast.success("Item de stock eliminado")
-          // Recargar lista local
           setStockBatchList(prev => prev.filter(i => i.id !== stockId))
-          fetchData() // Recargar contadores globales
+          fetchData() 
       } catch (error) {
           toast.error("Error eliminando stock")
       }
@@ -363,6 +365,18 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   const inventarioFiltrado = productos.filter((item) =>
     item.nombre.toLowerCase().includes(searchQuery.toLowerCase()),
   )
+
+  // Helper para margen
+  const getMargenInfo = (precio: number, costo: number) => {
+      if (!costo || costo === 0) return { margen: 100, ganancia: precio, color: 'text-gray-400' }
+      const ganancia = precio - costo
+      const margen = (ganancia / costo) * 100
+      return { 
+          margen: margen.toFixed(0), 
+          ganancia: ganancia.toFixed(0), 
+          color: margen < 30 ? 'text-red-600' : 'text-emerald-600' 
+      }
+  }
 
   return (
     <div className="min-h-screen bg-background pb-24">
@@ -564,7 +578,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
           </div>
         )}
 
-        {/* PESTAÑA: INVENTARIO (MEJORADA CON EDICIÓN) */}
+        {/* PESTAÑA: INVENTARIO (MEJORADA CON COSTOS) */}
         {activeTab === "inventory" && (
           <>
             <div className="relative mb-4">
@@ -573,42 +587,51 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             </div>
             {loading ? <div className="flex justify-center py-10"><Loader2 className="animate-spin h-8 w-8 text-primary"/></div> : (
               <div className="space-y-3">
-                {inventarioFiltrado.map((item) => (
-                  <Card key={item.id} className="p-4 flex flex-col gap-4 shadow-sm relative">
-                    {/* Botones de Gestión (Pencil / Trash) */}
-                    <div className="absolute top-2 right-2 flex gap-1">
-                        <Button size="icon" variant="ghost" className="h-8 w-8 hover:text-blue-600" onClick={() => setEditingProduct(item)}>
-                            <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-8 w-8 hover:text-red-600" onClick={() => handleDeleteProduct(item.id)}>
-                            <Trash2 className="h-4 w-4" />
-                        </Button>
-                    </div>
+                {inventarioFiltrado.map((item) => {
+                    const margenInfo = getMargenInfo(item.precio_venta, item.costo)
+                    return (
+                        <Card key={item.id} className="p-4 flex flex-col gap-4 shadow-sm relative">
+                            {/* Botones de Gestión */}
+                            <div className="absolute top-2 right-2 flex gap-1">
+                                <Button size="icon" variant="ghost" className="h-8 w-8 hover:text-blue-600" onClick={() => setEditingProduct(item)}>
+                                    <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button size="icon" variant="ghost" className="h-8 w-8 hover:text-red-600" onClick={() => handleDeleteProduct(item.id)}>
+                                    <Trash2 className="h-4 w-4" />
+                                </Button>
+                            </div>
 
-                    <div className="flex items-center justify-between pr-16">
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl">{item.emoji || '📦'}</span>
-                        <div>
-                          <h3 className="font-bold text-foreground text-pretty leading-tight">{item.nombre}</h3>
-                          <p className="text-xs text-muted-foreground mt-0.5">{item.categoria}</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-lg font-bold text-primary block">{formatMoney(item.precio_venta)}</span>
-                        
-                        {/* Botón para gestionar Stock (Corrección de errores) */}
-                        <button 
-                            onClick={() => loadStockBatches(item.id)}
-                            className="text-xs text-muted-foreground font-semibold mt-0.5 flex items-center gap-1 hover:text-orange-600 transition-colors"
-                        >
-                            Stock: <span className={(item.stock_disponible || 0) > 0 ? "text-emerald-600" : "text-destructive"}>{item.stock_disponible || 0} u.</span>
-                            <History className="h-3 w-3 ml-1" />
-                        </button>
-                      </div>
-                    </div>
-                    <AgregarStock producto={item} onStockAdded={fetchData} />
-                  </Card>
-                ))}
+                            <div className="flex items-center justify-between pr-16">
+                                <div className="flex items-center gap-3">
+                                    <span className="text-2xl">{item.emoji || '📦'}</span>
+                                    <div>
+                                        <h3 className="font-bold text-foreground text-pretty leading-tight">{item.nombre}</h3>
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <p className="text-xs text-muted-foreground">{item.categoria}</p>
+                                            {/* Indicador de Margen en la lista */}
+                                            {item.costo > 0 && (
+                                                <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100", margenInfo.color)}>
+                                                    {margenInfo.margen}% Mg.
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <span className="text-lg font-bold text-primary block">{formatMoney(item.precio_venta)}</span>
+                                    <button 
+                                        onClick={() => loadStockBatches(item.id)}
+                                        className="text-xs text-muted-foreground font-semibold mt-0.5 flex items-center gap-1 hover:text-orange-600 transition-colors"
+                                    >
+                                        Stock: <span className={(item.stock_disponible || 0) > 0 ? "text-emerald-600" : "text-destructive"}>{item.stock_disponible || 0} u.</span>
+                                        <History className="h-3 w-3 ml-1" />
+                                    </button>
+                                </div>
+                            </div>
+                            <AgregarStock producto={item} onStockAdded={fetchData} />
+                        </Card>
+                    )
+                })}
               </div>
             )}
           </>
@@ -668,7 +691,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
 
       <BottomNav active={activeTab === "catalog" ? "inventory" : activeTab as any} onChange={(val) => setActiveTab(val as any)} />
 
-      {/* --- MODAL: EDICIÓN DE PRODUCTO --- */}
+      {/* --- MODAL: EDICIÓN DE PRODUCTO (CON COSTOS) --- */}
       <Dialog open={!!editingProduct} onOpenChange={(open) => !open && setEditingProduct(null)}>
         <DialogContent>
             <DialogHeader>
@@ -676,6 +699,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             </DialogHeader>
             {editingProduct && (
                 <div className="space-y-4 py-2">
+                    {/* Fila 1: Icono y Nombre */}
                     <div className="grid grid-cols-4 gap-4">
                         <div className="col-span-1">
                             <Label>Icono</Label>
@@ -686,16 +710,38 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                             <Input value={editingProduct.nombre} onChange={(e) => setEditingProduct({...editingProduct, nombre: e.target.value})} />
                         </div>
                     </div>
+                    
                     <div className="grid grid-cols-2 gap-4">
-                        <div>
+                        <div className="col-span-2">
                             <Label>Categoría</Label>
                             <Input value={editingProduct.categoria} onChange={(e) => setEditingProduct({...editingProduct, categoria: e.target.value})} />
                         </div>
-                        <div>
-                            <Label>Precio Venta</Label>
-                            <Input type="number" value={editingProduct.precio_venta} onChange={(e) => setEditingProduct({...editingProduct, precio_venta: parseFloat(e.target.value)})} />
-                        </div>
                     </div>
+
+                    {/* Fila 2: Precios y Rentabilidad */}
+                    <div className="p-3 bg-blue-50 rounded-lg border border-blue-100 space-y-3">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <Label className="text-xs font-bold text-muted-foreground">Costo Compra</Label>
+                                <Input type="number" className="bg-white" value={editingProduct.costo} onChange={(e) => setEditingProduct({...editingProduct, costo: parseFloat(e.target.value)})} />
+                            </div>
+                            <div>
+                                <Label className="text-xs font-bold text-primary">Precio Venta</Label>
+                                <Input type="number" className="bg-white font-bold" value={editingProduct.precio_venta} onChange={(e) => setEditingProduct({...editingProduct, precio_venta: parseFloat(e.target.value)})} />
+                            </div>
+                        </div>
+                        
+                        {/* Margen en tiempo real */}
+                        {editingProduct.precio_venta > 0 && (
+                            <div className={cn("text-xs flex justify-between px-2 font-medium", 
+                                getMargenInfo(editingProduct.precio_venta, editingProduct.costo).color
+                            )}>
+                                <span>Margen: {getMargenInfo(editingProduct.precio_venta, editingProduct.costo).margen}%</span>
+                                <span>Ganancia: ${getMargenInfo(editingProduct.precio_venta, editingProduct.costo).ganancia}</span>
+                            </div>
+                        )}
+                    </div>
+
                     <DialogFooter>
                         <Button onClick={handleSaveProduct} disabled={actionLoading} className="w-full">
                             {actionLoading ? <Loader2 className="animate-spin" /> : <><Save className="mr-2 h-4 w-4" /> Guardar Cambios</>}
@@ -706,7 +752,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         </DialogContent>
       </Dialog>
 
-      {/* --- MODAL: GESTIÓN DE STOCK (Corrección de errores) --- */}
+      {/* --- MODAL: GESTIÓN DE STOCK --- */}
       <Dialog open={!!managingStockId} onOpenChange={(open) => !open && setManagingStockId(null)}>
         <DialogContent className="max-h-[80vh] flex flex-col">
             <DialogHeader>

@@ -1,3 +1,5 @@
+// components/crear-producto.tsx
+
 "use client"
 
 import { useState } from "react"
@@ -5,7 +7,7 @@ import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Loader2, Package, Save, Plus } from "lucide-react"
+import { Loader2, Package, Save, Plus, DollarSign, TrendingUp } from "lucide-react"
 import { toast } from "sonner"
 import { addDays, format } from "date-fns"
 
@@ -17,10 +19,17 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
     nombre: "",
     categoria: "",
     precio_venta: "",
+    costo: "", // NUEVO: Costo unitario
     vida_util_dias: "30",
-    cantidad_inicial: "0", // <--- NUEVO CAMPO
+    cantidad_inicial: "0",
     emoji: "📦"
   })
+
+  // Cálculo de Margen en vivo
+  const precioNum = parseFloat(formData.precio_venta) || 0
+  const costoNum = parseFloat(formData.costo) || 0
+  const ganancia = precioNum - costoNum
+  const margen = costoNum > 0 ? ((ganancia / costoNum) * 100).toFixed(1) : "0.0"
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value })
@@ -31,7 +40,7 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
     setLoading(true)
 
     try {
-      // 1. Insertamos el PRODUCTO en el catálogo y pedimos que nos devuelva el ID creado (.select().single())
+      // 1. Insertamos el PRODUCTO en el catálogo
       const { data: nuevoProducto, error: errorProd } = await supabase
         .from('productos')
         .insert([
@@ -39,6 +48,7 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
             nombre: formData.nombre,
             categoria: formData.categoria,
             precio_venta: parseFloat(formData.precio_venta),
+            costo: parseFloat(formData.costo) || 0, // Guardamos el costo
             vida_util_dias: parseInt(formData.vida_util_dias),
             emoji: formData.emoji
           }
@@ -52,11 +62,9 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
       const cantidad = parseInt(formData.cantidad_inicial) || 0
       
       if (cantidad > 0 && nuevoProducto) {
-        // Calculamos vencimiento automático: Hoy + Vida Útil
         const diasVida = parseInt(formData.vida_util_dias) || 30
         const fechaVencimientoAuto = format(addDays(new Date(), diasVida), 'yyyy-MM-dd')
 
-        // Creamos el array para inserción masiva
         const stockItems = Array.from({ length: cantidad }).map(() => ({
           producto_id: nuevoProducto.id,
           fecha_vencimiento: fechaVencimientoAuto,
@@ -81,6 +89,7 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
         nombre: "",
         categoria: "",
         precio_venta: "",
+        costo: "",
         vida_util_dias: "30",
         cantidad_inicial: "0",
         emoji: "📦"
@@ -147,32 +156,64 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
           />
         </div>
 
-        {/* Precio y Vida Útil */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-muted-foreground uppercase">Precio Venta ($)</label>
-            <Input 
-              name="precio_venta" 
-              type="number" 
-              placeholder="0.00" 
-              value={formData.precio_venta} 
-              onChange={handleChange} 
-              className="font-mono"
-              required 
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-muted-foreground uppercase">Vida Útil (Días)</label>
-            <Input 
-              name="vida_util_dias" 
-              type="number" 
-              value={formData.vida_util_dias} 
-              onChange={handleChange} 
-            />
-          </div>
+        {/* --- SECCIÓN DE PRECIOS Y COSTOS (Rentabilidad) --- */}
+        <div className="grid grid-cols-2 gap-3 p-3 bg-blue-50/50 rounded-lg border border-blue-100">
+            <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-1">
+                    Costo Compra <span className="text-[10px] font-normal">(Unitario)</span>
+                </label>
+                <div className="relative">
+                    <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                    <Input 
+                        name="costo" 
+                        type="number" 
+                        placeholder="0.00" 
+                        className="pl-6 bg-white h-9"
+                        value={formData.costo} 
+                        onChange={handleChange} 
+                    />
+                </div>
+            </div>
+            <div className="space-y-1.5">
+                <label className="text-xs font-bold text-primary uppercase">Precio Venta</label>
+                <div className="relative">
+                    <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-primary" />
+                    <Input 
+                        name="precio_venta" 
+                        type="number" 
+                        placeholder="0.00" 
+                        className="pl-6 border-primary/30 bg-white h-9 font-bold"
+                        value={formData.precio_venta} 
+                        onChange={handleChange} 
+                        required 
+                    />
+                </div>
+            </div>
+            
+            {/* Indicador de Margen en vivo */}
+            {(precioNum > 0 && costoNum > 0) && (
+                <div className={`col-span-2 text-xs flex justify-between items-center px-3 py-1.5 rounded border bg-white ${
+                    parseFloat(margen) < 30 ? "text-red-600 border-red-200" : "text-emerald-700 border-emerald-200"
+                }`}>
+                    <span className="font-bold flex items-center gap-1">
+                        <TrendingUp className="h-3 w-3" /> Margen: {margen}%
+                    </span>
+                    <span>Ganancia: <strong>${ganancia.toFixed(0)}</strong></span>
+                </div>
+            )}
         </div>
 
-        {/* SECCIÓN NUEVA: Stock Inicial */}
+        <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-muted-foreground uppercase">Vida Útil (Días)</label>
+            <Input 
+                name="vida_util_dias" 
+                type="number" 
+                value={formData.vida_util_dias} 
+                onChange={handleChange} 
+            />
+        </div>
+
+        {/* Stock Inicial */}
         <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 mt-2">
           <div className="flex items-center justify-between mb-2">
             <label className="text-sm font-bold text-slate-700 flex items-center gap-2">

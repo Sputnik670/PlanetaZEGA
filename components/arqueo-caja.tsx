@@ -1,3 +1,4 @@
+// components/arqueo-caja.tsx
 "use client"
 
 import { useState } from "react"
@@ -14,7 +15,7 @@ interface ArqueoCajaProps {
   onCajaAbierta: (turnoId: string) => void
   onCajaCerrada: () => void
   turnoActivo: CajaDiaria | null 
-  isBottom?: boolean // Prop para saber si está al fondo (opcional para estilos)
+  isBottom?: boolean 
 }
 
 export interface CajaDiaria {
@@ -30,14 +31,12 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
   const [montoFinal, setMontoFinal] = useState<string>("")
   const [loading, setLoading] = useState(false)
   
-  // Estado local para manejar la UI de caja abierta/cerrada
   const [caja, setCaja] = useState<CajaDiaria | null>(turnoActivo)
 
-  // 🎲 Lógica de Gamificación Dinámica (Motor de Misiones)
+  // 🎲 Gamificación: Generar Misiones
   const generarMisiones = async (cajaId: string, empleadoId: string) => {
     try {
       const hoy = new Date()
-      // Buscamos productos que vencen en los próximos 7 días
       const fechaLimite = format(addDays(hoy, 7), 'yyyy-MM-dd')
 
       const { data: stockCritico, error: stockError } = await supabase
@@ -48,7 +47,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       
       if (stockError) throw stockError
 
-      // Agrupamos para contar cuántas unidades hay de cada producto en riesgo
       const productosEnRiesgo: { [key: string]: number } = {}
       stockCritico?.forEach(item => {
         productosEnRiesgo[item.producto_id] = (productosEnRiesgo[item.producto_id] || 0) + 1
@@ -57,7 +55,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       const misionesABulkInsert = []
       const totalUnidadesRiesgo = Object.values(productosEnRiesgo).reduce((sum, count) => sum + count, 0)
       
-      // 1. Misión Condicional: Solo si hay riesgo real en el inventario
       if (totalUnidadesRiesgo > 0) {
         misionesABulkInsert.push({
           empleado_id: empleadoId,
@@ -67,12 +64,10 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
           objetivo_unidades: totalUnidadesRiesgo,
           unidades_completadas: 0,
           es_completada: false,
-          // Fórmula de puntos mejorada: Base 10 + bonos, tope 100 pts.
           puntos: Math.min(10 + Math.floor(totalUnidadesRiesgo / 2) * 5, 100), 
         })
       }
       
-      // 2. Misión Fija: Cierre de Caja Perfecto (Incentivo diario)
       misionesABulkInsert.push({
         empleado_id: empleadoId,
         caja_diaria_id: cajaId,
@@ -81,10 +76,9 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
         objetivo_unidades: 1,
         unidades_completadas: 0,
         es_completada: false,
-        puntos: 20, // 20 Puntos fijos por buen cierre
+        puntos: 20, 
       })
 
-      // 3. NUEVO: Misiones de Rutina Diaria (Automatizadas)
       const rutinasDiarias = [
           { descripcion: "🧊 Revisar Heladeras (Reponer faltantes e informar)", puntos: 50 },
           { descripcion: "🧹 Mantenimiento de Espacios Comunes", puntos: 30 },
@@ -95,7 +89,7 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
           misionesABulkInsert.push({
               empleado_id: empleadoId,
               caja_diaria_id: cajaId,
-              tipo: 'manual', // Usamos 'manual' para tareas generales que se completan con un botón
+              tipo: 'manual', 
               descripcion: rutina.descripcion,
               objetivo_unidades: 1,
               unidades_completadas: 0,
@@ -105,10 +99,7 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       })
 
       if (misionesABulkInsert.length > 0) {
-        const { error: insertError } = await supabase
-          .from('misiones')
-          .insert(misionesABulkInsert)
-        
+        const { error: insertError } = await supabase.from('misiones').insert(misionesABulkInsert)
         if (insertError) throw insertError
         
         if (totalUnidadesRiesgo > 0) {
@@ -118,7 +109,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
 
     } catch (error: any) {
       console.error("Error generando misiones:", error)
-      toast.error("Advertencia del Sistema", { description: "La caja se abrió, pero hubo un error generando las tareas automáticas." })
     }
   }
 
@@ -126,7 +116,7 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
   const handleAbrirCaja = async () => {
     const monto = parseFloat(montoInicial)
     if (isNaN(monto) || monto < 0) {
-      toast.error("Monto Inválido", { description: "Ingresa el efectivo inicial para abrir la caja." })
+      toast.error("Monto Inválido", { description: "Ingresa el efectivo inicial." })
       return
     }
 
@@ -135,7 +125,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error("Sesión inválida")
       
-      // 1. Crear el registro de Turno (Caja Diaria)
       const { data, error } = await supabase
         .from('caja_diaria')
         .insert({
@@ -151,11 +140,10 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       const nuevoTurno = data as CajaDiaria
       setCaja(nuevoTurno)
       
-      // 2. Generar Misiones AUTOMÁTICAS
       await generarMisiones(nuevoTurno.id, user.id)
 
       onCajaAbierta(nuevoTurno.id)
-      toast.success("Turno Iniciado", { description: "¡A vender! Se han asignado tus tareas diarias." })
+      toast.success("Turno Iniciado", { description: "Tareas asignadas." })
 
     } catch (error: any) {
       toast.error("Error al abrir caja", { description: error.message })
@@ -164,12 +152,13 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
     }
   }
 
-  // --- Cierre ---
+  // --- Cierre (LÓGICA CORREGIDA) ---
   const handleCerrarCaja = async () => {
     if (!caja) return
-    const monto = parseFloat(montoFinal)
-    if (isNaN(monto) || monto < 0) {
-      toast.error("Monto Inválido", { description: "Ingresa el monto final que hay en la caja." })
+    const montoDeclarado = parseFloat(montoFinal)
+    
+    if (isNaN(montoDeclarado) || montoDeclarado < 0) {
+      toast.error("Monto Inválido", { description: "Ingresa el efectivo final." })
       return
     }
 
@@ -178,34 +167,63 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error("Usuario no autenticado.")
 
-      // 1. Cálculo de Desvío para validar la Misión
-      const desvio = Math.abs(monto - caja.monto_inicial) 
-      const exitoArqueo = desvio <= 100 
+      // 1. OBTENER VENTAS EN EFECTIVO DEL TURNO
+      // Consultamos la tabla stock donde se guardan las ventas vinculadas a este turno
+      const { data: ventasData, error: ventasError } = await supabase
+        .from('stock')
+        .select('productos(precio_venta)') // Necesitamos el precio del producto vendido
+        .eq('caja_diaria_id', caja.id)
+        .eq('metodo_pago', 'efectivo') // Solo nos importa el efectivo para el arqueo
 
-      // 2. Actualizar registro de Caja (Cierre)
+      if (ventasError) throw ventasError
+
+      // Sumamos el total de ventas en efectivo
+      const totalVentasEfectivo = ventasData?.reduce((sum, item: any) => {
+         return sum + (item.productos?.precio_venta || 0)
+      }, 0) || 0
+
+      // 2. OBTENER GASTOS/RETIROS DEL TURNO
+      const { data: gastosData, error: gastosError } = await supabase
+        .from('movimientos_caja')
+        .select('monto')
+        .eq('caja_diaria_id', caja.id)
+        .eq('tipo', 'egreso')
+      
+      if (gastosError) throw gastosError
+
+      const totalGastos = gastosData?.reduce((sum, item) => sum + item.monto, 0) || 0
+
+      // 3. CÁLCULO FINANCIERO CORRECTO
+      // Dinero Esperado = Base + Entradas (Ventas Efec) - Salidas (Gastos)
+      const dineroEsperado = (caja.monto_inicial + totalVentasEfectivo) - totalGastos
+      
+      // 4. CÁLCULO DE DESVÍO
+      const desvio = Math.abs(montoDeclarado - dineroEsperado)
+      const exitoArqueo = desvio <= 100 // Margen de error permitido
+
+      // 5. Actualizar registro de Caja
       const { error } = await supabase
         .from('caja_diaria')
         .update({ 
-          monto_final: monto, 
+          monto_final: montoDeclarado, 
           fecha_cierre: new Date().toISOString() 
         })
         .eq('id', caja.id)
       
       if (error) throw error
 
-      // 3. Completar Misión de Arqueo automáticamente
+      // 6. Completar Misión
       await supabase
           .from('misiones')
           .update({
               es_completada: exitoArqueo,
-              unidades_completadas: 1, // Se marca como intento realizado
+              unidades_completadas: 1,
           })
           .eq('caja_diaria_id', caja.id)
           .eq('tipo', 'arqueo_cierre')
 
-      // 4. PERSISTENCIA DE PUNTOS (Si hubo éxito)
+      // 7. PREMIAR SI HUBO ÉXITO
       if (exitoArqueo) {
-          // A. Obtener XP actual
           const { data: perfil } = await supabase
             .from('perfiles')
             .select('xp')
@@ -213,7 +231,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
             .single()
           
           if (perfil) {
-              // B. Sumar y actualizar
               await supabase
                 .from('perfiles')
                 .update({ xp: perfil.xp + 20 })
@@ -222,7 +239,14 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
           triggerConfetti()
           toast.success("🏆 Cierre Perfecto", { description: "¡Ganaste +20 XP por precisión!" })
       } else {
-          toast.success("Turno Cerrado", { description: `Caja cerrada. Desvío: ${formatMoney(desvio)}` })
+          // Feedback honesto si falló
+          const mensajeDesvio = montoDeclarado > dineroEsperado 
+            ? `Sobran ${formatMoney(desvio)}` 
+            : `Faltan ${formatMoney(desvio)}`
+            
+          toast.warning("Turno Cerrado con Desvío", { 
+            description: `Esperado: ${formatMoney(dineroEsperado)}. ${mensajeDesvio}` 
+          })
       }
 
       setCaja(null)
@@ -239,8 +263,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
   const formatMoney = (val: number) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(val)
 
   // --- Renderizado UI ---
-  
-  // A. UI DE CIERRE (DISEÑO GRANDE)
   if (caja) {
     return (
       <Card className="p-6 border-4 border-red-100 bg-gradient-to-b from-white to-red-50 shadow-inner animate-in fade-in zoom-in-95 duration-300">
@@ -284,7 +306,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
     )
   }
 
-  // B. UI DE APERTURA (Estándar)
   return (
     <Card className="p-6 border-2 border-emerald-100 bg-emerald-50/50">
       <h2 className="text-xl font-bold flex items-center gap-2 text-emerald-700 mb-4">

@@ -199,16 +199,26 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     setCapitalSaludable(saludable)
   }
 
-  // --- FETCH DATA ---
+  // --- FETCH DATA (LÓGICA OPTIMIZADA AQUÍ) ---
   const fetchData = useCallback(async () => {
-    // A. Inventario y Stock
-    const { data: dataProductos } = await supabase.from('productos').select('*').order('nombre', { ascending: true })
-    const productosCalculados = await Promise.all((dataProductos || []).map(async (p) => {
-        const { count } = await supabase.from('stock').select('*', { count: 'exact', head: true }).eq('producto_id', p.id).eq('estado', 'pendiente')
-        return { ...p, stock_disponible: count || 0 }
-    }))
-    setProductos(productosCalculados as Producto[])
+    // A. Inventario y Stock (Optimizado con Vista SQL)
+    // ESTO REEMPLAZA LAS LENTAS CONSULTAS N+1
+    const { data: dataProductosView, error: errorProductosView } = await supabase
+        .from('view_productos_con_stock') // <-- CAMBIO CLAVE: Usamos la View pre-calculada
+        .select('*')
+        .order('nombre', { ascending: true })
+        
+    if (errorProductosView) {
+        console.error("Error al cargar la vista de productos:", errorProductosView);
+        // Si hay un error, al menos intentamos cargar los productos sin stock si es posible
+        setProductos([])
+    } else {
+        // La data ya tiene el campo 'stock_disponible' calculado
+        const productosCalculados = (dataProductosView as Producto[]) || []
+        setProductos(productosCalculados)
+    }
 
+    // El cálculo de Capital en Riesgo (Alertas) todavía necesita el detalle del lote de 'stock'
     const { data: dataStock } = await supabase.from('stock').select('*, productos(nombre, precio_venta, emoji)').eq('estado', 'pendiente')
     if (dataStock) calcularMetricasStock(dataStock)
 

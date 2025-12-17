@@ -16,7 +16,7 @@ interface ProductoConStock {
   nombre: string
   emoji: string
   precio_venta: number
-  stock_disponible: number
+  stock_disponible: number // Ahora viene directo de la View
 }
 
 interface CartItem {
@@ -48,7 +48,7 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('efectivo')
 
-  // --- Búsqueda ---
+  // --- Búsqueda (OPTIMIZADA) ---
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
       if (busqueda.length > 0) buscarProductos()
@@ -60,26 +60,23 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
   const buscarProductos = async () => {
     setLoading(true)
     try {
+      // ✅ CAMBIO CLAVE: Consultamos la vista view_productos_con_stock, 
+      // que ya tiene el stock calculado. Esto elimina las N+1 consultas.
       const { data: prods, error } = await supabase
-        .from('productos')
+        .from('view_productos_con_stock') // <-- USAMOS LA VISTA TURBO
         .select('*')
         .ilike('nombre', `%${busqueda}%`)
+        .order('nombre', { ascending: true }) // Opcional: ordenar para mejor UX
       
       if (error) throw error
 
-      const productosConStock = await Promise.all(prods.map(async (p) => {
-        const { count } = await supabase
-          .from('stock')
-          .select('*', { count: 'exact', head: true })
-          .eq('producto_id', p.id)
-          .eq('estado', 'pendiente')
-        
-        return { 
-            ...p, 
-            stock_disponible: count || 0,
-            precio_venta: parseFloat(p.precio_venta || 0) 
-        } as ProductoConStock
-      }))
+      // Los datos ya están listos, solo se parsean
+      const productosConStock = (prods || []).map(p => ({
+        ...p,
+        stock_disponible: p.stock_disponible || 0, // La vista ya lo calculó
+        precio_venta: parseFloat(p.precio_venta || 0)
+      })) as ProductoConStock[]
+      
       setProductosBusqueda(productosConStock)
     } catch (error) {
       console.error(error)

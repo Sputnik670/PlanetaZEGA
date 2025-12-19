@@ -6,17 +6,46 @@ import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Search, ShoppingCart, Loader2, Minus, Plus, Trash2, X, Check, CreditCard, DollarSign, Wallet, Repeat2 } from "lucide-react"
+import { Search, ShoppingCart, Loader2, Minus, Plus, Trash2, X, Check, CreditCard, DollarSign, Wallet, Repeat2, ScanBarcode } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
+import { useZxing } from "react-zxing"
+
+// --- COMPONENTE SCANNER (Reutilizable) ---
+function BarcodeScanner({ onResult, onClose }: { onResult: (code: string) => void, onClose: () => void }) {
+  const { ref } = useZxing({
+    onResult(result: any) {
+        if (result && result.getText) onResult(result.getText())
+        else onResult(String(result))
+    },
+    constraints: { video: { facingMode: "environment" } }
+  })
+
+  return (
+    <div className="relative flex flex-col items-center justify-center bg-black w-full h-[400px]">
+      <video ref={ref} className="w-full h-full object-cover" />
+      <div className="absolute top-0 left-0 w-full h-full border-2 border-primary/50 pointer-events-none">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-40 border-2 border-white/80 rounded-lg shadow-[0_0_0_999px_rgba(0,0,0,0.5)]">
+            <p className="absolute -top-8 w-full text-center text-white font-bold text-sm drop-shadow-md">
+                Escanea para agregar
+            </p>
+        </div>
+      </div>
+      <Button type="button" variant="destructive" className="absolute bottom-6 rounded-full px-6 shadow-lg z-50" onClick={onClose}>
+        <X className="mr-2 h-4 w-4" /> Cancelar
+      </Button>
+    </div>
+  )
+}
 
 interface ProductoConStock {
   id: string
   nombre: string
   emoji: string
   precio_venta: number
-  stock_disponible: number // Ahora viene directo de la View
+  stock_disponible: number
+  codigo_barras?: string // Agregado para validación
 }
 
 interface CartItem {
@@ -38,7 +67,6 @@ const PAYMENT_OPTIONS = [
     { key: 'otro', label: 'Otro / Cta. Corriente', icon: Wallet },
 ]
 
-// 🚨 CAMBIO 1: Recibimos el turnoId como prop para vincular la venta
 export default function CajaVentas({ turnoId }: { turnoId?: string }) {
   const [busqueda, setBusqueda] = useState("")
   const [productosBusqueda, setProductosBusqueda] = useState<ProductoConStock[]>([])
@@ -47,43 +75,67 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
   const [procesandoVenta, setProcesandoVenta] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('efectivo')
+  
+  // Estado para el escaner
+  const [showScanner, setShowScanner] = useState(false)
 
   // --- Búsqueda (OPTIMIZADA) ---
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
-      if (busqueda.length > 0) buscarProductos()
+      if (busqueda.length > 0) buscarProductos(busqueda)
       else setProductosBusqueda([])
     }, 300)
     return () => clearTimeout(delayDebounceFn)
   }, [busqueda])
 
-  const buscarProductos = async () => {
+  const buscarProductos = async (termino: string) => {
     setLoading(true)
     try {
-      // ✅ CAMBIO CLAVE: Consultamos la vista view_productos_con_stock, 
-      // que ya tiene el stock calculado. Esto elimina las N+1 consultas.
-      const { data: prods, error } = await supabase
-        .from('view_productos_con_stock') // <-- USAMOS LA VISTA TURBO
-        .select('*')
-        .ilike('nombre', `%${busqueda}%`)
-        .order('nombre', { ascending: true }) // Opcional: ordenar para mejor UX
+      // Lógica inteligente: Si parece un código de barras (solo números), buscamos exacto primero
+      let query = supabase.from('view_productos_con_stock').select('*')
+      
+      // Usamos el filtro OR para buscar por nombre O por código de barras
+      const isNumber = /^\d+$/.test(termino);
+      
+      if (isNumber) {
+         // Prioridad al código de barras
+         query = query.or(`codigo_barras.eq.${termino},nombre.ilike.%${termino}%`)
+      } else {
+         query = query.ilike('nombre', `%${termino}%`)
+      }
+      
+      const { data: prods, error } = await query.order('nombre', { ascending: true })
       
       if (error) throw error
 
-      // Los datos ya están listos, solo se parsean
       const productosConStock = (prods || []).map(p => ({
         ...p,
-        stock_disponible: p.stock_disponible || 0, // La vista ya lo calculó
+        stock_disponible: p.stock_disponible || 0,
         precio_venta: parseFloat(p.precio_venta || 0)
       })) as ProductoConStock[]
       
-      setProductosBusqueda(productosConStock)
+      // Auto-agregar si es búsqueda exacta por código de barras (UX Mágica)
+      if (isNumber && productosConStock.length === 1 && productosConStock[0].codigo_barras === termino) {
+          addToCart(productosConStock[0]);
+          setBusqueda(""); // Limpiamos búsqueda para seguir escaneando
+          toast.success("Producto agregado", { duration: 1500 });
+      } else {
+          setProductosBusqueda(productosConStock)
+      }
+
     } catch (error) {
       console.error(error)
-      toast.error("Error al buscar productos")
+      toast.error("Error al buscar")
     } finally {
       setLoading(false)
     }
+  }
+
+  // Callback del escaner
+  const handleScanResult = (code: string) => {
+      setShowScanner(false);
+      setBusqueda(code); // Esto disparará el useEffect que busca automáticamente
+      toast.info("Código leído", { description: "Procesando..." });
   }
 
   // --- Carrito ---
@@ -97,13 +149,10 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
 
   const handlePagarClick = () => {
     if (cart.length === 0) return toast.error("Carrito vacío")
-    
-    // 🚨 CAMBIO 2: Validación de Turno Abierto
     if (!turnoId) {
         toast.error("Caja Cerrada", { description: "Debes abrir un turno de caja antes de poder cobrar." })
         return
     }
-    
     setShowPaymentModal(true)
   }
 
@@ -123,8 +172,8 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
             precio_venta: producto.precio_venta, cantidad: 1, stock_disponible: producto.stock_disponible
         }])
     }
-    setBusqueda("")
-    setProductosBusqueda([])
+    // No limpiamos búsqueda aquí si fue manual, para permitir ver resultados.
+    // Si fue por scanner, ya se limpió en la lógica de `buscarProductos`.
   }
 
   const updateCartItemQuantity = (productId: string, delta: number) => {
@@ -145,16 +194,11 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
 
   // --- Confirmación ---
   const confirmarVenta = async (metodo_pago: PaymentMethod) => {
-    // Doble chequeo de seguridad
     if (!turnoId) return toast.error("Error crítico", { description: "No se detectó un turno activo." })
-    
     setProcesandoVenta(true)
-
     try {
       const updates = []
-      
       for (const item of cart) {
-        // FIFO: Obtener IDs más viejos disponibles
         const { data: stockItems, error: searchError } = await supabase
           .from('stock')
           .select('id')
@@ -171,14 +215,13 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
         updates.push(...stockItems.map(s => s.id))
       }
 
-      // 🚨 CAMBIO 3: Update incluyendo el caja_diaria_id
       const { error: updateError } = await supabase
         .from('stock')
         .update({ 
             estado: 'vendido',
             fecha_venta: new Date().toISOString(), 
             metodo_pago: metodo_pago,
-            caja_diaria_id: turnoId // <--- VINCULACIÓN DE LA VENTA AL TURNO
+            caja_diaria_id: turnoId 
         }) 
         .in('id', updates)
 
@@ -201,25 +244,36 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
   return (
     <div className="space-y-4">
       <Card className="p-4 space-y-4 shadow-lg border-2 border-primary/10">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-          <Input
-            placeholder="🔍 Busca y agrega productos..."
-            className="h-14 pl-12 text-lg"
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-          />
-          {loading && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 animate-spin text-primary" />}
-          {busqueda.length > 0 && !loading && (
-             <X className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground cursor-pointer hover:text-foreground" onClick={() => setBusqueda("")} />
-          )}
+        <div className="flex gap-2">
+            <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                <Input
+                    placeholder="Busca o escanea..."
+                    className="h-12 pl-12 text-lg"
+                    value={busqueda}
+                    onChange={(e) => setBusqueda(e.target.value)}
+                />
+                {loading && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 animate-spin text-primary" />}
+                {busqueda.length > 0 && !loading && (
+                    <X className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground cursor-pointer hover:text-foreground" onClick={() => setBusqueda("")} />
+                )}
+            </div>
+            
+            {/* BOTÓN ESCANER */}
+            <Button 
+                size="icon" 
+                className="h-12 w-12 shrink-0 bg-blue-600 hover:bg-blue-700" 
+                onClick={() => setShowScanner(true)}
+            >
+                <ScanBarcode className="h-6 w-6" />
+            </Button>
         </div>
 
         {/* Resultados */}
         {busqueda.length > 0 && productosBusqueda.length > 0 && (
-            <div className="border rounded-lg max-h-40 overflow-y-auto">
+            <div className="border rounded-lg max-h-40 overflow-y-auto bg-white shadow-sm z-10">
                 {productosBusqueda.map((prod) => (
-                    <div key={prod.id} className="flex items-center justify-between p-3 border-b last:border-b-0 cursor-pointer hover:bg-primary/5" onClick={() => addToCart(prod)}>
+                    <div key={prod.id} className="flex items-center justify-between p-3 border-b last:border-b-0 cursor-pointer hover:bg-primary/5 active:bg-primary/10 transition-colors" onClick={() => addToCart(prod)}>
                         <div className="flex items-center gap-3">
                             <span className="text-xl">{prod.emoji}</span>
                             <div>
@@ -229,8 +283,8 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
                                 </p>
                             </div>
                         </div>
-                        <Button size="sm" disabled={prod.stock_disponible === 0} onClick={(e) => { e.stopPropagation(); addToCart(prod) }}>
-                            <Plus className="h-4 w-4 mr-1" /> Agregar
+                        <Button size="sm" variant="ghost" disabled={prod.stock_disponible === 0} onClick={(e) => { e.stopPropagation(); addToCart(prod) }}>
+                            <Plus className="h-5 w-5 text-primary" />
                         </Button>
                     </div>
                 ))}
@@ -245,7 +299,7 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
             </h3>
             <div className="space-y-2 max-h-60 overflow-y-auto">
               {cart.map((item) => (
-                <div key={item.id} className="flex items-center justify-between p-2 border-b last:border-b-0">
+                <div key={item.id} className="flex items-center justify-between p-2 border-b last:border-b-0 bg-slate-50/50 rounded-lg mb-1">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     <span className="text-2xl">{item.emoji}</span>
                     <div className="flex-1 min-w-0">
@@ -253,11 +307,11 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
                       <p className="text-xs text-muted-foreground">{formatMoney(item.precio_venta)} c/u</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" size="icon-sm" onClick={() => updateCartItemQuantity(item.id, -1)}><Minus className="h-4 w-4" /></Button>
-                    <span className="font-bold w-6 text-center">{item.cantidad}</span>
-                    <Button variant="outline" size="icon-sm" onClick={() => updateCartItemQuantity(item.id, 1)} disabled={item.cantidad >= item.stock_disponible}><Plus className="h-4 w-4" /></Button>
-                    <Button variant="ghost" size="icon-sm" className="text-destructive hover:bg-destructive/10" onClick={() => removeCartItem(item.id)}><Trash2 className="h-4 w-4" /></Button>
+                  <div className="flex items-center gap-1">
+                    <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => updateCartItemQuantity(item.id, -1)}><Minus className="h-3 w-3" /></Button>
+                    <span className="font-bold w-6 text-center text-sm">{item.cantidad}</span>
+                    <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => updateCartItemQuantity(item.id, 1)} disabled={item.cantidad >= item.stock_disponible}><Plus className="h-3 w-3" /></Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => removeCartItem(item.id)}><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 </div>
               ))}
@@ -267,8 +321,8 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
                 <span className="text-xl font-bold">TOTAL:</span>
                 <span className="text-2xl font-black text-emerald-600">{formatMoney(totalCarrito)}</span>
               </div>
-              <Button onClick={handlePagarClick} disabled={procesandoVenta || cart.length === 0} className="w-full h-12 text-lg bg-emerald-600 hover:bg-emerald-700 font-bold">
-                {procesandoVenta ? <Loader2 className="animate-spin mr-2 h-5 w-5" /> : "PAGAR Y CERRAR VENTA"}
+              <Button onClick={handlePagarClick} disabled={procesandoVenta || cart.length === 0} className="w-full h-12 text-lg bg-emerald-600 hover:bg-emerald-700 font-bold shadow-md">
+                {procesandoVenta ? <Loader2 className="animate-spin mr-2 h-5 w-5" /> : "COBRAR 💸"}
               </Button>
             </div>
           </div>
@@ -278,6 +332,7 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
             <div className="text-center p-8 text-muted-foreground bg-muted/20 rounded-lg border-dashed border">
                 <ShoppingCart className="h-8 w-8 mx-auto mb-2 opacity-50" />
                 <p>Tu carrito está vacío.</p>
+                <p className="text-xs mt-1">Usa el buscador o el escáner para empezar.</p>
             </div>
         )}
       </Card>
@@ -309,9 +364,21 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
           </div>
           <DialogFooter>
             <Button className="w-full h-12 text-lg bg-emerald-600 hover:bg-emerald-700 font-bold" onClick={() => confirmarVenta(selectedPaymentMethod)} disabled={procesandoVenta}>
-              {procesandoVenta ? <Loader2 className="animate-spin mr-2 h-5 w-5" /> : "CONFIRMAR VENTA 💸"}
+              {procesandoVenta ? <Loader2 className="animate-spin mr-2 h-5 w-5" /> : "FINALIZAR VENTA"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL ESCANER */}
+      <Dialog open={showScanner} onOpenChange={setShowScanner}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden bg-black border-none text-white">
+            {showScanner && (
+                <BarcodeScanner 
+                    onResult={handleScanResult} 
+                    onClose={() => setShowScanner(false)} 
+                />
+            )}
         </DialogContent>
       </Dialog>
     </div>

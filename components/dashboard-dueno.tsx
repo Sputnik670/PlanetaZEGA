@@ -13,7 +13,7 @@ import {
   Loader2, ShieldCheck, DollarSign, CreditCard, 
   Repeat2, Wallet, Calendar as CalendarIcon, BarChart3, 
   Eye, TrendingDown, Star, User, ShoppingBag, Clock, 
-  Pencil, Trash2, History, Save, ChevronDown, ChevronUp, Calculator
+  Pencil, Trash2, History, Save, ChevronDown, ChevronUp, Calculator, ScanBarcode
 } from "lucide-react" 
 import { BottomNav } from "@/components/bottom-nav"
 import { BarChart, Bar, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts" 
@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
 import { DateRange } from "react-day-picker"
-import { format, subDays, startOfDay, endOfDay, parseISO, isWithinInterval } from "date-fns" 
+import { format, subDays, startOfDay, endOfDay, parseISO } from "date-fns" 
 import { es } from "date-fns/locale" 
 import AsignarMision from "@/components/asignar-mision" 
 import { toast } from "sonner" 
@@ -51,6 +51,7 @@ interface Producto {
     precio_venta: number
     costo: number
     emoji: string
+    codigo_barras?: string // ✅ Nuevo campo agregado
     stock_disponible?: number
 }
 
@@ -199,26 +200,23 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     setCapitalSaludable(saludable)
   }
 
-  // --- FETCH DATA (LÓGICA OPTIMIZADA AQUÍ) ---
+  // --- FETCH DATA ---
   const fetchData = useCallback(async () => {
-    // A. Inventario y Stock (Optimizado con Vista SQL)
-    // ESTO REEMPLAZA LAS LENTAS CONSULTAS N+1
+    // A. Inventario y Stock
     const { data: dataProductosView, error: errorProductosView } = await supabase
-        .from('view_productos_con_stock') // <-- CAMBIO CLAVE: Usamos la View pre-calculada
+        .from('view_productos_con_stock') 
         .select('*')
         .order('nombre', { ascending: true })
         
     if (errorProductosView) {
         console.error("Error al cargar la vista de productos:", errorProductosView);
-        // Si hay un error, al menos intentamos cargar los productos sin stock si es posible
         setProductos([])
     } else {
-        // La data ya tiene el campo 'stock_disponible' calculado
         const productosCalculados = (dataProductosView as Producto[]) || []
         setProductos(productosCalculados)
     }
 
-    // El cálculo de Capital en Riesgo (Alertas) todavía necesita el detalle del lote de 'stock'
+    // Capital en Riesgo
     const { data: dataStock } = await supabase.from('stock').select('*, productos(nombre, precio_venta, emoji)').eq('estado', 'pendiente')
     if (dataStock) calcularMetricasStock(dataStock)
 
@@ -278,7 +276,11 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     return `${from} - ${to}`
   }, [dateRange])
 
-  const inventarioFiltrado = productos.filter((item) => item.nombre.toLowerCase().includes(searchQuery.toLowerCase()))
+  // ✅ Búsqueda mejorada: Nombre O Código de barras
+  const inventarioFiltrado = productos.filter((item) => {
+    const term = searchQuery.toLowerCase()
+    return item.nombre.toLowerCase().includes(term) || (item.codigo_barras && item.codigo_barras.includes(term))
+  })
 
   // --- HANDLERS ---
   const loadPriceHistory = useCallback(async (productId: string) => {
@@ -305,12 +307,14 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
           const { data: oldProduct, error: fetchError } = await supabase.from('productos').select('precio_venta, costo').eq('id', editingProduct.id).single();
           if (fetchError) throw fetchError;
 
+          // ✅ Actualización incluye código de barras
           const { error: updateError } = await supabase.from('productos').update({
               nombre: editingProduct.nombre,
               categoria: editingProduct.categoria,
               precio_venta: editingProduct.precio_venta,
               costo: editingProduct.costo || 0, 
-              emoji: editingProduct.emoji
+              emoji: editingProduct.emoji,
+              codigo_barras: editingProduct.codigo_barras || null
           }).eq('id', editingProduct.id)
 
           if (updateError) throw updateError
@@ -418,8 +422,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                     <div className="space-y-3">
                         {turnosAudit.map((turno) => {
                             // 1. Filtrar ventas de este turno específico (por fecha)
-                            // IMPORTANTE: Esto asume que ventasRecientes tiene TODO lo necesario.
-                            // Si hay paginación, solo audita lo cargado.
                             const ventasTurno = ventasRecientes.filter(v => {
                                 const fechaVenta = parseISO(v.fecha_venta)
                                 const apertura = parseISO(turno.fecha_apertura)
@@ -435,8 +437,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                             const totalGastos = turno.movimientos_caja?.filter(m => m.tipo === 'egreso').reduce((acc, curr) => acc + curr.monto, 0) || 0
                             
                             // 3. Calcular Diferencia Real (Solo sobre efectivo)
-                            // Esperado = Inicio + Ventas(Efectivo) - Gastos(Efectivo)
-                            // Nota: Asumimos que los gastos salen de caja chica (efectivo)
                             const cajaEsperada = turno.monto_inicial + facturacionEfectivo - totalGastos
                             const diferenciaReal = (turno.monto_final || 0) - cajaEsperada
 
@@ -545,8 +545,8 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             </div>
         )}
 
-        {/* --- SALES (Se mantiene igual) --- */}
-        {activeTab === "sales" && (/* ... Se mantiene igual ... */
+        {/* --- SALES --- */}
+        {activeTab === "sales" && (
             <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4">
                 <Card className="p-6 bg-emerald-600 text-white shadow-lg border-0 relative overflow-hidden">
                     <div className="relative z-10">
@@ -611,12 +611,12 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             </div>
         )}
 
-        {/* --- CATÁLOGO (Se mantiene igual) --- */}
+        {/* --- CATÁLOGO --- */}
         {activeTab === "catalog" && (
           <div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500"><CrearProducto onProductCreated={() => { setActiveTab("inventory"); fetchData(); }} /></div>
         )}
 
-        {/* --- INVENTARIO (Se mantiene igual) --- */}
+        {/* --- INVENTARIO --- */}
         {activeTab === "inventory" && (
           <>
             <div className="relative mb-4"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" /><Input type="text" placeholder="Buscar productos..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="h-12 pl-12 text-base" /></div>
@@ -719,7 +719,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
 
       <BottomNav active={activeTab === "catalog" ? "inventory" : activeTab as any} onChange={(val) => setActiveTab(val as any)} />
 
-      {/* --- MODAL: EDICIÓN DE PRODUCTO (CON BOTÓN HISTORIAL) --- */}
+      {/* --- MODAL: EDICIÓN DE PRODUCTO (CON CÓDIGO DE BARRAS) --- */}
       <Dialog open={!!editingProduct} onOpenChange={(open) => !open && setEditingProduct(null)}>
         <DialogContent>
             <DialogHeader><DialogTitle>Editar Producto</DialogTitle></DialogHeader>
@@ -729,6 +729,22 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                         <div className="col-span-1"><Label>Icono</Label><Input value={editingProduct.emoji} onChange={(e) => setEditingProduct({...editingProduct, emoji: e.target.value})} className="text-center text-2xl" /></div>
                         <div className="col-span-3"><Label>Nombre</Label><Input value={editingProduct.nombre} onChange={(e) => setEditingProduct({...editingProduct, nombre: e.target.value})} /></div>
                     </div>
+                    
+                    {/* ✅ NUEVO CAMPO: CÓDIGO DE BARRAS */}
+                    <div>
+                        <Label className="flex items-center gap-2 mb-1">
+                            <ScanBarcode className="h-4 w-4" /> Código de Barras
+                        </Label>
+                        <Input 
+                            value={editingProduct.codigo_barras || ''} 
+                            placeholder="Escanear o escribir..." 
+                            onChange={(e) => setEditingProduct({...editingProduct, codigo_barras: e.target.value})} 
+                        />
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                            Si tienes el lector USB conectado, haz clic y escanea.
+                        </p>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4"><div className="col-span-2"><Label>Categoría</Label><Input value={editingProduct.categoria} onChange={(e) => setEditingProduct({...editingProduct, categoria: e.target.value})} /></div></div>
                     <div className="p-3 bg-blue-50 rounded-lg border border-blue-100 space-y-3">
                         <div className="grid grid-cols-2 gap-4">

@@ -1,3 +1,4 @@
+// components/vista-empleado.tsx
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
@@ -10,6 +11,7 @@ import CajaVentas from "@/components/caja-ventas"
 import ArqueoCaja, { CajaDiaria } from "@/components/arqueo-caja" 
 import MisionesEmpleado from "@/components/misiones-empleado"
 import RegistrarGasto from "@/components/registrar-gasto"
+import GestionVencimientos from "@/components/gestion-vencimientos" // ✅ IMPORTADO
 import { Progress } from "@/components/ui/progress" 
 
 interface UserProfile {
@@ -97,8 +99,8 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
         setActiveTab("caja")
     }
     
-    // Handler para actualizar XP/misiones
-    const handleMisionesUpdated = () => {
+    // Handler para actualizar XP/misiones (Reutilizamos para vencimientos también)
+    const handleDataUpdated = () => {
         setRefreshKey(prev => prev + 1)
     }
 
@@ -254,22 +256,18 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                             {activeTab === "misiones" && (
                                 <MisionesEmpleado 
                                     turnoId={turnoActivo.id}
-                                    empleadoId={turnoActivo.empleado_id} // Nuevo Prop para XP
-                                    onMisionesUpdated={handleMisionesUpdated}
+                                    empleadoId={turnoActivo.empleado_id} 
+                                    onMisionesUpdated={handleDataUpdated}
                                     key={turnoActivo.id + refreshKey}
                                 />
                             )}
                             
                             {activeTab === "vencimientos" && (
-                                <Card className="p-8 text-center text-muted-foreground bg-muted/30 border-dashed border-2">
-                                    <div className="bg-background p-4 rounded-full w-fit mx-auto mb-4 shadow-sm">
-                                        <TrendingUp className="h-8 w-8 text-primary" />
-                                    </div>
-                                    <h3 className="font-bold text-foreground text-lg">Próximamente</h3>
-                                    <p className="max-w-xs mx-auto mt-2 text-sm">
-                                        Gestión detallada de stock por vencer.
-                                    </p>
-                                </Card>
+                                <GestionVencimientos 
+                                    turnoId={turnoActivo.id}
+                                    empleadoId={turnoActivo.empleado_id}
+                                    onAccionRealizada={handleDataUpdated}
+                                />
                             )}
                         </div>
                     </>

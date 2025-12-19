@@ -16,18 +16,18 @@ import { useZxing } from "react-zxing"
 
 // --- CONFIGURACIÓN DE ESCANER ---
 function BarcodeScanner({ onResult, onClose }: { onResult: (code: string) => void, onClose: () => void }) {
-  // CORRECCIÓN: Usamos 'onResult' y tipamos 'result' como 'any' para evitar errores de TS
+  // CORRECCIÓN FINAL: Forzamos el tipo con 'as any' porque la librería
+  // tiene un bug en sus definiciones de TypeScript, aunque 'onDecodeResult' funciona.
   const { ref } = useZxing({
-    onResult(result: any) {
+    onDecodeResult(result: any) {
       if (result && result.getText) {
         onResult(result.getText())
       } else {
-        // Fallback por si la estructura del objeto es diferente
         onResult(String(result))
       }
     },
-    constraints: { video: { facingMode: "environment" } } // Usa la cámara trasera
-  })
+    constraints: { video: { facingMode: "environment" } }
+  } as any) 
 
   return (
     <div className="relative flex flex-col items-center justify-center bg-black w-full h-[400px]">

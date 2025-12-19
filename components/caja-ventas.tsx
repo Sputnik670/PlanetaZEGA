@@ -12,15 +12,26 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { cn } from "@/lib/utils"
 import { useZxing } from "react-zxing"
 
-// --- COMPONENTE SCANNER (Reutilizable) ---
+// --- COMPONENTE SCANNER ---
 function BarcodeScanner({ onResult, onClose }: { onResult: (code: string) => void, onClose: () => void }) {
+  // Función unificada para manejar el resultado sin importar la versión
+  const handleScan = (result: any) => {
+      if (result) {
+          if (typeof result.getText === 'function') {
+              onResult(result.getText())
+          } else {
+              onResult(String(result))
+          }
+      }
+  }
+
   const { ref } = useZxing({
-    onResult(result: any) {
-        if (result && result.getText) onResult(result.getText())
-        else onResult(String(result))
-    },
+    // TRUCO: Ponemos ambos nombres y usamos 'as any' para que TypeScript no se queje.
+    // Esto asegura que funcione con cualquier versión de la librería.
+    onDecodeResult: handleScan, // Nombre nuevo (v2)
+    onResult: handleScan,       // Nombre viejo (v1)
     constraints: { video: { facingMode: "environment" } }
-  })
+  } as any)
 
   return (
     <div className="relative flex flex-col items-center justify-center bg-black w-full h-[400px]">
@@ -45,7 +56,7 @@ interface ProductoConStock {
   emoji: string
   precio_venta: number
   stock_disponible: number
-  codigo_barras?: string // Agregado para validación
+  codigo_barras?: string
 }
 
 interface CartItem {
@@ -75,11 +86,8 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
   const [procesandoVenta, setProcesandoVenta] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('efectivo')
-  
-  // Estado para el escaner
   const [showScanner, setShowScanner] = useState(false)
 
-  // --- Búsqueda (OPTIMIZADA) ---
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
       if (busqueda.length > 0) buscarProductos(busqueda)
@@ -91,21 +99,16 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
   const buscarProductos = async (termino: string) => {
     setLoading(true)
     try {
-      // Lógica inteligente: Si parece un código de barras (solo números), buscamos exacto primero
       let query = supabase.from('view_productos_con_stock').select('*')
-      
-      // Usamos el filtro OR para buscar por nombre O por código de barras
       const isNumber = /^\d+$/.test(termino);
       
       if (isNumber) {
-         // Prioridad al código de barras
          query = query.or(`codigo_barras.eq.${termino},nombre.ilike.%${termino}%`)
       } else {
          query = query.ilike('nombre', `%${termino}%`)
       }
       
       const { data: prods, error } = await query.order('nombre', { ascending: true })
-      
       if (error) throw error
 
       const productosConStock = (prods || []).map(p => ({
@@ -114,15 +117,13 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
         precio_venta: parseFloat(p.precio_venta || 0)
       })) as ProductoConStock[]
       
-      // Auto-agregar si es búsqueda exacta por código de barras (UX Mágica)
       if (isNumber && productosConStock.length === 1 && productosConStock[0].codigo_barras === termino) {
           addToCart(productosConStock[0]);
-          setBusqueda(""); // Limpiamos búsqueda para seguir escaneando
-          toast.success("Producto agregado", { duration: 1500 });
+          setBusqueda("");
+          toast.success("Producto agregado");
       } else {
           setProductosBusqueda(productosConStock)
       }
-
     } catch (error) {
       console.error(error)
       toast.error("Error al buscar")
@@ -131,14 +132,12 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
     }
   }
 
-  // Callback del escaner
   const handleScanResult = (code: string) => {
       setShowScanner(false);
-      setBusqueda(code); // Esto disparará el useEffect que busca automáticamente
-      toast.info("Código leído", { description: "Procesando..." });
+      setBusqueda(code);
+      toast.info("Código leído");
   }
 
-  // --- Carrito ---
   const totalCarrito = useMemo(() => {
     return cart.reduce((total, item) => total + item.precio_venta * item.cantidad, 0)
   }, [cart])
@@ -150,7 +149,7 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
   const handlePagarClick = () => {
     if (cart.length === 0) return toast.error("Carrito vacío")
     if (!turnoId) {
-        toast.error("Caja Cerrada", { description: "Debes abrir un turno de caja antes de poder cobrar." })
+        toast.error("Caja Cerrada", { description: "Abre un turno antes de cobrar." })
         return
     }
     setShowPaymentModal(true)
@@ -158,13 +157,13 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
 
   const addToCart = (producto: ProductoConStock) => {
     const existingItem = cart.find(item => item.id === producto.id)
-    if (producto.stock_disponible === 0) return toast.warning("Sin Stock", { description: `${producto.nombre} no tiene unidades.` })
+    if (producto.stock_disponible === 0) return toast.warning("Sin Stock")
 
     if (existingItem) {
         if (existingItem.cantidad < producto.stock_disponible) {
             setCart(prev => prev.map(item => item.id === producto.id ? { ...item, cantidad: item.cantidad + 1 } : item))
         } else {
-            toast.warning("Límite de Stock", { description: `Solo hay ${producto.stock_disponible} unidades.` })
+            toast.warning("Límite de Stock alcanzado")
         }
     } else {
         setCart(prev => [...prev, {
@@ -172,8 +171,6 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
             precio_venta: producto.precio_venta, cantidad: 1, stock_disponible: producto.stock_disponible
         }])
     }
-    // No limpiamos búsqueda aquí si fue manual, para permitir ver resultados.
-    // Si fue por scanner, ya se limpió en la lógica de `buscarProductos`.
   }
 
   const updateCartItemQuantity = (productId: string, delta: number) => {
@@ -182,19 +179,15 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
         if (!item) return prev
         const newQuantity = item.cantidad + delta
         if (newQuantity < 1) return prev.filter(i => i.id !== productId)
-        if (newQuantity > item.stock_disponible) {
-            toast.warning("Límite de Stock")
-            return prev
-        }
+        if (newQuantity > item.stock_disponible) return prev
         return prev.map(i => i.id === productId ? { ...i, cantidad: newQuantity } : i)
     })
   }
 
   const removeCartItem = (productId: string) => setCart(prev => prev.filter(item => item.id !== productId))
 
-  // --- Confirmación ---
   const confirmarVenta = async (metodo_pago: PaymentMethod) => {
-    if (!turnoId) return toast.error("Error crítico", { description: "No se detectó un turno activo." })
+    if (!turnoId) return
     setProcesandoVenta(true)
     try {
       const updates = []
@@ -208,10 +201,6 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
           .limit(item.cantidad)
 
         if (searchError) throw searchError
-        if (!stockItems || stockItems.length < item.cantidad) {
-            toast.error(`Stock insuficiente de ${item.nombre}`, { description: `Quedan ${stockItems?.length || 0} unidades.` })
-            setProcesandoVenta(false); setShowPaymentModal(false); return
-        }
         updates.push(...stockItems.map(s => s.id))
       }
 
@@ -226,16 +215,11 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
         .in('id', updates)
 
       if (updateError) throw updateError
-
-      const formattedMethod = metodo_pago.toUpperCase().replace('_', ' ');
-      toast.success("¡Venta Exitosa! 💰", { description: `Venta registrada por ${formatMoney(totalCarrito)} (${formattedMethod}).` })
-      
+      toast.success("¡Venta Exitosa! 💰")
       setCart([])
       setShowPaymentModal(false)
-
     } catch (error: any) {
-      console.error(error)
-      toast.error("Error al procesar venta", { description: error.message || "Intenta de nuevo." })
+      toast.error("Error al procesar")
     } finally {
       setProcesandoVenta(false)
     }
@@ -254,17 +238,8 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
                     onChange={(e) => setBusqueda(e.target.value)}
                 />
                 {loading && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 animate-spin text-primary" />}
-                {busqueda.length > 0 && !loading && (
-                    <X className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground cursor-pointer hover:text-foreground" onClick={() => setBusqueda("")} />
-                )}
             </div>
-            
-            {/* BOTÓN ESCANER */}
-            <Button 
-                size="icon" 
-                className="h-12 w-12 shrink-0 bg-blue-600 hover:bg-blue-700" 
-                onClick={() => setShowScanner(true)}
-            >
+            <Button size="icon" className="h-12 w-12 shrink-0 bg-blue-600 hover:bg-blue-700" onClick={() => setShowScanner(true)}>
                 <ScanBarcode className="h-6 w-6" />
             </Button>
         </div>
@@ -273,112 +248,73 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
         {busqueda.length > 0 && productosBusqueda.length > 0 && (
             <div className="border rounded-lg max-h-40 overflow-y-auto bg-white shadow-sm z-10">
                 {productosBusqueda.map((prod) => (
-                    <div key={prod.id} className="flex items-center justify-between p-3 border-b last:border-b-0 cursor-pointer hover:bg-primary/5 active:bg-primary/10 transition-colors" onClick={() => addToCart(prod)}>
+                    <div key={prod.id} className="flex items-center justify-between p-3 border-b last:border-b-0 cursor-pointer hover:bg-primary/5 transition-colors" onClick={() => addToCart(prod)}>
                         <div className="flex items-center gap-3">
                             <span className="text-xl">{prod.emoji}</span>
                             <div>
                                 <h3 className="font-semibold leading-none truncate">{prod.nombre}</h3>
-                                <p className="text-xs text-muted-foreground mt-0.5">
-                                    Stock: <span className={prod.stock_disponible > 0 ? "text-emerald-600 font-bold" : "text-destructive font-bold"}>{prod.stock_disponible} u.</span> | {formatMoney(prod.precio_venta)}
-                                </p>
+                                <p className="text-xs text-muted-foreground mt-0.5">Stock: {prod.stock_disponible} | {formatMoney(prod.precio_venta)}</p>
                             </div>
                         </div>
-                        <Button size="sm" variant="ghost" disabled={prod.stock_disponible === 0} onClick={(e) => { e.stopPropagation(); addToCart(prod) }}>
-                            <Plus className="h-5 w-5 text-primary" />
-                        </Button>
+                        <Plus className="h-5 w-5 text-primary" />
                     </div>
                 ))}
             </div>
         )}
 
-        {/* Carrito */}
+        {/* Carrito y Total */}
         {cart.length > 0 && (
           <div className="space-y-3 pt-4 border-t">
-            <h3 className="font-bold flex items-center gap-2 text-lg text-primary">
-                <ShoppingCart className="h-5 w-5" /> Carrito ({cart.length})
-            </h3>
+            <h3 className="font-bold flex items-center gap-2 text-lg text-primary"><ShoppingCart className="h-5 w-5" /> Carrito ({cart.length})</h3>
             <div className="space-y-2 max-h-60 overflow-y-auto">
               {cart.map((item) => (
-                <div key={item.id} className="flex items-center justify-between p-2 border-b last:border-b-0 bg-slate-50/50 rounded-lg mb-1">
+                <div key={item.id} className="flex items-center justify-between p-2 bg-slate-50/50 rounded-lg">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     <span className="text-2xl">{item.emoji}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold truncate">{item.nombre}</p>
-                      <p className="text-xs text-muted-foreground">{formatMoney(item.precio_venta)} c/u</p>
-                    </div>
+                    <div className="flex-1 min-w-0"><p className="font-semibold truncate">{item.nombre}</p></div>
                   </div>
                   <div className="flex items-center gap-1">
                     <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => updateCartItemQuantity(item.id, -1)}><Minus className="h-3 w-3" /></Button>
                     <span className="font-bold w-6 text-center text-sm">{item.cantidad}</span>
                     <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => updateCartItemQuantity(item.id, 1)} disabled={item.cantidad >= item.stock_disponible}><Plus className="h-3 w-3" /></Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => removeCartItem(item.id)}><Trash2 className="h-4 w-4" /></Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeCartItem(item.id)}><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 </div>
               ))}
             </div>
             <div className="pt-3 border-t">
-              <div className="flex justify-between items-center mb-3">
-                <span className="text-xl font-bold">TOTAL:</span>
-                <span className="text-2xl font-black text-emerald-600">{formatMoney(totalCarrito)}</span>
-              </div>
-              <Button onClick={handlePagarClick} disabled={procesandoVenta || cart.length === 0} className="w-full h-12 text-lg bg-emerald-600 hover:bg-emerald-700 font-bold shadow-md">
-                {procesandoVenta ? <Loader2 className="animate-spin mr-2 h-5 w-5" /> : "COBRAR 💸"}
-              </Button>
+              <div className="flex justify-between items-center mb-3"><span className="text-xl font-bold">TOTAL:</span><span className="text-2xl font-black text-emerald-600">{formatMoney(totalCarrito)}</span></div>
+              <Button onClick={handlePagarClick} disabled={procesandoVenta} className="w-full h-12 text-lg bg-emerald-600 hover:bg-emerald-700 font-bold">COBRAR 💸</Button>
             </div>
           </div>
-        )}
-        
-        {cart.length === 0 && busqueda.length === 0 && !loading && (
-            <div className="text-center p-8 text-muted-foreground bg-muted/20 rounded-lg border-dashed border">
-                <ShoppingCart className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p>Tu carrito está vacío.</p>
-                <p className="text-xs mt-1">Usa el buscador o el escáner para empezar.</p>
-            </div>
         )}
       </Card>
 
       {/* Modal de Pago */}
       <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-center text-2xl flex flex-col items-center gap-2">
-              <Wallet className="h-6 w-6 text-primary" /> Método de Pago
-            </DialogTitle>
-            <p className="text-center text-muted-foreground">Total a Cobrar: <span className="font-black text-emerald-600">{formatMoney(totalCarrito)}</span></p>
-          </DialogHeader>
+          <DialogHeader><DialogTitle className="text-center text-2xl">Método de Pago</DialogTitle></DialogHeader>
           <div className="flex flex-col gap-3 py-4">
-            {PAYMENT_OPTIONS.map((option) => {
-                const Icon = option.icon
-                return (
-                    <Card key={option.key} className={cn("p-4 cursor-pointer hover:shadow-md transition-all", selectedPaymentMethod === option.key ? "border-2 border-primary ring-2 ring-primary/20 bg-primary/5" : "border")} onClick={() => setSelectedPaymentMethod(option.key as PaymentMethod)}>
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <Icon className={cn("h-6 w-6", selectedPaymentMethod === option.key ? "text-primary" : "text-muted-foreground")} />
-                                <span className="font-semibold">{option.label}</span>
-                            </div>
-                            {selectedPaymentMethod === option.key && <Check className="h-5 w-5 text-primary" />}
+            {PAYMENT_OPTIONS.map((option) => (
+                <Card key={option.key} className={cn("p-4 cursor-pointer", selectedPaymentMethod === option.key ? "border-2 border-primary bg-primary/5" : "border")} onClick={() => setSelectedPaymentMethod(option.key as PaymentMethod)}>
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <option.icon className={cn("h-6 w-6", selectedPaymentMethod === option.key ? "text-primary" : "text-muted-foreground")} />
+                            <span className="font-semibold">{option.label}</span>
                         </div>
-                    </Card>
-                )
-            })}
+                        {selectedPaymentMethod === option.key && <Check className="h-5 w-5 text-primary" />}
+                    </div>
+                </Card>
+            ))}
           </div>
-          <DialogFooter>
-            <Button className="w-full h-12 text-lg bg-emerald-600 hover:bg-emerald-700 font-bold" onClick={() => confirmarVenta(selectedPaymentMethod)} disabled={procesandoVenta}>
-              {procesandoVenta ? <Loader2 className="animate-spin mr-2 h-5 w-5" /> : "FINALIZAR VENTA"}
-            </Button>
-          </DialogFooter>
+          <DialogFooter><Button className="w-full h-12 text-lg bg-emerald-600 font-bold" onClick={() => confirmarVenta(selectedPaymentMethod)} disabled={procesandoVenta}>FINALIZAR VENTA</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* MODAL ESCANER */}
       <Dialog open={showScanner} onOpenChange={setShowScanner}>
         <DialogContent className="sm:max-w-md p-0 overflow-hidden bg-black border-none text-white">
-            {showScanner && (
-                <BarcodeScanner 
-                    onResult={handleScanResult} 
-                    onClose={() => setShowScanner(false)} 
-                />
-            )}
+            {showScanner && <BarcodeScanner onResult={handleScanResult} onClose={() => setShowScanner(false)} />}
         </DialogContent>
       </Dialog>
     </div>

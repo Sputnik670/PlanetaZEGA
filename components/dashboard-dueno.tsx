@@ -342,14 +342,29 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       finally { setActionLoading(false) }
   }
 
+  // ✅ LÓGICA DE BORRADO POTENTE (Corregida)
   const handleDeleteProduct = async (id: string) => {
-      if (!confirm("¿Borrar producto?")) return
+      if (!confirm("⚠️ ¿Estás seguro? Esto borrará el producto, TODO su stock y TODO su historial de ventas para siempre.")) return
+      
       try {
+          // 1. Borrar Stock asociado (histórico y actual)
+          const { error: errorStock } = await supabase.from('stock').delete().eq('producto_id', id)
+          if (errorStock) throw errorStock
+
+          // 2. Borrar Historial de Precios
+          const { error: errorPrecios } = await supabase.from('historial_precios').delete().eq('producto_id', id)
+          if (errorPrecios) throw errorPrecios
+
+          // 3. Finalmente borrar el producto
           const { error } = await supabase.from('productos').delete().eq('id', id)
           if (error) throw error
-          toast.success("Eliminado")
+          
+          toast.success("Producto y sus datos eliminados")
           fetchData()
-      } catch (error: any) { toast.error("Error", { description: "Verifica que no tenga stock asociado." }) }
+      } catch (error: any) { 
+          console.error(error)
+          toast.error("Error al eliminar", { description: error.message }) 
+      }
   }
 
   const loadStockBatches = async (productId: string) => {

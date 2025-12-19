@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
-import { Loader2, Package, Save, Plus, DollarSign, TrendingUp, Smile, ScanBarcode, X } from "lucide-react"
+import { Loader2, Package, Save, Plus, DollarSign, TrendingUp, Smile, ScanBarcode, X, Calendar as CalendarIcon } from "lucide-react"
 import { toast } from "sonner"
 import { addDays, format } from "date-fns"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -16,8 +16,7 @@ import { useZxing } from "react-zxing"
 
 // --- CONFIGURACIÓN DE ESCANER ---
 function BarcodeScanner({ onResult, onClose }: { onResult: (code: string) => void, onClose: () => void }) {
-  // CORRECCIÓN FINAL: Forzamos el tipo con 'as any' porque la librería
-  // tiene un bug en sus definiciones de TypeScript, aunque 'onDecodeResult' funciona.
+  // Fix para compatibilidad con versiones nuevas de react-zxing
   const { ref } = useZxing({
     onDecodeResult(result: any) {
       if (result && result.getText) {
@@ -80,14 +79,14 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
   const [loading, setLoading] = useState(false)
   const [showScanner, setShowScanner] = useState(false)
 
-  // Estado del formulario
+  // Estado del formulario (vida_util_dias reemplazado por fecha_vencimiento)
   const [formData, setFormData] = useState({
     codigo_barras: "",
     nombre: "",
     categoria: "",
     precio_venta: "",
     costo: "", 
-    vida_util_dias: "30",
+    fecha_vencimiento: "", // Nuevo campo fecha exacta
     cantidad_inicial: "0",
     emoji: "📦"
   })
@@ -105,8 +104,6 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
   // Lógica cuando se detecta un código
   const handleBarcodeDetected = async (code: string) => {
     setShowScanner(false) // Cerramos cámara
-    
-    // Evitar procesar si es el mismo que ya escaneó
     if (code === formData.codigo_barras) return;
 
     toast.info("Código detectado", { description: "Verificando producto..." })
@@ -121,7 +118,7 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
 
         if (existente) {
             toast.warning("¡Este producto ya existe!", { 
-                description: `Ya tienes "${existente.nombre}" registrado. Intenta editarlo o agregar stock.` 
+                description: `Ya tienes "${existente.nombre}" registrado.` 
             })
             return;
         }
@@ -139,9 +136,9 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
         }))
 
         if (apiData.found) {
-            toast.success("Información encontrada", { description: "Nombre autocompletado desde la base de datos global." })
+            toast.success("Información encontrada")
         } else {
-            toast("Código nuevo", { description: "No se encontraron datos online. Ingresa el nombre manualmente." })
+            toast("Código nuevo", { description: "No se encontraron datos online." })
         }
 
     } catch (error) {
@@ -156,6 +153,7 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
 
     try {
       // 1. Insertamos el PRODUCTO
+      // IMPORTANTE: Ponemos 'vida_util_dias' en 0 o null porque ya no usamos el input de días
       const { data: nuevoProducto, error: errorProd } = await supabase
         .from('productos')
         .insert([
@@ -164,7 +162,7 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
             categoria: formData.categoria,
             precio_venta: parseFloat(formData.precio_venta),
             costo: parseFloat(formData.costo) || 0,
-            vida_util_dias: parseInt(formData.vida_util_dias),
+            vida_util_dias: 0, // Default a 0
             emoji: formData.emoji,
             codigo_barras: formData.codigo_barras || null 
           }
@@ -174,16 +172,17 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
 
       if (errorProd) throw errorProd
 
-      // 2. Stock Inicial Automático
+      // 2. Stock Inicial con FECHA EXACTA
       const cantidad = parseInt(formData.cantidad_inicial) || 0
       
       if (cantidad > 0 && nuevoProducto) {
-        const diasVida = parseInt(formData.vida_util_dias) || 30
-        const fechaVencimientoAuto = format(addDays(new Date(), diasVida), 'yyyy-MM-dd')
+        
+        // Usamos la fecha seleccionada, o null si no seleccionó nada
+        const fechaVencimientoFinal = formData.fecha_vencimiento || null
 
         const stockItems = Array.from({ length: cantidad }).map(() => ({
           producto_id: nuevoProducto.id,
-          fecha_vencimiento: fechaVencimientoAuto,
+          fecha_vencimiento: fechaVencimientoFinal,
           estado: 'pendiente'
         }))
 
@@ -194,11 +193,7 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
         if (errorStock) throw errorStock
       }
 
-      toast.success("¡Producto creado!", {
-        description: cantidad > 0 
-          ? `Se creó "${formData.nombre}" y se agregaron ${cantidad} unidades.`
-          : `Se creó la ficha de "${formData.nombre}" en el catálogo.`
-      })
+      toast.success("¡Producto creado!")
       
       // Limpiar formulario
       setFormData({
@@ -207,7 +202,7 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
         categoria: "",
         precio_venta: "",
         costo: "",
-        vida_util_dias: "30",
+        fecha_vencimiento: "",
         cantidad_inicial: "0",
         emoji: "📦"
       })
@@ -216,7 +211,7 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
 
     } catch (error: any) {
       console.error("Error al crear:", error)
-      toast.error("Error al guardar", { description: error.message || "Verifica que el código no esté duplicado." })
+      toast.error("Error al guardar", { description: error.message })
     } finally {
       setLoading(false)
     }
@@ -241,8 +236,6 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
             <div className="space-y-1.5">
                  <div className="flex justify-between items-end">
                     <label className="text-xs font-semibold text-muted-foreground uppercase">Nombre del Producto</label>
-                    
-                    {/* Botón para abrir Escaner */}
                     <Button 
                         type="button" 
                         size="sm" 
@@ -255,7 +248,6 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
                     </Button>
                  </div>
 
-                 {/* Debug visual del código cargado */}
                  {formData.codigo_barras && (
                      <p className="text-[10px] text-blue-600 font-mono text-right">Código: {formData.codigo_barras}</p>
                  )}
@@ -263,7 +255,7 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
                  <div className="flex gap-2">
                     <Input 
                         name="nombre" 
-                        placeholder="Ej: Alfajor Jorgito (o Escanea 📸)" 
+                        placeholder="Ej: Alfajor Jorgito" 
                         value={formData.nombre} 
                         onChange={handleChange} 
                         className="font-medium flex-1"
@@ -365,38 +357,42 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
                 )}
             </div>
 
-            <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase">Vida Útil (Días)</label>
-                <Input 
-                    name="vida_util_dias" 
-                    type="number" 
-                    value={formData.vida_util_dias} 
-                    onChange={handleChange} 
-                />
-            </div>
-
             {/* Stock Inicial */}
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 mt-2">
-            <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                <Plus className="h-4 w-4 text-emerald-600" />
-                Stock Inicial (Opcional)
-                </label>
-            </div>
-            <div className="flex items-center gap-3">
-                <Input 
-                name="cantidad_inicial" 
-                type="number" 
-                min="0"
-                placeholder="0"
-                value={formData.cantidad_inicial} 
-                onChange={handleChange} 
-                className="bg-white text-lg font-bold text-center w-full"
-                />
-                <p className="text-xs text-muted-foreground leading-tight flex-1">
-                Unidades físicas que ya tienes en el local.
-                </p>
-            </div>
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 mt-2 space-y-3">
+                <div className="flex items-center justify-between">
+                    <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                        <Plus className="h-4 w-4 text-emerald-600" /> Stock Inicial
+                    </label>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-muted-foreground uppercase">Cantidad</label>
+                        <Input 
+                            name="cantidad_inicial" 
+                            type="number" 
+                            min="0"
+                            placeholder="0"
+                            value={formData.cantidad_inicial} 
+                            onChange={handleChange} 
+                            className="bg-white text-lg font-bold text-center"
+                        />
+                    </div>
+
+                    {/* Selector de Fecha */}
+                    <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1">
+                            <CalendarIcon className="h-3 w-3" /> Vencimiento
+                        </label>
+                        <Input 
+                            type="date"
+                            name="fecha_vencimiento"
+                            value={formData.fecha_vencimiento}
+                            onChange={handleChange}
+                            className="bg-white text-sm"
+                        />
+                    </div>
+                </div>
             </div>
 
             <Button type="submit" className="w-full h-12 text-md font-bold shadow-sm" disabled={loading}>

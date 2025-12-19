@@ -14,24 +14,18 @@ import { useZxing } from "react-zxing"
 
 // --- COMPONENTE SCANNER ---
 function BarcodeScanner({ onResult, onClose }: { onResult: (code: string) => void, onClose: () => void }) {
-  // Función unificada para manejar el resultado sin importar la versión
-  const handleScan = (result: any) => {
-      if (result) {
-          if (typeof result.getText === 'function') {
-              onResult(result.getText())
-          } else {
-              onResult(String(result))
-          }
-      }
-  }
-
+  
   const { ref } = useZxing({
-    // TRUCO: Ponemos ambos nombres y usamos 'as any' para que TypeScript no se queje.
-    // Esto asegura que funcione con cualquier versión de la librería.
-    onDecodeResult: handleScan, // Nombre nuevo (v2)
-    onResult: handleScan,       // Nombre viejo (v1)
+    // @ts-ignore
+    onDecodeResult(result: any) {
+        if (result && typeof result.getText === 'function') {
+            onResult(result.getText())
+        } else {
+            onResult(String(result))
+        }
+    },
     constraints: { video: { facingMode: "environment" } }
-  } as any)
+  } as any) // <--- ESTE ES EL 'AS ANY' QUE OBLIGA A VERCEL A ACEPTARLO
 
   return (
     <div className="relative flex flex-col items-center justify-center bg-black w-full h-[400px]">

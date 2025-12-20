@@ -25,12 +25,20 @@ function BarcodeScanner({ onResult, onClose }: { onResult: (code: string) => voi
         onResult(String(result))
       }
     },
-    constraints: { video: { facingMode: "environment" } }
+    // En iOS a veces ayuda especificar audio: false explícitamente
+    constraints: { video: { facingMode: "environment" }, audio: false }
   } as any) 
 
   return (
     <div className="relative flex flex-col items-center justify-center bg-black w-full h-[400px]">
-      <video ref={ref} className="w-full h-full object-cover" />
+      {/* CORRECCIÓN IOS: Agregamos playsInline, muted y autoPlay */}
+      <video 
+        ref={ref} 
+        className="w-full h-full object-cover" 
+        playsInline 
+        muted 
+        autoPlay 
+      />
       
       <div className="absolute top-0 left-0 w-full h-full border-2 border-primary/50 pointer-events-none">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-40 border-2 border-white/80 rounded-lg shadow-[0_0_0_999px_rgba(0,0,0,0.5)]">
@@ -79,14 +87,14 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
   const [loading, setLoading] = useState(false)
   const [showScanner, setShowScanner] = useState(false)
 
-  // Estado del formulario (vida_util_dias reemplazado por fecha_vencimiento)
+  // Estado del formulario
   const [formData, setFormData] = useState({
     codigo_barras: "",
     nombre: "",
     categoria: "",
     precio_venta: "",
     costo: "", 
-    fecha_vencimiento: "", // Nuevo campo fecha exacta
+    fecha_vencimiento: "", // Fecha exacta
     cantidad_inicial: "0",
     emoji: "📦"
   })
@@ -153,7 +161,6 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
 
     try {
       // 1. Insertamos el PRODUCTO
-      // IMPORTANTE: Ponemos 'vida_util_dias' en 0 o null porque ya no usamos el input de días
       const { data: nuevoProducto, error: errorProd } = await supabase
         .from('productos')
         .insert([
@@ -162,7 +169,7 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
             categoria: formData.categoria,
             precio_venta: parseFloat(formData.precio_venta),
             costo: parseFloat(formData.costo) || 0,
-            vida_util_dias: 0, // Default a 0
+            vida_util_dias: 0, 
             emoji: formData.emoji,
             codigo_barras: formData.codigo_barras || null 
           }
@@ -177,7 +184,6 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
       
       if (cantidad > 0 && nuevoProducto) {
         
-        // Usamos la fecha seleccionada, o null si no seleccionó nada
         const fechaVencimientoFinal = formData.fecha_vencimiento || null
 
         const stockItems = Array.from({ length: cantidad }).map(() => ({

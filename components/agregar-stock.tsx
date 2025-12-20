@@ -5,7 +5,7 @@
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase" 
 
-import { CalendarIcon, PlusIcon, MinusIcon, PackagePlus, DollarSign, Users } from "lucide-react" 
+import { CalendarIcon, PlusIcon, MinusIcon, PackagePlus, DollarSign, Users, CreditCard } from "lucide-react" 
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
 import { toast } from "sonner" 
@@ -36,11 +36,14 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
   const [cantidad, setCantidad] = useState(1)
   const [fechaVencimiento, setFechaVencimiento] = useState<Date | undefined>(undefined)
   
-  // --- NUEVO: ESTADOS PARA PROVEEDORES ---
+  // --- ESTADOS PARA PROVEEDORES ---
   const [proveedores, setProveedores] = useState<{id: string, nombre: string}[]>([])
   const [selectedProveedor, setSelectedProveedor] = useState<string>("")
   const [costoUnitario, setCostoUnitario] = useState<string>("")
-  const [estadoPago, setEstadoPago] = useState<string>("pendiente") // 'pendiente' (Cta Cte) o 'pagado'
+  
+  // Estados de Pago
+  const [estadoPago, setEstadoPago] = useState<string>("pendiente") // 'pendiente' o 'pagado'
+  const [medioPago, setMedioPago] = useState<string>("efectivo") // Nuevo estado
 
   // Cargar proveedores al montar (o al abrir el modal)
   useEffect(() => {
@@ -84,10 +87,9 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
                 {
                     proveedor_id: selectedProveedor,
                     monto_total: montoTotal,
-                    estado_pago: estadoPago, // 'pendiente' o 'pagado'
+                    estado_pago: estadoPago, 
+                    medio_pago: estadoPago === 'pagado' ? medioPago : null, // ✅ Guardamos el medio de pago
                     fecha_compra: new Date().toISOString(),
-                    // Si es a crédito, podríamos calcular vencimiento aquí, 
-                    // pero por simplicidad lo dejamos nulo o manual por ahora.
                 }
             ])
             .select()
@@ -102,7 +104,6 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
         producto_id: producto.id,
         fecha_vencimiento: format(fechaVencimiento, 'yyyy-MM-dd'),
         estado: 'pendiente',
-        // Vinculamos con los datos nuevos (si existen)
         proveedor_id: selectedProveedor || null,
         compra_id: compraId,
         costo_unitario_historico: costoNum > 0 ? costoNum : null
@@ -115,7 +116,7 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
 
       if (error) throw error
 
-      // 5. Actualizar precio de costo actual del producto (Opcional pero útil)
+      // 5. Actualizar precio de costo actual del producto
       if (costoNum > 0) {
           await supabase.from('productos').update({ costo: costoNum }).eq('id', producto.id)
       }
@@ -131,6 +132,7 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
       setSelectedProveedor("")
       setCostoUnitario("")
       setEstadoPago("pendiente")
+      setMedioPago("efectivo")
       setOpen(false)
       
       if (onStockAdded) onStockAdded()
@@ -254,7 +256,6 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
                         <select 
                             id="estado-pago"
                             title="Estado del Pago"
-                            aria-label="Estado del Pago"
                             className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:ring-1 focus:ring-primary"
                             value={estadoPago}
                             onChange={(e) => setEstadoPago(e.target.value)}
@@ -265,6 +266,29 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
                     </div>
                 )}
             </div>
+
+            {/* ✅ NUEVO: SELECCIÓN DE MEDIO DE PAGO */}
+            {selectedProveedor && estadoPago === 'pagado' && (
+                <div className="space-y-1 animate-in slide-in-from-top-2">
+                    <Label htmlFor="medio-pago" className="text-xs text-muted-foreground flex items-center gap-1">
+                        <CreditCard className="h-3 w-3"/> Medio de Pago
+                    </Label>
+                    <select 
+                        id="medio-pago"
+                        title="Medio de Pago"
+                        className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:ring-1 focus:ring-primary font-medium"
+                        value={medioPago}
+                        onChange={(e) => setMedioPago(e.target.value)}
+                    >
+                        <option value="efectivo">Efectivo 💵</option>
+                        <option value="transferencia">Transferencia 🏦</option>
+                        <option value="debito">Tarjeta Débito 💳</option>
+                        <option value="credito">Tarjeta Crédito 💳</option>
+                        <option value="cheque">Cheque 🎫</option>
+                        <option value="otro">Otro</option>
+                    </select>
+                </div>
+            )}
           </div>
 
           <Button onClick={handleGuardar} disabled={loading} size="lg" className="w-full font-bold mt-2">

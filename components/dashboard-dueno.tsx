@@ -14,7 +14,7 @@ import {
   Repeat2, Wallet, Calendar as CalendarIcon, BarChart3, 
   Eye, TrendingDown, Star, User, ShoppingBag, Clock, 
   Pencil, Trash2, History, Save, ChevronDown, ChevronUp, Calculator, ScanBarcode,
-  Users // ✅ Nuevo icono importado
+  Users, Sparkles, ArrowRight
 } from "lucide-react" 
 import { BottomNav } from "@/components/bottom-nav"
 import { BarChart, Bar, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts" 
@@ -30,7 +30,7 @@ import AsignarMision from "@/components/asignar-mision"
 import { toast } from "sonner" 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
-import GestionProveedores from "@/components/gestion-proveedores" // ✅ Importamos el módulo nuevo
+import GestionProveedores from "@/components/gestion-proveedores"
 
 // --- Configuración ---
 const UMBRAL_STOCK_BAJO = 5 
@@ -109,6 +109,16 @@ interface TurnoAudit {
   movimientos_caja: MovimientoCaja[]
 }
 
+// ✅ NUEVA INTERFAZ PARA SUGERENCIAS
+interface SugerenciaCompra {
+    id: string
+    producto: string
+    stock_actual: number
+    mejor_proveedor: string | null
+    mejor_precio_historico: number | null
+    emoji: string
+}
+
 const PAYMENT_ICONS = {
     efectivo: DollarSign,
     tarjeta: CreditCard,
@@ -118,7 +128,7 @@ const PAYMENT_ICONS = {
 }
 
 export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
-  // 1. Estados Globales (✅ Agregamos "suppliers")
+  // 1. Estados Globales
   const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks" | "catalog" | "sales" | "supervision" | "suppliers">("sales")
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(false)
@@ -140,6 +150,9 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   const [topProductos, setTopProductos] = useState<{name: string, count: number}[]>([])
   const [turnosAudit, setTurnosAudit] = useState<TurnoAudit[]>([])
   const [expandedTurnoId, setExpandedTurnoId] = useState<string | null>(null)
+  
+  // ✅ Nuevo Estado: Sugerencias
+  const [sugerencias, setSugerencias] = useState<SugerenciaCompra[]>([])
 
   // 3. Modales
   const [editingProduct, setEditingProduct] = useState<Producto | null>(null)
@@ -202,7 +215,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     setCapitalSaludable(saludable)
   }
 
-  // --- FETCH DATA ---
+  // --- FETCH DATA (LÓGICA PRINCIPAL) ---
   const fetchData = useCallback(async () => {
     // A. Inventario y Stock
     const { data: dataProductosView, error: errorProductosView } = await supabase
@@ -216,6 +229,43 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     } else {
         const productosCalculados = (dataProductosView as Producto[]) || []
         setProductos(productosCalculados)
+
+        // ✅ LÓGICA DE SUGERENCIAS DE COMPRA
+        // Filtramos productos con stock bajo y buscamos quién los vendió más barato
+        const productosBajos = productosCalculados.filter(p => (p.stock_disponible || 0) <= UMBRAL_STOCK_BAJO)
+        const nuevasSugerencias: SugerenciaCompra[] = []
+
+        // Iteramos los críticos (no suele ser una lista enorme)
+        for (const prod of productosBajos) {
+            // Buscamos en el historial de stock quién tuvo el menor precio histórico
+            const { data: historial } = await supabase
+                .from('stock')
+                .select('costo_unitario_historico, proveedores(nombre)')
+                .eq('producto_id', prod.id)
+                .not('proveedor_id', 'is', null) // Solo si tiene proveedor registrado
+                .not('costo_unitario_historico', 'is', null)
+                .order('costo_unitario_historico', { ascending: true }) // El más barato primero
+                .limit(1)
+            
+            let mejorProv = null
+            let mejorPrecio = null
+
+            if (historial && historial.length > 0) {
+                // @ts-ignore
+                mejorProv = historial[0].proveedores?.nombre
+                mejorPrecio = historial[0].costo_unitario_historico
+            }
+
+            nuevasSugerencias.push({
+                id: prod.id,
+                producto: prod.nombre,
+                emoji: prod.emoji,
+                stock_actual: prod.stock_disponible || 0,
+                mejor_proveedor: mejorProv,
+                mejor_precio_historico: mejorPrecio
+            })
+        }
+        setSugerencias(nuevasSugerencias)
     }
 
     // Capital en Riesgo
@@ -278,7 +328,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     return `${from} - ${to}`
   }, [dateRange])
 
-  // ✅ Búsqueda mejorada: Nombre O Código de barras
+  // ✅ Búsqueda mejorada
   const inventarioFiltrado = productos.filter((item) => {
     const term = searchQuery.toLowerCase()
     return item.nombre.toLowerCase().includes(term) || (item.codigo_barras && item.codigo_barras.includes(term))
@@ -309,7 +359,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
           const { data: oldProduct, error: fetchError } = await supabase.from('productos').select('precio_venta, costo').eq('id', editingProduct.id).single();
           if (fetchError) throw fetchError;
 
-          // ✅ Actualización incluye código de barras
           const { error: updateError } = await supabase.from('productos').update({
               nombre: editingProduct.nombre,
               categoria: editingProduct.categoria,
@@ -344,20 +393,16 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       finally { setActionLoading(false) }
   }
 
-  // ✅ LÓGICA DE BORRADO POTENTE (Corregida)
   const handleDeleteProduct = async (id: string) => {
       if (!confirm("⚠️ ¿Estás seguro? Esto borrará el producto, TODO su stock y TODO su historial de ventas para siempre.")) return
       
       try {
-          // 1. Borrar Stock asociado (histórico y actual)
           const { error: errorStock } = await supabase.from('stock').delete().eq('producto_id', id)
           if (errorStock) throw errorStock
 
-          // 2. Borrar Historial de Precios
           const { error: errorPrecios } = await supabase.from('historial_precios').delete().eq('producto_id', id)
           if (errorPrecios) throw errorPrecios
 
-          // 3. Finalmente borrar el producto
           const { error } = await supabase.from('productos').delete().eq('id', id)
           if (error) throw error
           
@@ -409,7 +454,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
           <Button onClick={() => setActiveTab("alerts")} variant={activeTab === "alerts" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><TrendingUp className="mr-2 h-4 w-4" /> Riesgos</Button>
           <Button onClick={() => setActiveTab("inventory")} variant={activeTab === "inventory" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Package className="mr-2 h-4 w-4" /> Stock</Button>
           <Button onClick={() => setActiveTab("catalog")} variant={activeTab === "catalog" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Plus className="mr-2 h-4 w-4" /> Catálogo</Button>
-          {/* ✅ NUEVO BOTÓN PROVEEDORES */}
           <Button onClick={() => setActiveTab("suppliers")} variant={activeTab === "suppliers" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Users className="mr-2 h-4 w-4" /> Proveedores</Button>
         </div>
       </div>
@@ -426,7 +470,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             </div>
         )}
 
-        {/* --- SUPERVISIÓN (MEJORADO CON AUDITORÍA DETALLADA) --- */}
+        {/* --- SUPERVISIÓN --- */}
         {activeTab === "supervision" && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
                 <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
@@ -440,7 +484,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                 ) : (
                     <div className="space-y-3">
                         {turnosAudit.map((turno) => {
-                            // 1. Filtrar ventas de este turno específico (por fecha)
                             const ventasTurno = ventasRecientes.filter(v => {
                                 const fechaVenta = parseISO(v.fecha_venta)
                                 const apertura = parseISO(turno.fecha_apertura)
@@ -448,17 +491,12 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                 return fechaVenta >= apertura && fechaVenta <= cierre
                             })
 
-                            // 2. Calcular desglose
                             const facturacionTotal = ventasTurno.reduce((acc, curr) => acc + (curr.productos?.precio_venta || 0), 0)
                             const facturacionEfectivo = ventasTurno.filter(v => v.metodo_pago === 'efectivo' || !v.metodo_pago).reduce((acc, curr) => acc + (curr.productos?.precio_venta || 0), 0)
                             const facturacionDigital = facturacionTotal - facturacionEfectivo
-                            
                             const totalGastos = turno.movimientos_caja?.filter(m => m.tipo === 'egreso').reduce((acc, curr) => acc + curr.monto, 0) || 0
-                            
-                            // 3. Calcular Diferencia Real (Solo sobre efectivo)
                             const cajaEsperada = turno.monto_inicial + facturacionEfectivo - totalGastos
                             const diferenciaReal = (turno.monto_final || 0) - cajaEsperada
-
                             const isOpen = !turno.fecha_cierre
                             const isExpanded = expandedTurnoId === turno.id
                             const colorClass = isOpen ? "border-blue-200 bg-blue-50/50" : Math.abs(diferenciaReal) > 100 ? "border-red-200 bg-red-50/30" : "border-emerald-200 bg-emerald-50/30"
@@ -490,8 +528,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                     </div>
                                     {isExpanded && (
                                         <div className="border-t p-3 bg-white animate-in slide-in-from-top-2 space-y-3">
-                                            
-                                            {/* SECCIÓN 1: DETALLE DE CAJA */}
                                             <div className="grid grid-cols-2 gap-3 text-sm">
                                                 <div className="p-2 bg-slate-50 rounded border border-slate-100">
                                                     <span className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Apertura</span>
@@ -502,8 +538,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                                     <span className="font-mono font-bold text-lg">{turno.monto_final ? formatMoney(turno.monto_final) : '---'}</span>
                                                 </div>
                                             </div>
-
-                                            {/* SECCIÓN 2: FACTURACIÓN DEL TURNO */}
                                             <div className="p-3 bg-blue-50/50 rounded border border-blue-100">
                                                 <div className="flex items-center justify-between mb-2">
                                                     <span className="text-xs font-bold text-blue-800 flex items-center gap-1"><Calculator className="h-3 w-3"/> Facturación Turno</span>
@@ -520,8 +554,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                                     </div>
                                                 </div>
                                             </div>
-
-                                            {/* SECCIÓN 3: RESULTADO (DIFERENCIA) */}
                                             {!isOpen && (
                                                 <div className={cn("p-2 rounded border flex justify-between items-center", Math.abs(diferenciaReal) > 100 ? "bg-red-50 border-red-200" : "bg-emerald-50 border-emerald-200")}>
                                                     <div>
@@ -535,8 +567,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                                     </span>
                                                 </div>
                                             )}
-
-                                            {/* SECCIÓN 4: GASTOS */}
                                             {turno.movimientos_caja?.length > 0 && (
                                                 <div className="pt-2 border-t border-dashed">
                                                     <p className="text-xs font-bold text-red-600 mb-1 flex items-center gap-1"><TrendingDown className="h-3 w-3"/> Gastos Registrados</p>
@@ -548,7 +578,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                                     ))}
                                                 </div>
                                             )}
-
                                             {isOpen && (
                                                 <div className="mt-2 pt-2 border-t flex justify-end">
                                                     <AsignarMision turnoId={turno.id} empleadoId={turno.empleado_id} empleadoNombre={turno.perfiles?.nombre || "Empleado"} onMisionCreated={fetchData} />
@@ -687,6 +716,41 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         {/* --- ALERTAS (RIESGOS) --- */}
         {activeTab === "alerts" && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+             {/* ✅ NUEVA TARJETA DE SUGERENCIAS */}
+             {sugerencias.length > 0 && (
+                 <Card className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-0 shadow-lg p-4">
+                    <h3 className="flex items-center gap-2 font-bold mb-3">
+                        <Sparkles className="h-5 w-5 text-yellow-300 animate-pulse" /> Sugerencias de Compra 🧠
+                    </h3>
+                    <div className="space-y-2">
+                        {sugerencias.map(sug => (
+                            <div key={sug.id} className="bg-white/10 backdrop-blur-sm p-2 rounded-lg flex items-center justify-between text-sm">
+                                <div className="flex items-center gap-2">
+                                    <span>{sug.emoji}</span>
+                                    <div>
+                                        <p className="font-bold">{sug.producto}</p>
+                                        <p className="text-[10px] text-violet-200">
+                                            Quedan: {sug.stock_actual} u.
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    {sug.mejor_proveedor ? (
+                                        <>
+                                            <p className="text-[10px] font-bold text-yellow-300 uppercase">Mejor Precio</p>
+                                            <p className="font-bold">{formatMoney(sug.mejor_precio_historico || 0)}</p>
+                                            <p className="text-[10px] truncate max-w-[80px]">{sug.mejor_proveedor}</p>
+                                        </>
+                                    ) : (
+                                        <span className="text-[10px] text-white/50 italic">Sin historial</span>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                 </Card>
+             )}
+
              <div className="grid grid-cols-2 gap-4">
                 <Card className="p-4 bg-orange-50 border-l-4 border-l-orange-500 shadow-sm">
                     <div className="flex flex-col">

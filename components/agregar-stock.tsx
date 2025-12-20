@@ -1,11 +1,11 @@
+// components/agregar-stock.tsx
+
 "use client"
 
-import { useState } from "react"
-// ELIMINADO: import { createClientComponentClient } ...
-// AGREGADO: Importamos tu cliente centralizado
+import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase" 
 
-import { CalendarIcon, PlusIcon, MinusIcon, PackagePlus } from "lucide-react" 
+import { CalendarIcon, PlusIcon, MinusIcon, PackagePlus, DollarSign, Users } from "lucide-react" 
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
 import { toast } from "sonner" 
@@ -36,8 +36,22 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
   const [cantidad, setCantidad] = useState(1)
   const [fechaVencimiento, setFechaVencimiento] = useState<Date | undefined>(undefined)
   
-  // ELIMINADO: const supabase = createClientComponentClient() 
-  // (Ya no hace falta inicializarlo aquí, usamos el importado arriba)
+  // --- NUEVO: ESTADOS PARA PROVEEDORES ---
+  const [proveedores, setProveedores] = useState<{id: string, nombre: string}[]>([])
+  const [selectedProveedor, setSelectedProveedor] = useState<string>("")
+  const [costoUnitario, setCostoUnitario] = useState<string>("")
+  const [estadoPago, setEstadoPago] = useState<string>("pendiente") // 'pendiente' (Cta Cte) o 'pagado'
+
+  // Cargar proveedores al montar (o al abrir el modal)
+  useEffect(() => {
+    if (open) {
+        const fetchProveedores = async () => {
+            const { data } = await supabase.from('proveedores').select('id, nombre').order('nombre')
+            setProveedores(data || [])
+        }
+        fetchProveedores()
+    }
+  }, [open])
 
   // Helpers para botones grandes (+ / -)
   const incrementar = () => setCantidad((prev) => prev + 1)
@@ -57,28 +71,66 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
     setLoading(true)
 
     try {
-      // 2. Lógica de "Bulk Insert"
+      let compraId: string | null = null;
+      const costoNum = parseFloat(costoUnitario) || 0;
+
+      // 2. Si hay proveedor y costo, registramos la COMPRA primero
+      if (selectedProveedor && costoNum > 0) {
+          const montoTotal = costoNum * cantidad;
+          
+          const { data: compraData, error: compraError } = await supabase
+            .from('compras')
+            .insert([
+                {
+                    proveedor_id: selectedProveedor,
+                    monto_total: montoTotal,
+                    estado_pago: estadoPago, // 'pendiente' o 'pagado'
+                    fecha_compra: new Date().toISOString(),
+                    // Si es a crédito, podríamos calcular vencimiento aquí, 
+                    // pero por simplicidad lo dejamos nulo o manual por ahora.
+                }
+            ])
+            .select()
+            .single()
+
+          if (compraError) throw compraError
+          compraId = compraData.id
+      }
+
+      // 3. Lógica de "Bulk Insert" en STOCK
       const stockItems = Array.from({ length: cantidad }).map(() => ({
         producto_id: producto.id,
         fecha_vencimiento: format(fechaVencimiento, 'yyyy-MM-dd'),
-        estado: 'pendiente'
+        estado: 'pendiente',
+        // Vinculamos con los datos nuevos (si existen)
+        proveedor_id: selectedProveedor || null,
+        compra_id: compraId,
+        costo_unitario_historico: costoNum > 0 ? costoNum : null
       }))
 
-      // 3. Enviamos todo junto a Supabase (usando 'supabase' importado)
+      // 4. Enviamos todo junto a Supabase
       const { error } = await supabase
         .from('stock')
         .insert(stockItems)
 
       if (error) throw error
 
-      // 4. Éxito
+      // 5. Actualizar precio de costo actual del producto (Opcional pero útil)
+      if (costoNum > 0) {
+          await supabase.from('productos').update({ costo: costoNum }).eq('id', producto.id)
+      }
+
+      // 6. Éxito
       toast.success("Stock guardado", { 
-        description: `Se ingresaron ${cantidad} unidades de ${producto.nombre}.` 
+        description: `Se ingresaron ${cantidad} unidades.${compraId ? ' Compra registrada.' : ''}` 
       })
       
       // Reset del formulario
       setCantidad(1)
       setFechaVencimiento(undefined)
+      setSelectedProveedor("")
+      setCostoUnitario("")
+      setEstadoPago("pendiente")
       setOpen(false)
       
       if (onStockAdded) onStockAdded()
@@ -100,19 +152,19 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
         </Button>
       </DialogTrigger>
       
-      <DialogContent className="sm:max-w-md bg-white">
+      <DialogContent className="sm:max-w-md bg-white max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Ingresar: {producto.nombre}</DialogTitle>
         </DialogHeader>
         
-        <div className="flex flex-col gap-6 py-4">
+        <div className="flex flex-col gap-5 py-2">
           
           {/* CONTROL DE CANTIDAD */}
           <div className="space-y-2">
-            <Label className="text-center block">Cantidad a ingresar</Label>
+            <Label className="text-center block text-xs uppercase font-bold text-muted-foreground">Cantidad</Label>
             <div className="flex items-center justify-center gap-4">
-              <Button variant="outline" size="icon" onClick={decrementar} className="h-12 w-12 rounded-full">
-                <MinusIcon className="h-6 w-6" />
+              <Button variant="outline" size="icon" onClick={decrementar} className="h-10 w-10 rounded-full">
+                <MinusIcon className="h-5 w-5" />
               </Button>
               
               <Input
@@ -120,29 +172,29 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
                 min="1"
                 value={cantidad}
                 onChange={(e) => setCantidad(parseInt(e.target.value) || 0)}
-                className="h-12 w-24 text-center text-xl font-bold"
+                className="h-12 w-20 text-center text-xl font-bold"
               />
               
-              <Button variant="outline" size="icon" onClick={incrementar} className="h-12 w-12 rounded-full">
-                <PlusIcon className="h-6 w-6" />
+              <Button variant="outline" size="icon" onClick={incrementar} className="h-10 w-10 rounded-full">
+                <PlusIcon className="h-5 w-5" />
               </Button>
             </div>
           </div>
 
           {/* FECHA DE VENCIMIENTO */}
-          <div className="flex flex-col gap-2">
-            <Label>Fecha de Vencimiento</Label>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs uppercase font-bold text-muted-foreground">Fecha Vencimiento</Label>
             <Popover>
               <PopoverTrigger asChild>
                 <Button
                   variant={"outline"}
                   className={cn(
-                    "h-12 w-full justify-start text-left font-normal",
+                    "h-10 w-full justify-start text-left font-normal",
                     !fechaVencimiento && "text-muted-foreground"
                   )}
                 >
-                  <CalendarIcon className="mr-2 h-5 w-5" />
-                  {fechaVencimiento ? format(fechaVencimiento, "PPP", { locale: es }) : "Seleccionar fecha"}
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {fechaVencimiento ? format(fechaVencimiento, "dd/MM/yyyy", { locale: es }) : "Seleccionar fecha"}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
@@ -157,8 +209,66 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
             </Popover>
           </div>
 
-          <Button onClick={handleGuardar} disabled={loading} size="lg" className="w-full text-lg mt-2">
-            {loading ? "Guardando..." : "Confirmar"}
+          {/* SECCIÓN PROVEEDOR (OPCIONAL) */}
+          <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 space-y-3">
+            <div className="flex items-center gap-2 mb-1">
+                <Users className="h-4 w-4 text-primary" />
+                <Label className="font-bold text-sm">Datos de Compra (Opcional)</Label>
+            </div>
+            
+            <div className="space-y-1">
+                <Label htmlFor="proveedor-select" className="text-xs text-muted-foreground">Proveedor</Label>
+                <select 
+                    id="proveedor-select"
+                    title="Seleccionar Proveedor"
+                    aria-label="Seleccionar Proveedor"
+                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:ring-1 focus:ring-primary"
+                    value={selectedProveedor}
+                    onChange={(e) => setSelectedProveedor(e.target.value)}
+                >
+                    <option value="">-- Sin asignar --</option>
+                    {proveedores.map(p => (
+                        <option key={p.id} value={p.id}>{p.nombre}</option>
+                    ))}
+                </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Costo Unitario</Label>
+                    <div className="relative">
+                        <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                        <Input 
+                            type="number" 
+                            placeholder="0.00" 
+                            className="pl-7 h-9 bg-white"
+                            value={costoUnitario}
+                            onChange={(e) => setCostoUnitario(e.target.value)}
+                        />
+                    </div>
+                </div>
+                
+                {selectedProveedor && (
+                    <div className="space-y-1 animate-in fade-in">
+                        <Label htmlFor="estado-pago" className="text-xs text-muted-foreground">Estado Pago</Label>
+                        <select 
+                            id="estado-pago"
+                            title="Estado del Pago"
+                            aria-label="Estado del Pago"
+                            className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:ring-1 focus:ring-primary"
+                            value={estadoPago}
+                            onChange={(e) => setEstadoPago(e.target.value)}
+                        >
+                            <option value="pendiente">Cuenta Corriente</option>
+                            <option value="pagado">Pagado</option>
+                        </select>
+                    </div>
+                )}
+            </div>
+          </div>
+
+          <Button onClick={handleGuardar} disabled={loading} size="lg" className="w-full font-bold mt-2">
+            {loading ? "Guardando..." : "Confirmar Ingreso"}
           </Button>
 
         </div>

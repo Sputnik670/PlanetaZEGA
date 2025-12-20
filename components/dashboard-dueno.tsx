@@ -13,7 +13,8 @@ import {
   Loader2, ShieldCheck, DollarSign, CreditCard, 
   Repeat2, Wallet, Calendar as CalendarIcon, BarChart3, 
   Eye, TrendingDown, Star, User, ShoppingBag, Clock, 
-  Pencil, Trash2, History, Save, ChevronDown, ChevronUp, Calculator, ScanBarcode
+  Pencil, Trash2, History, Save, ChevronDown, ChevronUp, Calculator, ScanBarcode,
+  Users // ✅ Nuevo icono importado
 } from "lucide-react" 
 import { BottomNav } from "@/components/bottom-nav"
 import { BarChart, Bar, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts" 
@@ -29,6 +30,7 @@ import AsignarMision from "@/components/asignar-mision"
 import { toast } from "sonner" 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
+import GestionProveedores from "@/components/gestion-proveedores" // ✅ Importamos el módulo nuevo
 
 // --- Configuración ---
 const UMBRAL_STOCK_BAJO = 5 
@@ -51,7 +53,7 @@ interface Producto {
     precio_venta: number
     costo: number
     emoji: string
-    codigo_barras?: string // ✅ Nuevo campo agregado
+    codigo_barras?: string 
     stock_disponible?: number
 }
 
@@ -116,8 +118,8 @@ const PAYMENT_ICONS = {
 }
 
 export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
-  // 1. Estados Globales
-  const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks" | "catalog" | "sales" | "supervision">("sales")
+  // 1. Estados Globales (✅ Agregamos "suppliers")
+  const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks" | "catalog" | "sales" | "supervision" | "suppliers">("sales")
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
@@ -407,6 +409,8 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
           <Button onClick={() => setActiveTab("alerts")} variant={activeTab === "alerts" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><TrendingUp className="mr-2 h-4 w-4" /> Riesgos</Button>
           <Button onClick={() => setActiveTab("inventory")} variant={activeTab === "inventory" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Package className="mr-2 h-4 w-4" /> Stock</Button>
           <Button onClick={() => setActiveTab("catalog")} variant={activeTab === "catalog" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Plus className="mr-2 h-4 w-4" /> Catálogo</Button>
+          {/* ✅ NUEVO BOTÓN PROVEEDORES */}
+          <Button onClick={() => setActiveTab("suppliers")} variant={activeTab === "suppliers" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Users className="mr-2 h-4 w-4" /> Proveedores</Button>
         </div>
       </div>
 
@@ -629,6 +633,13 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         {/* --- CATÁLOGO --- */}
         {activeTab === "catalog" && (
           <div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500"><CrearProducto onProductCreated={() => { setActiveTab("inventory"); fetchData(); }} /></div>
+        )}
+
+        {/* --- PROVEEDORES (NUEVO) --- */}
+        {activeTab === "suppliers" && (
+            <div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <GestionProveedores />
+            </div>
         )}
 
         {/* --- INVENTARIO --- */}

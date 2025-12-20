@@ -35,6 +35,7 @@ export interface Database {
           organization_id: string | null
           rol: 'dueño' | 'empleado'
           nombre: string | null
+          email: string | null // ✅ NUEVO CAMPO
           xp: number
           created_at: string
         }
@@ -43,6 +44,7 @@ export interface Database {
           organization_id?: string | null
           rol?: 'dueño' | 'empleado'
           nombre?: string | null
+          email?: string | null // ✅ NUEVO CAMPO
           xp?: number
           created_at?: string
         }
@@ -51,6 +53,7 @@ export interface Database {
           organization_id?: string | null
           rol?: 'dueño' | 'empleado'
           nombre?: string | null
+          email?: string | null // ✅ NUEVO CAMPO
           xp?: number
           created_at?: string
         }
@@ -69,7 +72,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          organization_id: string
+          organization_id?: string
           nombre: string
           rubro?: string | null
           contacto_nombre?: string | null
@@ -106,7 +109,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          organization_id: string
+          organization_id?: string
           nombre: string
           emoji?: string | null
           categoria?: string | null
@@ -145,7 +148,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          organization_id: string
+          organization_id?: string
           empleado_id?: string | null
           fecha_apertura?: string
           fecha_cierre?: string | null
@@ -177,7 +180,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          organization_id: string
+          organization_id?: string
           proveedor_id?: string | null
           monto_total: number
           estado_pago?: string | null
@@ -215,7 +218,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          organization_id: string
+          organization_id?: string
           producto_id?: string | null
           proveedor_id?: string | null
           compra_id?: string | null
@@ -259,7 +262,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          organization_id: string
+          organization_id?: string
           caja_diaria_id: string
           empleado_id?: string | null
           monto: number
@@ -294,7 +297,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          organization_id: string
+          organization_id?: string
           empleado_id: string
           caja_diaria_id?: string | null
           tipo: 'vencimiento' | 'arqueo_cierre' | 'manual'
@@ -333,7 +336,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          organization_id: string
+          organization_id?: string
           producto_id?: string | null
           empleado_id?: string | null
           precio_venta_anterior?: number | null

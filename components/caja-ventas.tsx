@@ -1,4 +1,3 @@
-// components/caja-ventas.tsx
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
@@ -11,10 +10,12 @@ import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { useZxing } from "react-zxing"
+// ✅ IMPORTAMOS LA LÓGICA DE TICKET
+import { generarTicketVenta } from "@/lib/generar-ticket"
+import { format } from "date-fns"
 
 // --- COMPONENTE SCANNER ---
 function BarcodeScanner({ onResult, onClose }: { onResult: (code: string) => void, onClose: () => void }) {
-  
   const { ref } = useZxing({
     // @ts-ignore
     onDecodeResult(result: any) {
@@ -25,7 +26,7 @@ function BarcodeScanner({ onResult, onClose }: { onResult: (code: string) => voi
         }
     },
     constraints: { video: { facingMode: "environment" } }
-  } as any) // <--- ESTE ES EL 'AS ANY' QUE OBLIGA A VERCEL A ACEPTARLO
+  } as any)
 
   return (
     <div className="relative flex flex-col items-center justify-center bg-black w-full h-[400px]">
@@ -72,7 +73,8 @@ const PAYMENT_OPTIONS = [
     { key: 'otro', label: 'Otro / Cta. Corriente', icon: Wallet },
 ]
 
-export default function CajaVentas({ turnoId }: { turnoId?: string }) {
+// ✅ AHORA RECIBE EL NOMBRE DEL EMPLEADO PARA EL TICKET
+export default function CajaVentas({ turnoId, empleadoNombre = "Cajero" }: { turnoId?: string, empleadoNombre?: string }) {
   const [busqueda, setBusqueda] = useState("")
   const [productosBusqueda, setProductosBusqueda] = useState<ProductoConStock[]>([])
   const [loading, setLoading] = useState(false)
@@ -180,6 +182,7 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
 
   const removeCartItem = (productId: string) => setCart(prev => prev.filter(item => item.id !== productId))
 
+  // ✅ LOGICA DE PAGO + IMPRESIÓN
   const confirmarVenta = async (metodo_pago: PaymentMethod) => {
     if (!turnoId) return
     setProcesandoVenta(true)
@@ -209,9 +212,33 @@ export default function CajaVentas({ turnoId }: { turnoId?: string }) {
         .in('id', updates)
 
       if (updateError) throw updateError
+      
       toast.success("¡Venta Exitosa! 💰")
-      setCart([])
       setShowPaymentModal(false)
+
+      // 🖨️ IMPRIMIR TICKET AUTOMÁTICO (O PREGUNTAR)
+      // Usamos un pequeño timeout para asegurar que el modal se cierre visualmente antes del alert
+      setTimeout(() => {
+          const deseaTicket = confirm("¿Imprimir Ticket de Venta?")
+          if (deseaTicket) {
+              generarTicketVenta({
+                  organizacion: "Planeta ZEGA", // Podrías traer esto de la DB si quisieras
+                  fecha: format(new Date(), 'dd/MM/yyyy HH:mm'),
+                  vendedor: empleadoNombre,
+                  metodoPago: metodo_pago,
+                  total: totalCarrito,
+                  items: cart.map(i => ({
+                      cantidad: i.cantidad,
+                      producto: i.nombre,
+                      precioUnitario: i.precio_venta,
+                      subtotal: i.cantidad * i.precio_venta
+                  }))
+              })
+          }
+      }, 100)
+
+      setCart([]) // Limpiar carrito después de todo
+      
     } catch (error: any) {
       toast.error("Error al procesar")
     } finally {

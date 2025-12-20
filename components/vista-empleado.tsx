@@ -4,14 +4,13 @@
 import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card" 
-import { LogOut, Loader2, ShoppingCart, Target, TrendingUp, Star, Trophy, AlertTriangle } from "lucide-react" 
+import { LogOut, Loader2, ShoppingCart, Target, Trophy, AlertTriangle, Star } from "lucide-react" 
 import { toast } from "sonner"
 import CajaVentas from "@/components/caja-ventas" 
 import ArqueoCaja, { CajaDiaria } from "@/components/arqueo-caja" 
 import MisionesEmpleado from "@/components/misiones-empleado"
 import RegistrarGasto from "@/components/registrar-gasto"
-import GestionVencimientos from "@/components/gestion-vencimientos" // ✅ IMPORTADO
+import GestionVencimientos from "@/components/gestion-vencimientos" 
 import { Progress } from "@/components/ui/progress" 
 
 interface UserProfile {
@@ -239,7 +238,11 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                                     />
 
                                     {/* B. Caja de Ventas (Carrito) */}
-                                    <CajaVentas turnoId={turnoActivo.id} />
+                                    {/* ✅ AQUÍ PASAMOS EL NOMBRE AL COMPONENTE */}
+                                    <CajaVentas 
+                                        turnoId={turnoActivo.id} 
+                                        empleadoNombre={userProfile?.nombre || "Cajero"}
+                                    />
 
                                     {/* C. Arqueo / Cierre ABAJO DE TODO */}
                                     <div className="pt-6 border-t border-dashed border-gray-300 mt-4">

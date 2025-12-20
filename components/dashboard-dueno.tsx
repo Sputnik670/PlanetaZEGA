@@ -14,7 +14,7 @@ import {
   Repeat2, Wallet, Calendar as CalendarIcon, BarChart3, 
   Eye, TrendingDown, Star, User, ShoppingBag, Clock, 
   Pencil, Trash2, History, Save, ChevronDown, ChevronUp, Calculator, ScanBarcode,
-  Users, Sparkles, ArrowRight
+  Users, Sparkles, Printer, Briefcase // ✅ Importamos Briefcase para el icono de Equipo
 } from "lucide-react" 
 import { BottomNav } from "@/components/bottom-nav"
 import { BarChart, Bar, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts" 
@@ -31,6 +31,8 @@ import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
 import GestionProveedores from "@/components/gestion-proveedores"
+import { InvitarEmpleado } from "@/components/invitar-empleado"
+import { generarTicketPDF } from "@/lib/generar-ticket" // ✅ Importamos generador PDF
 
 // --- Configuración ---
 const UMBRAL_STOCK_BAJO = 5 
@@ -109,7 +111,7 @@ interface TurnoAudit {
   movimientos_caja: MovimientoCaja[]
 }
 
-// ✅ NUEVA INTERFAZ PARA SUGERENCIAS
+// Interfaz para sugerencias
 interface SugerenciaCompra {
     id: string
     producto: string
@@ -128,8 +130,8 @@ const PAYMENT_ICONS = {
 }
 
 export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
-  // 1. Estados Globales
-  const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks" | "catalog" | "sales" | "supervision" | "suppliers">("sales")
+  // 1. Estados Globales (✅ Agregamos "team" al tipo)
+  const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks" | "catalog" | "sales" | "supervision" | "suppliers" | "team">("sales")
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
@@ -151,7 +153,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   const [turnosAudit, setTurnosAudit] = useState<TurnoAudit[]>([])
   const [expandedTurnoId, setExpandedTurnoId] = useState<string | null>(null)
   
-  // ✅ Nuevo Estado: Sugerencias
+  // Estado Sugerencias
   const [sugerencias, setSugerencias] = useState<SugerenciaCompra[]>([])
 
   // 3. Modales
@@ -230,21 +232,18 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         const productosCalculados = (dataProductosView as Producto[]) || []
         setProductos(productosCalculados)
 
-        // ✅ LÓGICA DE SUGERENCIAS DE COMPRA
-        // Filtramos productos con stock bajo y buscamos quién los vendió más barato
+        // LÓGICA DE SUGERENCIAS
         const productosBajos = productosCalculados.filter(p => (p.stock_disponible || 0) <= UMBRAL_STOCK_BAJO)
         const nuevasSugerencias: SugerenciaCompra[] = []
 
-        // Iteramos los críticos (no suele ser una lista enorme)
         for (const prod of productosBajos) {
-            // Buscamos en el historial de stock quién tuvo el menor precio histórico
             const { data: historial } = await supabase
                 .from('stock')
                 .select('costo_unitario_historico, proveedores(nombre)')
                 .eq('producto_id', prod.id)
-                .not('proveedor_id', 'is', null) // Solo si tiene proveedor registrado
+                .not('proveedor_id', 'is', null) 
                 .not('costo_unitario_historico', 'is', null)
-                .order('costo_unitario_historico', { ascending: true }) // El más barato primero
+                .order('costo_unitario_historico', { ascending: true }) 
                 .limit(1)
             
             let mejorProv = null
@@ -328,13 +327,38 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     return `${from} - ${to}`
   }, [dateRange])
 
-  // ✅ Búsqueda mejorada
+  // Búsqueda
   const inventarioFiltrado = productos.filter((item) => {
     const term = searchQuery.toLowerCase()
     return item.nombre.toLowerCase().includes(term) || (item.codigo_barras && item.codigo_barras.includes(term))
   })
 
   // --- HANDLERS ---
+  
+  // ✅ HANDLER PARA IMPRIMIR TICKET (Nuevo)
+  const handlePrintTurno = (turno: TurnoAudit, ventasTurno: VentaJoin[]) => {
+      const facturacionTotal = ventasTurno.reduce((acc, curr) => acc + (curr.productos?.precio_venta || 0), 0)
+      const facturacionEfectivo = ventasTurno.filter(v => v.metodo_pago === 'efectivo' || !v.metodo_pago).reduce((acc, curr) => acc + (curr.productos?.precio_venta || 0), 0)
+      const totalGastos = turno.movimientos_caja?.filter(m => m.tipo === 'egreso').reduce((acc, curr) => acc + curr.monto, 0) || 0
+      const cajaEsperada = turno.monto_inicial + facturacionEfectivo - totalGastos
+      const diferencia = (turno.monto_final || 0) - cajaEsperada
+
+      generarTicketPDF({
+          empleado: turno.perfiles?.nombre || "Empleado",
+          fechaApertura: format(parseISO(turno.fecha_apertura), 'dd/MM/yyyy HH:mm'),
+          fechaCierre: turno.fecha_cierre ? format(parseISO(turno.fecha_cierre), 'dd/MM/yyyy HH:mm') : null,
+          montoInicial: turno.monto_inicial,
+          totalVentas: facturacionTotal,
+          totalGastos: totalGastos,
+          cajaEsperada: cajaEsperada,
+          cajaReal: turno.monto_final,
+          diferencia: diferencia,
+          gastos: turno.movimientos_caja?.filter(m => m.tipo === 'egreso') || []
+      })
+      
+      toast.success("PDF Generado correctamente")
+  }
+
   const loadPriceHistory = useCallback(async (productId: string) => {
     if (!productId) return;
     setLoading(true);
@@ -448,6 +472,8 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             <Button variant="ghost" size="icon" onClick={onBack} className="hover:bg-primary-foreground/20 text-primary-foreground"><ArrowLeft className="h-6 w-6" /></Button>
             <div className="text-right"><h1 className="text-2xl font-bold">Torre de Control</h1><p className="text-xs text-primary-foreground/70">Planeta ZEGA</p></div>
         </div>
+        
+        {/* NAVEGACIÓN SUPERIOR */}
         <div className="flex gap-2 mt-4 overflow-x-auto pb-2 scrollbar-hide">
           <Button onClick={() => setActiveTab("sales")} variant={activeTab === "sales" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><BarChart3 className="mr-2 h-4 w-4" /> Reportes</Button>
           <Button onClick={() => setActiveTab("supervision")} variant={activeTab === "supervision" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Eye className="mr-2 h-4 w-4" /> Supervisión</Button>
@@ -455,6 +481,8 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
           <Button onClick={() => setActiveTab("inventory")} variant={activeTab === "inventory" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Package className="mr-2 h-4 w-4" /> Stock</Button>
           <Button onClick={() => setActiveTab("catalog")} variant={activeTab === "catalog" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Plus className="mr-2 h-4 w-4" /> Catálogo</Button>
           <Button onClick={() => setActiveTab("suppliers")} variant={activeTab === "suppliers" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Users className="mr-2 h-4 w-4" /> Proveedores</Button>
+          {/* ✅ NUEVO BOTÓN: EQUIPO */}
+          <Button onClick={() => setActiveTab("team")} variant={activeTab === "team" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Briefcase className="mr-2 h-4 w-4" /> Equipo</Button>
         </div>
       </div>
 
@@ -515,6 +543,20 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                             <span className="text-xs text-muted-foreground">{format(parseISO(turno.fecha_apertura), 'dd/MM HH:mm')}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
+                                            {/* ✅ BOTÓN DE IMPRESIÓN PDF */}
+                                            <Button 
+                                                variant="ghost" 
+                                                size="icon" 
+                                                className="h-8 w-8 text-muted-foreground hover:text-primary"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handlePrintTurno(turno, ventasTurno);
+                                                }}
+                                                title="Descargar PDF Cierre"
+                                            >
+                                                <Printer className="h-4 w-4" />
+                                            </Button>
+
                                             {isOpen ? (
                                                 <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-1 rounded-full animate-pulse">EN CURSO</span>
                                             ) : (
@@ -664,10 +706,18 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
           <div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500"><CrearProducto onProductCreated={() => { setActiveTab("inventory"); fetchData(); }} /></div>
         )}
 
-        {/* --- PROVEEDORES (NUEVO) --- */}
+        {/* --- PROVEEDORES --- */}
         {activeTab === "suppliers" && (
             <div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <GestionProveedores />
+            </div>
+        )}
+        
+        {/* ✅ PESTAÑA EQUIPO (NUEVA) */}
+        {activeTab === "team" && (
+            <div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                 {/* Aquí vive ahora el componente, aislado y limpio */}
+                <InvitarEmpleado />
             </div>
         )}
 
@@ -716,100 +766,100 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         {/* --- ALERTAS (RIESGOS) --- */}
         {activeTab === "alerts" && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
-             {/* ✅ NUEVA TARJETA DE SUGERENCIAS */}
-             {sugerencias.length > 0 && (
-                 <Card className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-0 shadow-lg p-4">
-                    <h3 className="flex items-center gap-2 font-bold mb-3">
-                        <Sparkles className="h-5 w-5 text-yellow-300 animate-pulse" /> Sugerencias de Compra 🧠
-                    </h3>
-                    <div className="space-y-2">
-                        {sugerencias.map(sug => (
-                            <div key={sug.id} className="bg-white/10 backdrop-blur-sm p-2 rounded-lg flex items-center justify-between text-sm">
-                                <div className="flex items-center gap-2">
-                                    <span>{sug.emoji}</span>
-                                    <div>
-                                        <p className="font-bold">{sug.producto}</p>
-                                        <p className="text-[10px] text-violet-200">
-                                            Quedan: {sug.stock_actual} u.
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="text-right">
-                                    {sug.mejor_proveedor ? (
-                                        <>
-                                            <p className="text-[10px] font-bold text-yellow-300 uppercase">Mejor Precio</p>
-                                            <p className="font-bold">{formatMoney(sug.mejor_precio_historico || 0)}</p>
-                                            <p className="text-[10px] truncate max-w-[80px]">{sug.mejor_proveedor}</p>
-                                        </>
-                                    ) : (
-                                        <span className="text-[10px] text-white/50 italic">Sin historial</span>
-                                    )}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
+              {/* TARJETA DE SUGERENCIAS */}
+              {sugerencias.length > 0 && (
+                  <Card className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-0 shadow-lg p-4">
+                     <h3 className="flex items-center gap-2 font-bold mb-3">
+                         <Sparkles className="h-5 w-5 text-yellow-300 animate-pulse" /> Sugerencias de Compra 🧠
+                     </h3>
+                     <div className="space-y-2">
+                         {sugerencias.map(sug => (
+                             <div key={sug.id} className="bg-white/10 backdrop-blur-sm p-2 rounded-lg flex items-center justify-between text-sm">
+                                 <div className="flex items-center gap-2">
+                                     <span>{sug.emoji}</span>
+                                     <div>
+                                         <p className="font-bold">{sug.producto}</p>
+                                         <p className="text-[10px] text-violet-200">
+                                             Quedan: {sug.stock_actual} u.
+                                         </p>
+                                     </div>
+                                 </div>
+                                 <div className="text-right">
+                                     {sug.mejor_proveedor ? (
+                                         <>
+                                             <p className="text-[10px] font-bold text-yellow-300 uppercase">Mejor Precio</p>
+                                             <p className="font-bold">{formatMoney(sug.mejor_precio_historico || 0)}</p>
+                                             <p className="text-[10px] truncate max-w-[80px]">{sug.mejor_proveedor}</p>
+                                         </>
+                                     ) : (
+                                         <span className="text-[10px] text-white/50 italic">Sin historial</span>
+                                     )}
+                                 </div>
+                             </div>
+                         ))}
+                     </div>
+                  </Card>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                 <Card className="p-4 bg-orange-50 border-l-4 border-l-orange-500 shadow-sm">
+                     <div className="flex flex-col">
+                         <div className="flex items-center gap-2 text-orange-600 mb-1"><AlertTriangle className="h-4 w-4" /><span className="text-xs font-bold uppercase">En Riesgo (Venc.)</span></div>
+                         <span className="text-2xl font-black text-gray-800">{formatMoney(capitalEnRiesgo.capital)}</span>
+                         <span className="text-[10px] text-gray-500">{capitalEnRiesgo.unidades} u. &lt; 10 días</span>
+                     </div>
                  </Card>
-             )}
+                 <Card className="p-4 bg-red-50 border-l-4 border-l-red-500 shadow-sm">
+                     <div className="flex flex-col">
+                         <div className="flex items-center gap-2 text-red-600 mb-1"><ShoppingBag className="h-4 w-4" /><span className="text-xs font-bold uppercase">Reponer Stock</span></div>
+                         <span className="text-2xl font-black text-gray-800">{alertasStockBajo.length}</span>
+                         <span className="text--[10px] text-gray-500">Prods &le; {UMBRAL_STOCK_BAJO} u.</span>
+                     </div>
+                 </Card>
+              </div>
 
-             <div className="grid grid-cols-2 gap-4">
-                <Card className="p-4 bg-orange-50 border-l-4 border-l-orange-500 shadow-sm">
-                    <div className="flex flex-col">
-                        <div className="flex items-center gap-2 text-orange-600 mb-1"><AlertTriangle className="h-4 w-4" /><span className="text-xs font-bold uppercase">En Riesgo (Venc.)</span></div>
-                        <span className="text-2xl font-black text-gray-800">{formatMoney(capitalEnRiesgo.capital)}</span>
-                        <span className="text-[10px] text-gray-500">{capitalEnRiesgo.unidades} u. &lt; 10 días</span>
-                    </div>
-                </Card>
-                <Card className="p-4 bg-red-50 border-l-4 border-l-red-500 shadow-sm">
-                    <div className="flex flex-col">
-                        <div className="flex items-center gap-2 text-red-600 mb-1"><ShoppingBag className="h-4 w-4" /><span className="text-xs font-bold uppercase">Reponer Stock</span></div>
-                        <span className="text-2xl font-black text-gray-800">{alertasStockBajo.length}</span>
-                        <span className="text-[10px] text-gray-500">Prods &le; {UMBRAL_STOCK_BAJO} u.</span>
-                    </div>
-                </Card>
-             </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Lista Vencimientos */}
+                  <div>
+                     <h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-orange-500" /> Vencimientos Próximos</h3>
+                     {capitalEnRiesgo.criticos.length === 0 ? (<Card className="p-4 text-center text-muted-foreground bg-muted/20 border-dashed"><p className="text-xs">Sin riesgo de vencimiento.</p></Card>) : (
+                         <div className="space-y-2">
+                             {capitalEnRiesgo.criticos.map((item, idx) => (
+                                 <Card key={idx} className="p-2 border-l-4 border-l-orange-400 flex items-center justify-between">
+                                     <div className="flex items-center gap-2"><span className="text-xl">{item.emoji}</span><div><p className="font-bold text-xs">{item.nombre}</p><p className="text-[10px] text-orange-600 font-bold">Vence: {new Date(item.fechaVenc).toLocaleDateString()}</p></div></div>
+                                     <span className="text-xs font-bold bg-white px-2 py-1 rounded border shadow-sm">{item.unidades} u.</span>
+                                 </Card>
+                             ))}
+                         </div>
+                     )}
+                  </div>
 
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                 {/* Lista Vencimientos */}
-                 <div>
-                    <h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-orange-500" /> Vencimientos Próximos</h3>
-                    {capitalEnRiesgo.criticos.length === 0 ? (<Card className="p-4 text-center text-muted-foreground bg-muted/20 border-dashed"><p className="text-xs">Sin riesgo de vencimiento.</p></Card>) : (
-                        <div className="space-y-2">
-                            {capitalEnRiesgo.criticos.map((item, idx) => (
-                                <Card key={idx} className="p-2 border-l-4 border-l-orange-400 flex items-center justify-between">
-                                    <div className="flex items-center gap-2"><span className="text-xl">{item.emoji}</span><div><p className="font-bold text-xs">{item.nombre}</p><p className="text-[10px] text-orange-600 font-bold">Vence: {new Date(item.fechaVenc).toLocaleDateString()}</p></div></div>
-                                    <span className="text-xs font-bold bg-white px-2 py-1 rounded border shadow-sm">{item.unidades} u.</span>
-                                </Card>
-                            ))}
-                        </div>
-                    )}
-                 </div>
-
-                 {/* Lista Stock Bajo */}
-                 <div>
-                    <h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2"><ShoppingBag className="h-5 w-5 text-red-600" /> Stock Crítico</h3>
-                    {alertasStockBajo.length === 0 ? (<Card className="p-4 text-center text-muted-foreground bg-muted/20 border-dashed"><p className="text-xs">Stock saludable.</p></Card>) : (
-                        <div className="space-y-2">
-                            {alertasStockBajo.map((item) => (
-                                <Card key={item.id} className="p-2 border-l-4 border-l-red-500 flex items-center justify-between">
-                                    <div className="flex items-center gap-2"><span className="text-xl">{item.emoji}</span><div><p className="font-bold text-xs">{item.nombre}</p><p className="text-[10px] text-muted-foreground">{item.categoria}</p></div></div>
-                                    <div className="text-right">
-                                        <span className={cn("text-xs font-bold px-2 py-1 rounded border shadow-sm", (item.stock_disponible || 0) === 0 ? "bg-red-100 text-red-700" : "bg-white text-gray-800")}>
-                                            {(item.stock_disponible || 0) === 0 ? "AGOTADO" : `${item.stock_disponible} u.`}
-                                        </span>
-                                    </div>
-                                </Card>
-                            ))}
-                        </div>
-                    )}
-                 </div>
-             </div>
+                  {/* Lista Stock Bajo */}
+                  <div>
+                     <h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2"><ShoppingBag className="h-5 w-5 text-red-600" /> Stock Crítico</h3>
+                     {alertasStockBajo.length === 0 ? (<Card className="p-4 text-center text-muted-foreground bg-muted/20 border-dashed"><p className="text-xs">Stock saludable.</p></Card>) : (
+                         <div className="space-y-2">
+                             {alertasStockBajo.map((item) => (
+                                 <Card key={item.id} className="p-2 border-l-4 border-l-red-500 flex items-center justify-between">
+                                     <div className="flex items-center gap-2"><span className="text-xl">{item.emoji}</span><div><p className="font-bold text-xs">{item.nombre}</p><p className="text-[10px] text-muted-foreground">{item.categoria}</p></div></div>
+                                     <div className="text-right">
+                                         <span className={cn("text-xs font-bold px-2 py-1 rounded border shadow-sm", (item.stock_disponible || 0) === 0 ? "bg-red-100 text-red-700" : "bg-white text-gray-800")}>
+                                             {(item.stock_disponible || 0) === 0 ? "AGOTADO" : `${item.stock_disponible} u.`}
+                                         </span>
+                                     </div>
+                                 </Card>
+                             ))}
+                         </div>
+                     )}
+                  </div>
+              </div>
           </div>
         )}
       </div>
 
       <BottomNav active={activeTab === "catalog" ? "inventory" : activeTab as any} onChange={(val) => setActiveTab(val as any)} />
 
-      {/* --- MODAL: EDICIÓN DE PRODUCTO (CON CÓDIGO DE BARRAS) --- */}
+      {/* --- MODAL: EDICIÓN DE PRODUCTO --- */}
       <Dialog open={!!editingProduct} onOpenChange={(open) => !open && setEditingProduct(null)}>
         <DialogContent>
             <DialogHeader><DialogTitle>Editar Producto</DialogTitle></DialogHeader>
@@ -820,7 +870,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                         <div className="col-span-3"><Label>Nombre</Label><Input value={editingProduct.nombre} onChange={(e) => setEditingProduct({...editingProduct, nombre: e.target.value})} /></div>
                     </div>
                     
-                    {/* ✅ NUEVO CAMPO: CÓDIGO DE BARRAS */}
                     <div>
                         <Label className="flex items-center gap-2 mb-1">
                             <ScanBarcode className="h-4 w-4" /> Código de Barras
@@ -893,7 +942,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             <DialogHeader><DialogTitle>Auditoría de Stock</DialogTitle><DialogDescription>Borra líneas específicas si hubo error de carga.</DialogDescription></DialogHeader>
             <div className="flex-1 overflow-y-auto pr-2 space-y-2">
                 {stockBatchList.length === 0 ? <p className="text-center text-muted-foreground py-4">No hay stock activo para este producto.</p> : 
-                 stockBatchList.map(batch => (
+                stockBatchList.map(batch => (
                     <div key={batch.id} className="flex items-center justify-between p-2 border rounded bg-slate-50 text-sm">
                         <div><p className="font-bold">Ingreso: {format(parseISO(batch.created_at), 'dd/MM HH:mm')}</p>{batch.fecha_vencimiento && <p className="text-xs text-orange-600">Vence: {batch.fecha_vencimiento}</p>}</div>
                         <Button size="sm" variant="destructive" onClick={() => handleDeleteStockItem(batch.id)}><Trash2 className="h-4 w-4" /></Button>

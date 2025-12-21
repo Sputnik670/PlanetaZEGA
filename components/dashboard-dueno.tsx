@@ -14,7 +14,7 @@ import {
   Repeat2, Wallet, Calendar as CalendarIcon, BarChart3, 
   Eye, TrendingDown, Star, User, ShoppingBag, Clock, 
   Pencil, Trash2, History, Save, ChevronDown, ChevronUp, Calculator, ScanBarcode,
-  Users, Sparkles, Printer, Briefcase // ✅ Importamos Briefcase para el icono de Equipo
+  Users, Sparkles, Printer, Briefcase
 } from "lucide-react" 
 import { BottomNav } from "@/components/bottom-nav"
 import { BarChart, Bar, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts" 
@@ -32,7 +32,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Progress } from "@/components/ui/progress"
 import GestionProveedores from "@/components/gestion-proveedores"
 import { InvitarEmpleado } from "@/components/invitar-empleado"
-import { generarTicketPDF } from "@/lib/generar-ticket" // ✅ Importamos generador PDF
+import { generarTicketPDF } from "@/lib/generar-ticket"
+import HappyHour from "@/components/happy-hour"
+import TeamRanking from "@/components/team-ranking" // ✅ Importamos el Ranking
 
 // --- Configuración ---
 const UMBRAL_STOCK_BAJO = 5 
@@ -72,6 +74,7 @@ interface VentaJoin {
     id: string
     fecha_venta: string
     metodo_pago: string
+    costo_unitario_historico?: number
     productos: { nombre: string; precio_venta: number; emoji: string } | null 
 }
 
@@ -130,8 +133,8 @@ const PAYMENT_ICONS = {
 }
 
 export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
-  // 1. Estados Globales (✅ Agregamos "team" al tipo)
-  const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks" | "catalog" | "sales" | "supervision" | "suppliers" | "team">("sales")
+  // 1. Estados Globales
+  const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks" | "catalog" | "sales" | "finance" | "supervision" | "suppliers" | "team">("sales")
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
@@ -199,6 +202,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         riesgo.capital += precio; riesgo.unidades += 1
         if (!criticosAgrupados[item.producto_id]) {
              criticosAgrupados[item.producto_id] = {
+                producto_id: item.producto_id,
                 nombre: item.productos?.nombre || "Desconocido",
                 emoji: item.productos?.emoji || "📦",
                 unidades: 0,
@@ -272,7 +276,10 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
     if (dataStock) calcularMetricasStock(dataStock)
 
     // B. Ventas
-    let ventasQuery = supabase.from('stock').select('id, fecha_venta, metodo_pago, productos(nombre, precio_venta, emoji)').eq('estado', 'vendido')
+    let ventasQuery = supabase.from('stock')
+        .select('id, fecha_venta, metodo_pago, costo_unitario_historico, productos(nombre, precio_venta, emoji)')
+        .eq('estado', 'vendido')
+        
     if (dateRange?.from) { ventasQuery = ventasQuery.gte('fecha_venta', format(startOfDay(dateRange.from), 'yyyy-MM-dd HH:mm:ss')) }
     if (dateRange?.to) { ventasQuery = ventasQuery.lte('fecha_venta', format(endOfDay(dateRange.to), 'yyyy-MM-dd HH:mm:ss')) }
     
@@ -301,6 +308,71 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   }, [fetchData])
 
   // --- MEMOS ---
+  
+  // 1. Matriz de Rentabilidad
+  const matrizRentabilidad = useMemo(() => {
+    if (ventasRecientes.length === 0 || productos.length === 0) return { estrellas: [], vacas: [], interrogantes: [], huesos: [] };
+
+    const conteoVentas: Record<string, number> = {}
+    ventasRecientes.forEach(v => {
+        const nombre = v.productos?.nombre || "Desconocido"
+        conteoVentas[nombre] = (conteoVentas[nombre] || 0) + 1
+    })
+
+    const estrellas: any[] = [] 
+    const vacas: any[] = []     
+    const interrogantes: any[] = [] 
+    const huesos: any[] = []    
+
+    const totalVentas = Object.values(conteoVentas).reduce((a, b) => a + b, 0)
+    const promedioVentas = totalVentas / (Object.keys(conteoVentas).length || 1)
+
+    productos.forEach(p => {
+        const ventas = conteoVentas[p.nombre] || 0
+        const costo = p.costo || 1
+        const margen = ((p.precio_venta - costo) / costo) * 100
+        
+        const esAltaRotacion = ventas >= promedioVentas
+        const esAltoMargen = margen >= 40 
+
+        const data = { ...p, ventas, margen: margen.toFixed(0) }
+
+        if (esAltaRotacion && esAltoMargen) estrellas.push(data)
+        else if (esAltaRotacion && !esAltoMargen) vacas.push(data)
+        else if (!esAltaRotacion && esAltoMargen) interrogantes.push(data)
+        else huesos.push(data)
+    })
+
+    return { estrellas, vacas, interrogantes, huesos }
+  }, [ventasRecientes, productos])
+
+  // 2. LÓGICA DE FINANZAS
+  const metricasFinancieras = useMemo(() => {
+    let ventaBruta = 0
+    let costoMercaderia = 0
+    let ventaBlanco = 0 
+    let ventaNegro = 0 
+
+    ventasRecientes.forEach(v => {
+        const precio = v.productos?.precio_venta || 0
+        const costo = v.costo_unitario_historico || (precio * 0.5) 
+        
+        ventaBruta += precio
+        costoMercaderia += costo
+
+        if (['tarjeta', 'transferencia', 'billetera_virtual'].includes(v.metodo_pago)) {
+            ventaBlanco += precio
+        } else {
+            ventaNegro += precio
+        }
+    })
+
+    const gananciaNeta = ventaBruta - costoMercaderia
+    const margenGeneral = ventaBruta > 0 ? (gananciaNeta / ventaBruta) * 100 : 0
+
+    return { ventaBruta, costoMercaderia, gananciaNeta, margenGeneral, ventaBlanco, ventaNegro }
+  }, [ventasRecientes])
+
   const chartData = useMemo(() => {
     const agrupado: { [key: string]: number } = {}
     const ventasCronologicas = [...ventasRecientes].reverse()
@@ -335,7 +407,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
 
   // --- HANDLERS ---
   
-  // ✅ HANDLER PARA IMPRIMIR TICKET (Nuevo)
   const handlePrintTurno = (turno: TurnoAudit, ventasTurno: VentaJoin[]) => {
       const facturacionTotal = ventasTurno.reduce((acc, curr) => acc + (curr.productos?.precio_venta || 0), 0)
       const facturacionEfectivo = ventasTurno.filter(v => v.metodo_pago === 'efectivo' || !v.metodo_pago).reduce((acc, curr) => acc + (curr.productos?.precio_venta || 0), 0)
@@ -475,13 +546,13 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         
         {/* NAVEGACIÓN SUPERIOR */}
         <div className="flex gap-2 mt-4 overflow-x-auto pb-2 scrollbar-hide">
-          <Button onClick={() => setActiveTab("sales")} variant={activeTab === "sales" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><BarChart3 className="mr-2 h-4 w-4" /> Reportes</Button>
+          <Button onClick={() => setActiveTab("sales")} variant={activeTab === "sales" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><DollarSign className="mr-2 h-4 w-4" /> Caja y Facturación</Button>
+          <Button onClick={() => setActiveTab("finance")} variant={activeTab === "finance" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><TrendingUp className="mr-2 h-4 w-4" /> Rentabilidad (BI)</Button>
           <Button onClick={() => setActiveTab("supervision")} variant={activeTab === "supervision" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Eye className="mr-2 h-4 w-4" /> Supervisión</Button>
-          <Button onClick={() => setActiveTab("alerts")} variant={activeTab === "alerts" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><TrendingUp className="mr-2 h-4 w-4" /> Riesgos</Button>
+          <Button onClick={() => setActiveTab("alerts")} variant={activeTab === "alerts" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><AlertTriangle className="mr-2 h-4 w-4" /> Riesgos</Button>
           <Button onClick={() => setActiveTab("inventory")} variant={activeTab === "inventory" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Package className="mr-2 h-4 w-4" /> Stock</Button>
           <Button onClick={() => setActiveTab("catalog")} variant={activeTab === "catalog" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Plus className="mr-2 h-4 w-4" /> Catálogo</Button>
           <Button onClick={() => setActiveTab("suppliers")} variant={activeTab === "suppliers" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Users className="mr-2 h-4 w-4" /> Proveedores</Button>
-          {/* ✅ NUEVO BOTÓN: EQUIPO */}
           <Button onClick={() => setActiveTab("team")} variant={activeTab === "team" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Briefcase className="mr-2 h-4 w-4" /> Equipo</Button>
         </div>
       </div>
@@ -489,12 +560,80 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       <div className="p-4 space-y-4">
         
         {/* FILTRO DE FECHA */}
-        {(activeTab === "sales" || activeTab === "supervision") && (
+        {(activeTab === "sales" || activeTab === "supervision" || activeTab === "finance") && (
              <div className="flex gap-2 items-center mb-4">
                 <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                     <PopoverTrigger asChild><Button id="date" variant={"outline"} className={cn("w-full justify-start text-left font-normal h-12 text-base border-2", !dateRange && "text-muted-foreground")}><CalendarIcon className="mr-2 h-5 w-5" />{dateRangeLabel}</Button></PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="center"><Calendar initialFocus mode="range" defaultMonth={dateRange?.from} selected={dateRange} onSelect={(range) => { setDateRange(range); if(range?.to) setIsCalendarOpen(false) }} numberOfMonths={1} locale={es} /></PopoverContent>
                 </Popover>
+            </div>
+        )}
+        
+        {/* PESTAÑA FINANZAS */}
+        {activeTab === "finance" && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                <div className="grid grid-cols-2 gap-4">
+                    <Card className="p-4 bg-emerald-50 border-emerald-200 border-l-4">
+                        <p className="text-xs font-bold uppercase text-emerald-600 mb-1 flex items-center gap-1">
+                            <DollarSign className="h-3 w-3" /> Ganancia Neta Est.
+                        </p>
+                        <h3 className="text-2xl font-black text-emerald-900">
+                            {formatMoney(metricasFinancieras.gananciaNeta)}
+                        </h3>
+                        <p className="text-[10px] text-emerald-700 font-medium mt-1">
+                            Margen Promedio: {metricasFinancieras.margenGeneral.toFixed(1)}%
+                        </p>
+                    </Card>
+                    <Card className="p-4 bg-slate-50 border-slate-200 border-l-4">
+                        <p className="text-xs font-bold uppercase text-slate-500 mb-1 flex items-center gap-1">
+                            <ShieldCheck className="h-3 w-3" /> Estado Fiscal
+                        </p>
+                        <div className="space-y-1 mt-2">
+                            <div className="flex justify-between text-xs">
+                                <span>Declarado (Digital)</span>
+                                <span className="font-bold">{formatMoney(metricasFinancieras.ventaBlanco)}</span>
+                            </div>
+                            <Progress value={(metricasFinancieras.ventaBlanco / (metricasFinancieras.ventaBruta || 1)) * 100} className="h-1.5" />
+                            <div className="flex justify-between text-[10px] text-muted-foreground pt-1">
+                                <span>Efectivo (Caja)</span>
+                                <span>{formatMoney(metricasFinancieras.ventaNegro)}</span>
+                            </div>
+                        </div>
+                    </Card>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Card className="p-4 border-l-4 border-l-yellow-400 bg-yellow-50/50">
+                        <h3 className="font-bold text-yellow-700 flex items-center gap-2">
+                            <Star className="h-5 w-5 fill-yellow-400" /> Productos Estrella
+                        </h3>
+                        <p className="text-xs text-muted-foreground mb-3">Se venden mucho y ganas bien. ¡Nunca rompas stock!</p>
+                        <div className="space-y-2 max-h-40 overflow-y-auto">
+                            {matrizRentabilidad.estrellas.map((p, i) => (
+                                <div key={i} className="flex justify-between text-sm bg-white p-2 rounded shadow-sm">
+                                    <span>{p.emoji} {p.nombre}</span>
+                                    <span className="font-bold text-emerald-600">{p.margen}% Mg.</span>
+                                </div>
+                            ))}
+                            {matrizRentabilidad.estrellas.length === 0 && <p className="text-xs italic text-center py-2">Sin datos suficientes aún.</p>}
+                        </div>
+                    </Card>
+                    <Card className="p-4 border-l-4 border-l-gray-400 bg-gray-50/50">
+                        <h3 className="font-bold text-gray-700 flex items-center gap-2">
+                            <Trash2 className="h-5 w-5" /> Productos "Hueso"
+                        </h3>
+                        <p className="text-xs text-muted-foreground mb-3">No se venden y ocupan espacio. ¡Haz una oferta o liquídalos!</p>
+                        <div className="space-y-2 max-h-40 overflow-y-auto">
+                            {matrizRentabilidad.huesos.slice(0, 5).map((p, i) => (
+                                <div key={i} className="flex justify-between text-sm bg-white p-2 rounded shadow-sm opacity-70">
+                                    <span>{p.emoji} {p.nombre}</span>
+                                    <span className="text-xs font-mono">0 Ventas recientes</span>
+                                </div>
+                            ))}
+                            {matrizRentabilidad.huesos.length > 5 && <p className="text-xs text-center mt-1">...y {matrizRentabilidad.huesos.length - 5} más.</p>}
+                        </div>
+                    </Card>
+                </div>
             </div>
         )}
 
@@ -543,7 +682,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                             <span className="text-xs text-muted-foreground">{format(parseISO(turno.fecha_apertura), 'dd/MM HH:mm')}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
-                                            {/* ✅ BOTÓN DE IMPRESIÓN PDF */}
                                             <Button 
                                                 variant="ghost" 
                                                 size="icon" 
@@ -635,7 +773,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             </div>
         )}
 
-        {/* --- SALES --- */}
+        {/* --- SALES (Caja y Facturación) --- */}
         {activeTab === "sales" && (
             <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4">
                 <Card className="p-6 bg-emerald-600 text-white shadow-lg border-0 relative overflow-hidden">
@@ -713,11 +851,19 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             </div>
         )}
         
-        {/* ✅ PESTAÑA EQUIPO (NUEVA) */}
+        {/* ✅ PESTAÑA EQUIPO (MEJORADA CON RANKING) */}
         {activeTab === "team" && (
-            <div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                 {/* Aquí vive ahora el componente, aislado y limpio */}
-                <InvitarEmpleado />
+            <div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
+                 {/* 1. Ranking y Métricas */}
+                 <TeamRanking />
+
+                 {/* 2. Gestión de Personal (Invitar) */}
+                 <div className="border-t pt-6">
+                    <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2">
+                        <Users className="h-5 w-5" /> Gestión de Accesos
+                    </h3>
+                    <InvitarEmpleado />
+                 </div>
             </div>
         )}
 
@@ -766,7 +912,8 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         {/* --- ALERTAS (RIESGOS) --- */}
         {activeTab === "alerts" && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
-              {/* TARJETA DE SUGERENCIAS */}
+              <HappyHour criticos={capitalEnRiesgo.criticos} onDiscountApplied={fetchData} />
+
               {sugerencias.length > 0 && (
                   <Card className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-0 shadow-lg p-4">
                      <h3 className="flex items-center gap-2 font-bold mb-3">

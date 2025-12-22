@@ -1,4 +1,3 @@
-// components/gestion-proveedores.tsx
 "use client"
 
 import { useState, useEffect } from "react"
@@ -9,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { 
   Users, Plus, Phone, Mail, ChevronRight, DollarSign, Loader2, 
-  ShoppingBag, Calendar, Receipt, TrendingUp 
+  ShoppingBag, Receipt
 } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
@@ -25,7 +24,8 @@ interface Proveedor {
     telefono: string
     email: string
     condicion_pago: string
-    dias_vencimiento: number
+    saldo_actual: number          // ✅ NUEVO
+    saldo_minimo_alerta: number   // ✅ NUEVO
 }
 
 interface Compra {
@@ -53,7 +53,7 @@ export default function GestionProveedores() {
   // Formulario nuevo proveedor
   const [formData, setFormData] = useState({
     nombre: "", rubro: "", contacto_nombre: "", 
-    telefono: "", email: "", condicion_pago: "contado", dias_vencimiento: 0
+    telefono: "", email: "", condicion_pago: "contado"
   })
 
   useEffect(() => { fetchProveedores() }, [])
@@ -82,12 +82,17 @@ export default function GestionProveedores() {
 
   async function handleAddProveedor() {
     if (!formData.nombre) return toast.error("El nombre es obligatorio")
+    
     const { error } = await supabase.from('proveedores').insert([formData])
-    if (error) return toast.error("Error al guardar")
+    
+    if (error) {
+        console.error("Error al guardar proveedor:", error)
+        return toast.error("Error al guardar")
+    }
     
     toast.success("Proveedor registrado")
     setShowAddModal(false)
-    setFormData({ nombre: "", rubro: "", contacto_nombre: "", telefono: "", email: "", condicion_pago: "contado", dias_vencimiento: 0 })
+    setFormData({ nombre: "", rubro: "", contacto_nombre: "", telefono: "", email: "", condicion_pago: "contado" })
     fetchProveedores()
   }
 

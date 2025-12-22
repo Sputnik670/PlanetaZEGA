@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Loader2, User, Store, Check } from "lucide-react"
 import { toast } from "sonner"
 
+// --- DEFINICIÓN DE PROPS (La solución al error de TypeScript) ---
 interface ProfileSetupProps {
   user: any
   onProfileCreated: (role: "dueño" | "empleado") => void
@@ -15,7 +16,8 @@ interface ProfileSetupProps {
 export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupProps) {
   const [selectedRole, setSelectedRole] = useState<"dueño" | "empleado" | null>(null)
   const [loading, setLoading] = useState(false)
-  const [name, setName] = useState(user.email.split('@')[0] || "")
+  // Usamos un valor seguro por si user.email es null
+  const [name, setName] = useState(user?.email?.split('@')[0] || "Usuario")
 
   const handleSaveProfile = async () => {
     if (!selectedRole) {
@@ -29,7 +31,6 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
       let orgId = null
 
       // 1. Si es dueño, CREAMOS la organización primero
-      // IMPORTANTE: Esto requiere que exista la tabla 'organizations' en Supabase
       if (selectedRole === 'dueño') {
         const { data: orgData, error: orgError } = await supabase
             .from('organizations')
@@ -41,13 +42,14 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
         orgId = orgData.id
       } 
       
-      // 2. Insertamos el perfil con la Org ID vinculada (o null si es empleado)
+      // 2. Insertamos el perfil
       const { error } = await supabase
         .from('perfiles')
         .insert({ 
           id: user.id, 
           rol: selectedRole,
           nombre: name,
+          email: user.email, 
           organization_id: orgId 
         })
 
@@ -57,15 +59,13 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
         description: `Bienvenido, ${name}. Configuración lista.` 
       })
       
-      // Damos un segundo para que el usuario vea el éxito antes de redirigir
+      // Notificamos al componente padre
       setTimeout(() => onProfileCreated(selectedRole), 1000)
 
     } catch (error: any) {
-      // --- MEJORA CRÍTICA: Visualización real del error ---
-      console.error("Error setup DETALLADO:", JSON.stringify(error, null, 2))
-      
+      console.error("Error setup:", error)
       toast.error("Error al guardar", { 
-        description: error.message || "Revisa la consola para más detalles." 
+        description: error.message || "Revisa la consola." 
       })
     } finally {
       setLoading(false)
@@ -78,7 +78,7 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
         
         <div className="text-center space-y-2">
           <h1 className="text-3xl font-bold text-primary">Configuración Inicial</h1>
-          <p className="text-muted-foreground text-md">Hola, <b>{user.email}</b>.</p>
+          <p className="text-muted-foreground text-md">Hola, <b>{user?.email}</b>.</p>
         </div>
 
         <div className="space-y-1.5">
@@ -89,7 +89,6 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
                 value={name} 
                 onChange={(e) => setName(e.target.value)} 
                 className="flex h-10 w-full rounded-md border bg-background px-3" 
-                placeholder="Tu nombre aquí"
             />
         </div>
 
@@ -118,8 +117,7 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
         </div>
 
         <Button onClick={handleSaveProfile} className="w-full" disabled={loading || !selectedRole}>
-          {loading ? <Loader2 className="animate-spin mr-2" /> : null}
-          {loading ? "Guardando..." : "Comenzar"}
+          {loading ? <Loader2 className="animate-spin mr-2" /> : "Comenzar"}
         </Button>
       </div>
     </div>

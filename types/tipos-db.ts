@@ -35,7 +35,7 @@ export interface Database {
           organization_id: string | null
           rol: 'dueño' | 'empleado'
           nombre: string | null
-          email: string | null // ✅ NUEVO CAMPO
+          email: string | null // ✅ CORREGIDO: Campo agregado
           xp: number
           created_at: string
         }
@@ -44,7 +44,7 @@ export interface Database {
           organization_id?: string | null
           rol?: 'dueño' | 'empleado'
           nombre?: string | null
-          email?: string | null // ✅ NUEVO CAMPO
+          email?: string | null // ✅ CORREGIDO
           xp?: number
           created_at?: string
         }
@@ -53,7 +53,7 @@ export interface Database {
           organization_id?: string | null
           rol?: 'dueño' | 'empleado'
           nombre?: string | null
-          email?: string | null // ✅ NUEVO CAMPO
+          email?: string | null // ✅ CORREGIDO
           xp?: number
           created_at?: string
         }
@@ -68,6 +68,8 @@ export interface Database {
           telefono: string | null
           email: string | null
           condicion_pago: string | null
+          saldo_actual: number          // ✅ NUEVO
+          saldo_minimo_alerta: number   // ✅ NUEVO
           created_at: string
         }
         Insert: {
@@ -79,6 +81,8 @@ export interface Database {
           telefono?: string | null
           email?: string | null
           condicion_pago?: string | null
+          saldo_actual?: number         // ✅ NUEVO
+          saldo_minimo_alerta?: number  // ✅ NUEVO
           created_at?: string
         }
         Update: {
@@ -90,6 +94,8 @@ export interface Database {
           telefono?: string | null
           email?: string | null
           condicion_pago?: string | null
+          saldo_actual?: number         // ✅ NUEVO
+          saldo_minimo_alerta?: number  // ✅ NUEVO
           created_at?: string
         }
       }

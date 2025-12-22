@@ -11,7 +11,8 @@ import ArqueoCaja, { CajaDiaria } from "@/components/arqueo-caja"
 import MisionesEmpleado from "@/components/misiones-empleado"
 import RegistrarGasto from "@/components/registrar-gasto"
 import GestionVencimientos from "@/components/gestion-vencimientos" 
-import WidgetServicios from "@/components/widget-servicios" // <--- IMPORTADO
+import WidgetServicios from "@/components/widget-servicios" 
+import WidgetSube from "@/components/widget-sube" // <--- IMPORTAMOS SUBE TAMBIÉN
 import { Progress } from "@/components/ui/progress" 
 
 interface UserProfile {
@@ -81,13 +82,11 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
         }
     }, [fetchProfile]) 
     
-    // USAMOS refreshKey para disparar el fetch al inicio y al completar misiones/cerrar caja
     useEffect(() => {
         setLoading(true)
         checkTurnoActivo()
     }, [checkTurnoActivo, refreshKey])
 
-    // Handlers para ArqueoCaja
     const handleCajaAbierta = () => {
         setRefreshKey(prev => prev + 1)
         setActiveTab("caja")
@@ -99,7 +98,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
         setActiveTab("caja")
     }
     
-    // Handler para actualizar XP/misiones (Reutilizamos para vencimientos también)
     const handleDataUpdated = () => {
         setRefreshKey(prev => prev + 1)
     }
@@ -111,8 +109,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
     const nextLevelXP = level * XP_PER_LEVEL
     const prevLevelXP = (level - 1) * XP_PER_LEVEL
     const progressPercent = Math.min(((currentXP - prevLevelXP) / XP_PER_LEVEL) * 100, 100)
-
-    // --- Renderizado ---
 
     if (loading) {
         return (
@@ -127,7 +123,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
             
             {/* Header Fijo Gamificado */}
             <div className="bg-gradient-to-br from-accent via-accent to-chart-2 text-accent-foreground p-6 rounded-b-3xl shadow-xl relative overflow-hidden">
-                {/* Elemento decorativo de fondo */}
                 <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
                     <Trophy className="h-32 w-32 rotate-12" />
                 </div>
@@ -144,7 +139,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                     </Button>
                 </div>
                 
-                {/* BARRA DE PROGRESO DE NIVEL */}
                 <div className="mt-4 relative z-10">
                     <div className="flex justify-between items-end mb-1">
                         <div className="flex items-center gap-1.5">
@@ -167,7 +161,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                     />
                 </div>
                 
-                {/* Estado del Turno */}
                 <div className="mt-4 pt-3 border-t border-white/10 relative z-10 flex justify-between items-center text-sm">
                     {turnoActivo ? (
                         <>
@@ -188,7 +181,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
 
             <div className="p-4 space-y-4">
                 
-                {/* 1. Si NO hay turno activo, solo mostramos APERTURA */}
                 {!turnoActivo && (
                     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <ArqueoCaja 
@@ -199,7 +191,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                     </div>
                 )}
                 
-                {/* 2. Si hay turno activo, mostramos el contenido operativo */}
                 {turnoActivo && (
                     <>
                         <div className="flex gap-2 mt-2 overflow-x-auto pb-2 border-b scrollbar-hide">
@@ -231,23 +222,26 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                         
                         <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 pb-12">
                             {activeTab === "caja" && (
-                                <div className="flex flex-col gap-6">
-                                    {/* A. Botón de Gastos Arriba */}
+                                <div className="flex flex-col gap-4"> {/* Gap reducido a 4 */}
+                                    {/* 1. Registrar Gastos */}
                                     <RegistrarGasto 
                                         turnoId={turnoActivo.id} 
                                         empleadoId={turnoActivo.empleado_id} 
                                     />
 
-                                    {/* B. Widget de Servicios (SUBE/Carga Virtual) - AGREGADO */}
-                                    <WidgetServicios onVentaRegistrada={handleDataUpdated} />
+                                    {/* 2. Sección de Servicios Rápidos */}
+                                    <div className="space-y-4">
+                                        <WidgetSube onVentaRegistrada={handleDataUpdated} />
+                                        <WidgetServicios onVentaRegistrada={handleDataUpdated} />
+                                    </div>
 
-                                    {/* C. Caja de Ventas (Carrito de productos) */}
+                                    {/* 3. Carrito de Productos */}
                                     <CajaVentas 
                                         turnoId={turnoActivo.id} 
                                         empleadoNombre={userProfile?.nombre || "Cajero"}
                                     />
 
-                                    {/* D. Arqueo / Cierre ABAJO DE TODO */}
+                                    {/* 4. Arqueo / Cierre */}
                                     <div className="pt-6 border-t border-dashed border-gray-300 mt-4">
                                         <p className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-4">Fin de Jornada</p>
                                         <ArqueoCaja 

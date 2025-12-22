@@ -12,7 +12,7 @@ import MisionesEmpleado from "@/components/misiones-empleado"
 import RegistrarGasto from "@/components/registrar-gasto"
 import GestionVencimientos from "@/components/gestion-vencimientos" 
 import WidgetServicios from "@/components/widget-servicios" 
-import WidgetSube from "@/components/widget-sube" // <--- IMPORTAMOS SUBE TAMBIÉN
+import WidgetSube from "@/components/widget-sube"
 import { Progress } from "@/components/ui/progress" 
 
 interface UserProfile {
@@ -33,7 +33,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
     const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
     const [refreshKey, setRefreshKey] = useState(0) 
 
-    // OBTENER PERFIL Y XP
     const fetchProfile = useCallback(async (userId: string) => {
         try {
             const { data } = await supabase
@@ -48,7 +47,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
         }
     }, [])
 
-    // FETCH TURNO ACTIVO
     const checkTurnoActivo = useCallback(async () => {
         try {
             const { data: { user } } = await supabase.auth.getUser()
@@ -57,7 +55,6 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                 return
             }
             
-            // Cargamos el perfil en paralelo
             fetchProfile(user.id) 
 
             const { data, error } = await supabase
@@ -121,7 +118,7 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
     return (
         <div className="min-h-screen bg-background pb-20">
             
-            {/* Header Fijo Gamificado */}
+            {/* Header Gamificado */}
             <div className="bg-gradient-to-br from-accent via-accent to-chart-2 text-accent-foreground p-6 rounded-b-3xl shadow-xl relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
                     <Trophy className="h-32 w-32 rotate-12" />
@@ -193,6 +190,7 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                 
                 {turnoActivo && (
                     <>
+                        {/* Pestañas de Navegación */}
                         <div className="flex gap-2 mt-2 overflow-x-auto pb-2 border-b scrollbar-hide">
                             <Button 
                                 onClick={() => setActiveTab("caja")} 
@@ -222,26 +220,26 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                         
                         <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 pb-12">
                             {activeTab === "caja" && (
-                                <div className="flex flex-col gap-4"> {/* Gap reducido a 4 */}
-                                    {/* 1. Registrar Gastos */}
-                                    <RegistrarGasto 
-                                        turnoId={turnoActivo.id} 
-                                        empleadoId={turnoActivo.empleado_id} 
-                                    />
-
-                                    {/* 2. Sección de Servicios Rápidos */}
-                                    <div className="space-y-4">
-                                        <WidgetSube onVentaRegistrada={handleDataUpdated} />
-                                        <WidgetServicios onVentaRegistrada={handleDataUpdated} />
-                                    </div>
-
-                                    {/* 3. Carrito de Productos */}
+                                <div className="flex flex-col gap-4">
+                                    {/* 1. ✅ PRIORIDAD MÁXIMA: Caja de Ventas */}
                                     <CajaVentas 
                                         turnoId={turnoActivo.id} 
                                         empleadoNombre={userProfile?.nombre || "Cajero"}
                                     />
 
-                                    {/* 4. Arqueo / Cierre */}
+                                    {/* 2. Sección de Servicios Rápidos (Widgets) */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <WidgetSube onVentaRegistrada={handleDataUpdated} />
+                                        <WidgetServicios onVentaRegistrada={handleDataUpdated} />
+                                    </div>
+
+                                    {/* 3. Registrar Gastos / Salidas (Menos frecuente) */}
+                                    <RegistrarGasto 
+                                        turnoId={turnoActivo.id} 
+                                        empleadoId={turnoActivo.empleado_id} 
+                                    />
+
+                                    {/* 4. Fin de Turno (Abajo del todo) */}
                                     <div className="pt-6 border-t border-dashed border-gray-300 mt-4">
                                         <p className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-4">Fin de Jornada</p>
                                         <ArqueoCaja 

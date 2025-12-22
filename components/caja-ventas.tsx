@@ -8,13 +8,6 @@ import { Search, Trash2, ShoppingCart, Plus, Minus, Loader2 } from "lucide-react
 import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 
 // Tipos
@@ -56,7 +49,7 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
         .from('productos')
         .select('*')
         .ilike('nombre', `%${query}%`)
-        .not('nombre', 'in', '("Carga SUBE","Carga Virtual")') // EXCLUIMOS LOS SERVICIOS
+        .not('nombre', 'in', '("Carga SUBE","Carga Virtual")') 
         .limit(5)
 
       if (error) throw error
@@ -117,7 +110,6 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
 
       const { data: { user } } = await supabase.auth.getUser()
       
-      // Obtener organization_id del turno
       const { data: turnoData } = await supabase
         .from('caja_diaria')
         .select('organization_id')
@@ -126,17 +118,17 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
         
       if (!turnoData) throw new Error("Error de turno")
 
-      // 1. Registrar movimientos en Stock (uno por producto)
+      // 1. Registrar movimientos en Stock
       const movimientosStock = carrito.map(item => ({
         organization_id: turnoData.organization_id,
         caja_diaria_id: turnoId,
         producto_id: item.id,
         estado: 'vendido',
-        cantidad: item.cantidad, // Asegúrate que tu tabla stock tenga columna cantidad, sino es un insert por unidad
+        cantidad: item.cantidad,
         fecha_venta: fechaArgentina.toISOString(),
         metodo_pago: metodoPago,
-        precio_venta: item.precio, // Guardamos el precio al que se vendió
-        costo_unitario_historico: 0 // Aquí idealmente iría el costo real si lo tuvieras
+        precio_venta: item.precio, 
+        costo_unitario_historico: 0 
       }))
 
       const { error: errorStock } = await supabase.from('stock').insert(movimientosStock)
@@ -173,7 +165,7 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
       <div className="p-4 border-b bg-white rounded-t-lg">
         <h3 className="font-bold flex items-center gap-2 text-lg">
           <ShoppingCart className="h-5 w-5 text-primary" />
-          Carrito de Compras
+          Carrito de Ventas
         </h3>
       </div>
 
@@ -213,7 +205,7 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
           {carrito.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-muted-foreground border-2 border-dashed rounded-lg bg-slate-100/50">
               <ShoppingCart className="h-8 w-8 mb-2 opacity-50" />
-              <p className="text-sm">El carrito está vacío</p>
+              <p className="text-sm">Listo para vender</p>
             </div>
           ) : (
             carrito.map(item => (

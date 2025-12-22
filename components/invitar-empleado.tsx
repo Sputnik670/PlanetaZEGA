@@ -1,3 +1,5 @@
+// components/invitar-empleado.tsx
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -6,9 +8,10 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loader2, Mail, Plus, Trash2, UserCheck, Users, UserMinus } from "lucide-react"
+import { Loader2, Mail, Plus, Trash2, UserCheck, Users, UserMinus, Send } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
+import { format } from "date-fns"
 
 // Tipos locales
 interface Invite {
@@ -39,11 +42,11 @@ export function InvitarEmpleado() {
   const cargarDatos = async () => {
     // 1. Cargar Invitaciones Pendientes
     const { data: dataInvites } = await supabase
-        .from('pending_invites' as any)
+        .from('pending_invites')
         .select('*')
         .order('created_at', { ascending: false })
     
-    if (dataInvites) setInvites(dataInvites as Invite[])
+    setInvites((dataInvites as Invite[]) || [])
 
     // 2. Cargar Equipo Activo (Perfiles con rol 'empleado')
     const { data: dataEmpleados } = await supabase
@@ -55,35 +58,65 @@ export function InvitarEmpleado() {
     if (dataEmpleados) setEmpleados(dataEmpleados as unknown as Empleado[])
   }
 
+  // ✅ FUNCIÓN CORREGIDA: Envía el correo real usando Supabase Auth (Magic Link)
+  const enviarMagicLink = async (emailDestino: string) => {
+      const { error } = await supabase.auth.signInWithOtp({
+          email: emailDestino,
+          options: {
+              emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}` : undefined,
+              shouldCreateUser: true // Crea el usuario si no existe (Flujo sin contraseña)
+          }
+      })
+
+      if (error) throw error
+  }
+
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email.includes("@")) return toast.error("Email inválido")
     
     setLoading(true)
     try {
-      // Verificar duplicados
+      // 1. Verificar duplicados locales
       const yaInvitado = invites.find(i => i.email === email)
       const yaExiste = empleados.find(e => e.email === email)
       
       if (yaInvitado) throw new Error("Ya tiene una invitación pendiente.")
       if (yaExiste) throw new Error("Este usuario ya es parte del equipo.")
 
-      // Insertar en pending_invites (trigger no necesario aquí, es directo)
-      const { error } = await supabase.from('pending_invites' as any).insert([{ email }])
-      if (error) throw error
+      // 2. Insertar el permiso en la Base de Datos (pending_invites)
+      const { error: dbError } = await supabase.from('pending_invites').insert([{ email: email.trim().toLowerCase() }])
+      if (dbError) throw dbError
 
-      toast.success("Invitación enviada", { description: "Pídele que se registre con este email." })
+      // 3. 📧 ENVIAR EL CORREO AUTOMÁTICO (MAGIC LINK)
+      await enviarMagicLink(email.trim().toLowerCase())
+
+      toast.success("¡Invitación enviada!", { description: "El empleado recibirá un enlace mágico de acceso." })
+      
       setEmail("")
       cargarDatos()
     } catch (error: any) {
+      console.error(error)
       toast.error("Error", { description: error.message })
     } finally {
       setLoading(false)
     }
   }
 
+  const reEnviarCorreo = async (emailDestino: string) => {
+      setLoading(true)
+      try {
+          await enviarMagicLink(emailDestino)
+          toast.success("Correo reenviado correctamente")
+      } catch (error: any) {
+          toast.error("Error al reenviar", { description: error.message })
+      } finally {
+          setLoading(false)
+      }
+  }
+
   const borrarInvite = async (id: string) => {
-    const { error } = await supabase.from('pending_invites' as any).delete().eq('id', id)
+    const { error } = await supabase.from('pending_invites').delete().eq('id', id)
     if (!error) {
         toast.info("Invitación cancelada")
         cargarDatos()
@@ -93,7 +126,6 @@ export function InvitarEmpleado() {
   const desvincularEmpleado = async (id: string, nombre: string) => {
       if (!confirm(`⚠️ ¿Estás seguro de que quieres desvincular a ${nombre}?\n\nPerderá el acceso al sistema inmediatamente.`)) return
 
-      // Gracias a la política RLS que creamos, el dueño puede borrar perfiles de su org
       const { error } = await supabase.from('perfiles').delete().eq('id', id)
       
       if (error) {
@@ -134,7 +166,7 @@ export function InvitarEmpleado() {
                 </div>
                 <Button type="submit" disabled={loading}>
                     {loading ? <Loader2 className="animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-                    Invitar
+                    Enviar
                 </Button>
             </form>
 
@@ -145,16 +177,18 @@ export function InvitarEmpleado() {
                     <div className="space-y-2">
                         {invites.map((inv) => (
                             <div key={inv.id} className="flex items-center justify-between p-3 bg-yellow-50/50 border border-yellow-100 rounded-lg">
-                                <span className="font-medium text-sm text-yellow-800">{inv.email}</span>
-                                <Button 
-                                    variant="ghost" 
-                                    size="sm" 
-                                    className="text-red-400 hover:text-red-600 hover:bg-red-50"
-                                    onClick={() => borrarInvite(inv.id)}
-                                    title="Cancelar invitación"
-                                >
-                                    <Trash2 className="h-4 w-4" />
-                                </Button>
+                                <div className="flex flex-col">
+                                    <span className="font-medium text-sm text-yellow-800">{inv.email}</span>
+                                    <span className="text-[10px] text-yellow-600/70">Enviado: {format(new Date(inv.created_at), 'dd/MM/yyyy')}</span>
+                                </div>
+                                <div className="flex gap-1">
+                                    <Button size="icon" variant="ghost" className="h-8 w-8 text-blue-600 hover:bg-blue-50" onClick={() => reEnviarCorreo(inv.email)} title="Reenviar Magic Link">
+                                        <Send className="h-4 w-4" />
+                                    </Button>
+                                    <Button size="icon" variant="ghost" className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => borrarInvite(inv.id)} title="Cancelar">
+                                        <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -191,13 +225,7 @@ export function InvitarEmpleado() {
                                 <span className="text-xs text-muted-foreground block mt-0.5">{emp.email || "Email no registrado"}</span>
                                 <span className="text-[10px] text-slate-400 block mt-1">Alta: {new Date(emp.created_at).toLocaleDateString()}</span>
                             </div>
-                            <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
-                                onClick={() => desvincularEmpleado(emp.id, emp.nombre || "este usuario")}
-                                title="Dar de baja / Quitar acceso"
-                            >
+                            <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700" onClick={() => desvincularEmpleado(emp.id, emp.nombre || "este usuario")} title="Dar de baja">
                                 <UserMinus className="h-4 w-4 mr-2" />
                                 Baja
                             </Button>

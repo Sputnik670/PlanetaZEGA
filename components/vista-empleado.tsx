@@ -11,6 +11,7 @@ import ArqueoCaja, { CajaDiaria } from "@/components/arqueo-caja"
 import MisionesEmpleado from "@/components/misiones-empleado"
 import RegistrarGasto from "@/components/registrar-gasto"
 import GestionVencimientos from "@/components/gestion-vencimientos" 
+import WidgetServicios from "@/components/widget-servicios" // <--- IMPORTADO
 import { Progress } from "@/components/ui/progress" 
 
 interface UserProfile {
@@ -237,14 +238,16 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                                         empleadoId={turnoActivo.empleado_id} 
                                     />
 
-                                    {/* B. Caja de Ventas (Carrito) */}
-                                    {/* ✅ AQUÍ PASAMOS EL NOMBRE AL COMPONENTE */}
+                                    {/* B. Widget de Servicios (SUBE/Carga Virtual) - AGREGADO */}
+                                    <WidgetServicios onVentaRegistrada={handleDataUpdated} />
+
+                                    {/* C. Caja de Ventas (Carrito de productos) */}
                                     <CajaVentas 
                                         turnoId={turnoActivo.id} 
                                         empleadoNombre={userProfile?.nombre || "Cajero"}
                                     />
 
-                                    {/* C. Arqueo / Cierre ABAJO DE TODO */}
+                                    {/* D. Arqueo / Cierre ABAJO DE TODO */}
                                     <div className="pt-6 border-t border-dashed border-gray-300 mt-4">
                                         <p className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-4">Fin de Jornada</p>
                                         <ArqueoCaja 

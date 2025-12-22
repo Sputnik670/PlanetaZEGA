@@ -1,3 +1,4 @@
+// components/widget-sube.tsx
 "use client"
 
 import { useState, useEffect } from "react"
@@ -18,7 +19,12 @@ export default function WidgetSube({ onVentaRegistrada }: { onVentaRegistrada: (
     // Buscamos el ID del producto "Carga SUBE" al iniciar
     useEffect(() => {
         const fetchId = async () => {
-            const { data } = await supabase.from('productos').select('id').eq('nombre', 'Carga SUBE').single()
+            // Buscamos el producto que acabamos de crear con SQL
+            const { data } = await supabase
+                .from('productos')
+                .select('id')
+                .eq('nombre', 'Carga SUBE')
+                .single()
             if (data) setSubeProductId(data.id)
         }
         fetchId()
@@ -33,49 +39,62 @@ export default function WidgetSube({ onVentaRegistrada }: { onVentaRegistrada: (
         const totalCobrar = montoCarga + servicio
 
         try {
-            // 1. Registramos la venta en la tabla STOCK
+            // ✅ CORRECCIÓN 1: Ajuste de Fecha Argentina (El parche horario)
+            const fechaArgentina = new Date();
+            fechaArgentina.setHours(fechaArgentina.getHours() - 3);
+
+            // Obtener usuario actual para vincular la organización
+            const { data: { user } } = await supabase.auth.getUser()
+            
+            // Buscar turno abierto
+            const { data: turno } = await supabase.from('caja_diaria')
+                .select('id, organization_id') // Traemos también el org_id
+                .eq('empleado_id', user?.id)
+                .is('fecha_cierre', null)
+                .single()
+
+            if (!turno) {
+                toast.error("No tienes un turno de caja abierto.")
+                setLoading(false)
+                return
+            }
+
+            // 1. Registramos la "Venta" (Insert directo sin consumir stock)
+            // ✅ CORRECCIÓN 2: Agregamos organization_id para que no falle
             const { error } = await supabase.from('stock').insert({
+                organization_id: turno.organization_id, // Vital para permisos
                 producto_id: subeProductId,
                 estado: 'vendido',
-                fecha_venta: new Date().toISOString(),
+                fecha_venta: fechaArgentina.toISOString(), // Fecha corregida
                 metodo_pago: 'efectivo',
                 costo_unitario_historico: montoCarga, 
             })
 
             if (error) throw error
 
-            const { data: userData } = await supabase.auth.getUser()
+            // 2. Registrar Ingreso de Dinero en la Caja
+            // ✅ CORRECCIÓN 3: Usamos 'caja_diaria_id' (el nombre real en tu DB) en vez de 'caja_id'
+            const { error: errorCaja } = await supabase.from('movimientos_caja').insert({
+                organization_id: turno.organization_id, // Vital para permisos
+                caja_diaria_id: turno.id, // <--- Nombre corregido
+                empleado_id: user?.id,    // Vinculamos al empleado
+                tipo: 'ingreso',
+                monto: totalCobrar,
+                descripcion: `Carga SUBE ($${montoCarga}) + Serv ($${servicio})`
+            })
+
+            if (errorCaja) throw errorCaja
             
-            // Buscar turno abierto
-            // CORRECCIÓN AQUÍ: Usamos userData.user?.id
-            const { data: turno } = await supabase.from('caja_diaria')
-                .select('id')
-                .eq('empleado_id', userData.user?.id)
-                .is('fecha_cierre', null)
-                .single()
+            toast.success(`Carga registrada: $${totalCobrar}`, {
+                description: `Ganancia servicio: $${servicio}`
+            })
+            
+            setMonto("")
+            if (onVentaRegistrada) onVentaRegistrada() 
 
-            if (turno) {
-                // Registrar Ingreso de Dinero
-                await supabase.from('movimientos_caja').insert({
-                    caja_id: turno.id,
-                    tipo: 'ingreso',
-                    monto: totalCobrar,
-                    descripcion: `Carga SUBE ($${montoCarga}) + Serv ($${servicio})`
-                })
-                
-                toast.success(`Carga registrada: $${totalCobrar}`, {
-                    description: `Ganancia servicio: $${servicio}`
-                })
-                
-                setMonto("")
-                onVentaRegistrada() 
-            } else {
-                toast.error("No tienes un turno de caja abierto.")
-            }
-
-        } catch (error) {
+        } catch (error: any) {
             console.error(error)
-            toast.error("Error al registrar carga")
+            toast.error("Error al registrar carga", { description: error.message })
         } finally {
             setLoading(false)
         }

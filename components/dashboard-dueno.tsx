@@ -544,7 +544,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
       <div className="bg-gradient-to-br from-primary via-primary to-chart-1 text-primary-foreground p-6 rounded-b-3xl shadow-xl">
         <div className="flex justify-between items-center mb-4">
             <Button variant="ghost" size="icon" onClick={onBack} className="hover:bg-primary-foreground/20 text-primary-foreground"><ArrowLeft className="h-6 w-6" /></Button>
-            <div className="text-right"><h1 className="text-2xl font-bold">Torre de Control</h1><p className="text-xs text-primary-foreground/70">Planeta ZEGA</p></div>
+            <div className="text-right"><h1 className="text-2xl font-bold">Torre de Control</h1><p className="text-xs text-primary-foreground/70">Responsable</p></div>
         </div>
         
         {/* NAVEGACIÓN SUPERIOR */}

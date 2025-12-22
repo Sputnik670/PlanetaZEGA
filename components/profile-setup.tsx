@@ -1,4 +1,3 @@
-// components/profile-setup.tsx
 "use client"
 
 import { useState } from "react"
@@ -30,6 +29,7 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
       let orgId = null
 
       // 1. Si es dueño, CREAMOS la organización primero
+      // IMPORTANTE: Esto requiere que exista la tabla 'organizations' en Supabase
       if (selectedRole === 'dueño') {
         const { data: orgData, error: orgError } = await supabase
             .from('organizations')
@@ -41,7 +41,7 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
         orgId = orgData.id
       } 
       
-      // 2. Insertamos el perfil con la Org ID vinculada
+      // 2. Insertamos el perfil con la Org ID vinculada (o null si es empleado)
       const { error } = await supabase
         .from('perfiles')
         .insert({ 
@@ -57,11 +57,16 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
         description: `Bienvenido, ${name}. Configuración lista.` 
       })
       
+      // Damos un segundo para que el usuario vea el éxito antes de redirigir
       setTimeout(() => onProfileCreated(selectedRole), 1000)
 
     } catch (error: any) {
-      console.error("Error setup:", error)
-      toast.error("Error", { description: error.message })
+      // --- MEJORA CRÍTICA: Visualización real del error ---
+      console.error("Error setup DETALLADO:", JSON.stringify(error, null, 2))
+      
+      toast.error("Error al guardar", { 
+        description: error.message || "Revisa la consola para más detalles." 
+      })
     } finally {
       setLoading(false)
     }
@@ -76,22 +81,23 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
           <p className="text-muted-foreground text-md">Hola, <b>{user.email}</b>.</p>
         </div>
 
-        {/* --- CORRECCIÓN AQUÍ --- */}
         <div className="space-y-1.5">
             <label htmlFor="user-name" className="text-sm font-medium">Nombre para mostrar</label>
             <input 
-                id="user-name"  // Agregado ID
+                id="user-name"
                 type="text" 
                 value={name} 
                 onChange={(e) => setName(e.target.value)} 
                 className="flex h-10 w-full rounded-md border bg-background px-3" 
-                placeholder="Tu nombre aquí" // Agregado Placeholder para cumplir la regla
+                placeholder="Tu nombre aquí"
             />
         </div>
-        {/* ----------------------- */}
 
         <div className="space-y-4">
-          <Card className={`p-5 cursor-pointer border-2 ${selectedRole === "dueño" ? "border-primary bg-primary/5" : "hover:border-primary/50"}`} onClick={() => setSelectedRole("dueño")}>
+          <Card 
+            className={`p-5 cursor-pointer border-2 transition-all ${selectedRole === "dueño" ? "border-primary bg-primary/5" : "hover:border-primary/50"}`} 
+            onClick={() => setSelectedRole("dueño")}
+          >
             <div className="flex items-center gap-4">
               <Store className="h-8 w-8 text-primary" />
               <div><h2 className="font-bold">Soy Dueño</h2><p className="text-xs text-muted-foreground">Crear un nuevo Kiosco.</p></div>
@@ -99,7 +105,10 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
             </div>
           </Card>
 
-          <Card className={`p-5 cursor-pointer border-2 ${selectedRole === "empleado" ? "border-accent bg-accent/5" : "hover:border-accent/50"}`} onClick={() => setSelectedRole("empleado")}>
+          <Card 
+            className={`p-5 cursor-pointer border-2 transition-all ${selectedRole === "empleado" ? "border-accent bg-accent/5" : "hover:border-accent/50"}`} 
+            onClick={() => setSelectedRole("empleado")}
+          >
              <div className="flex items-center gap-4">
               <User className="h-8 w-8 text-accent" />
               <div><h2 className="font-bold">Soy Empleado</h2><p className="text-xs text-muted-foreground">Unirme a un equipo existente.</p></div>
@@ -109,7 +118,8 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
         </div>
 
         <Button onClick={handleSaveProfile} className="w-full" disabled={loading || !selectedRole}>
-          {loading ? <Loader2 className="animate-spin" /> : "Comenzar"}
+          {loading ? <Loader2 className="animate-spin mr-2" /> : null}
+          {loading ? "Guardando..." : "Comenzar"}
         </Button>
       </div>
     </div>

@@ -1,18 +1,15 @@
-// app/page.tsx
-
 "use client"
 
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
-import { Store, User, Loader2, LogOut, Package } from "lucide-react"
+import { Loader2, LogOut, Package } from "lucide-react"
 import DashboardDueno from "@/components/dashboard-dueno"
 import VistaEmpleado from "@/components/vista-empleado"
 import AuthForm from "@/components/auth-form"
-import ProfileSetup from "@/components/profile-setup" // <-- Importamos el setup de perfil
+import ProfileSetup from "@/components/profile-setup"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { toast } from "sonner"
-
 
 interface UserProfile {
     id: string
@@ -20,17 +17,9 @@ interface UserProfile {
     nombre: string
 }
 
-// Componente que maneja el ruteo interno (ya no es selección de rol, sino el Dashboard real)
+// Componente que maneja el ruteo interno
 function AppRouter({ userProfile, onLogout }: { userProfile: UserProfile, onLogout: () => void }) {
     
-    // Función para mostrar un mensaje de error si alguien intenta acceder al dashboard equivocado
-    const showAccessDenied = () => {
-        toast.error("Acceso Denegado", { 
-            description: `Tu rol actual es: ${userProfile.rol.toUpperCase()}. No puedes acceder a este dashboard.`,
-            duration: 5000
-        })
-    }
-
     // El ruteo es automático basado en el rol del perfil
     if (userProfile.rol === "dueño") {
         return (
@@ -44,18 +33,19 @@ function AppRouter({ userProfile, onLogout }: { userProfile: UserProfile, onLogo
         )
     }
 
-    // Fallback: Debería ser inaccesible si el rol está tipado correctamente.
+    // Fallback: Si el rol no es ni dueño ni empleado
     return (
         <div className="min-h-screen flex items-center justify-center p-4">
             <Card className="p-6 text-center">
                 <p className="text-xl font-bold text-destructive">Error de Rol</p>
-                <p className="text-muted-foreground mt-2">Tu perfil está corrupto. Por favor, contacta al administrador.</p>
-                <Button onClick={onLogout} className="mt-4" variant="destructive"><LogOut className="h-4 w-4 mr-2"/> Cerrar Sesión</Button>
+                <p className="text-muted-foreground mt-2">Tu perfil tiene un rol desconocido ({userProfile.rol}). Contacta soporte.</p>
+                <Button onClick={onLogout} className="mt-4" variant="destructive">
+                    <LogOut className="h-4 w-4 mr-2"/> Cerrar Sesión
+                </Button>
             </Card>
         </div>
     )
 }
-
 
 export default function HomePage() {
   const [session, setSession] = useState<any>(null)
@@ -63,32 +53,49 @@ export default function HomePage() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [hasProfile, setHasProfile] = useState(false)
 
-
   const fetchProfile = async (userId: string) => {
     setLoading(true)
     try {
+        console.log("Buscando perfil para:", userId) // Log para depurar
+
         const { data, error } = await supabase
             .from('perfiles')
             .select('*')
             .eq('id', userId)
             .single()
 
-        if (error && error.code === 'PGRST116') {
-            // No row found: El usuario está logueado pero no tiene perfil.
-            setHasProfile(false)
-            setUserProfile(null)
-            return
+        if (error) {
+            // Caso 1: El usuario no tiene perfil (PGRST116) -> Mostrar ProfileSetup
+            if (error.code === 'PGRST116') {
+                console.log("Usuario sin perfil, redirigiendo a Setup.")
+                setHasProfile(false)
+                setUserProfile(null)
+                return 
+            }
+            
+            // Caso 2: Error real de base de datos -> Lanzar al catch
+            throw error
         }
 
-        if (error) throw error
-
+        // Caso 3: Éxito
+        console.log("Perfil encontrado:", data)
         setUserProfile(data as UserProfile)
         setHasProfile(true)
 
-    } catch (error) {
-        console.error("Error fetching profile:", error)
-        toast.error('Error de Perfil', { description: 'No se pudo cargar tu rol. Intenta de nuevo.' })
-        await supabase.auth.signOut()
+    } catch (error: any) {
+        // --- CORRECCIÓN CRÍTICA AQUÍ ---
+        // Usamos JSON.stringify para ver el error real si sale {}
+        console.error("Error fetching profile DETALLADO:", JSON.stringify(error, null, 2))
+        
+        toast.error('Error de conexión o permisos', { 
+            description: 'No pudimos cargar tu perfil. Revisa tu conexión.' 
+        })
+        
+        // IMPORTANTE: COMENTAMOS EL LOGOUT AUTOMÁTICO
+        // Esto evita el bucle infinito. Si falla, se queda aquí y puedes ver el error.
+        // await supabase.auth.signOut() 
+        
+        setHasProfile(false) // Asumimos false para no romper la UI
     } finally {
         setLoading(false)
     }
@@ -101,7 +108,7 @@ export default function HomePage() {
         if (session?.user) {
             fetchProfile(session.user.id)
         } else {
-            setLoading(false) // Si no hay sesión, terminamos la carga
+            setLoading(false)
             setUserProfile(null)
             setHasProfile(false)
         }
@@ -164,13 +171,23 @@ export default function HomePage() {
     return <AppRouter userProfile={userProfile} onLogout={handleLogout} />
   }
 
-  // Fallback final
+  // Fallback final (Por si acaso falla el fetch pero hay sesión)
   return (
-    <div className="min-h-screen flex items-center justify-center">
-        <Card className="p-6 text-center">
-            <Package className="h-10 w-10 mx-auto text-destructive" />
-            <p className="mt-4">Ocurrió un error inesperado al cargar la aplicación.</p>
-            <Button onClick={handleLogout} className="mt-4">Reiniciar</Button>
+    <div className="min-h-screen flex items-center justify-center p-4">
+        <Card className="p-6 text-center max-w-md">
+            <Package className="h-10 w-10 mx-auto text-yellow-500" />
+            <h2 className="text-lg font-bold mt-4">No pudimos cargar tu perfil</h2>
+            <p className="text-muted-foreground mt-2 text-sm">
+               Tu usuario existe ({session.user.email}), pero no pudimos leer tu rol.
+            </p>
+            <div className="flex gap-2 justify-center mt-4">
+                <Button onClick={() => fetchProfile(session.user.id)} variant="outline">
+                    Reintentar
+                </Button>
+                <Button onClick={handleLogout} variant="destructive">
+                    Cerrar Sesión
+                </Button>
+            </div>
         </Card>
     </div>
   )

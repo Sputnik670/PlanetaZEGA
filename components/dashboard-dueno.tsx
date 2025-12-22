@@ -11,12 +11,11 @@ import { Label } from "@/components/ui/label"
 import { 
   ArrowLeft, AlertTriangle, TrendingUp, Package, Search, Plus, 
   Loader2, ShieldCheck, DollarSign, CreditCard, 
-  Repeat2, Wallet, Calendar as CalendarIcon, BarChart3, 
+  Repeat2, Wallet, Calendar as CalendarIcon, 
   Eye, TrendingDown, Star, User, ShoppingBag, Clock, 
   Pencil, Trash2, History, Save, ChevronDown, ChevronUp, Calculator, ScanBarcode,
-  Users, Sparkles, Printer, Briefcase
+  Users, Sparkles, Printer, Briefcase, Receipt, X
 } from "lucide-react" 
-import { BottomNav } from "@/components/bottom-nav"
 import { BarChart, Bar, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts" 
 import CrearProducto from "@/components/crear-producto"
 import { AgregarStock } from "@/components/agregar-stock"
@@ -34,7 +33,7 @@ import GestionProveedores from "@/components/gestion-proveedores"
 import { InvitarEmpleado } from "@/components/invitar-empleado"
 import { generarTicketPDF } from "@/lib/generar-ticket"
 import HappyHour from "@/components/happy-hour"
-import TeamRanking from "@/components/team-ranking" // ✅ Importamos el Ranking
+import TeamRanking from "@/components/team-ranking"
 
 // --- Configuración ---
 const UMBRAL_STOCK_BAJO = 5 
@@ -124,7 +123,7 @@ interface SugerenciaCompra {
     emoji: string
 }
 
-const PAYMENT_ICONS = {
+const PAYMENT_ICONS: any = {
     efectivo: DollarSign,
     tarjeta: CreditCard,
     transferencia: Repeat2,
@@ -164,6 +163,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   const [managingStockId, setManagingStockId] = useState<string | null>(null)
   const [stockBatchList, setStockBatchList] = useState<any[]>([])
   const [actionLoading, setActionLoading] = useState(false)
+  const [showSalesDetail, setShowSalesDetail] = useState(false) // ✅ NUEVO ESTADO
   
   // 4. Historial de Precios
   const [showPriceHistoryModal, setShowPriceHistoryModal] = useState(false);
@@ -410,8 +410,11 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   const handlePrintTurno = (turno: TurnoAudit, ventasTurno: VentaJoin[]) => {
       const facturacionTotal = ventasTurno.reduce((acc, curr) => acc + (curr.productos?.precio_venta || 0), 0)
       const facturacionEfectivo = ventasTurno.filter(v => v.metodo_pago === 'efectivo' || !v.metodo_pago).reduce((acc, curr) => acc + (curr.productos?.precio_venta || 0), 0)
+      
       const totalGastos = turno.movimientos_caja?.filter(m => m.tipo === 'egreso').reduce((acc, curr) => acc + curr.monto, 0) || 0
-      const cajaEsperada = turno.monto_inicial + facturacionEfectivo - totalGastos
+      const totalIngresosExtra = turno.movimientos_caja?.filter(m => m.tipo === 'ingreso').reduce((acc, curr) => acc + curr.monto, 0) || 0
+      
+      const cajaEsperada = turno.monto_inicial + facturacionEfectivo + totalIngresosExtra - totalGastos
       const diferencia = (turno.monto_final || 0) - cajaEsperada
 
       generarTicketPDF({
@@ -661,9 +664,13 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                             const facturacionTotal = ventasTurno.reduce((acc, curr) => acc + (curr.productos?.precio_venta || 0), 0)
                             const facturacionEfectivo = ventasTurno.filter(v => v.metodo_pago === 'efectivo' || !v.metodo_pago).reduce((acc, curr) => acc + (curr.productos?.precio_venta || 0), 0)
                             const facturacionDigital = facturacionTotal - facturacionEfectivo
+                            
                             const totalGastos = turno.movimientos_caja?.filter(m => m.tipo === 'egreso').reduce((acc, curr) => acc + curr.monto, 0) || 0
-                            const cajaEsperada = turno.monto_inicial + facturacionEfectivo - totalGastos
+                            const totalIngresosExtra = turno.movimientos_caja?.filter(m => m.tipo === 'ingreso').reduce((acc, curr) => acc + curr.monto, 0) || 0
+                            
+                            const cajaEsperada = turno.monto_inicial + facturacionEfectivo + totalIngresosExtra - totalGastos
                             const diferenciaReal = (turno.monto_final || 0) - cajaEsperada
+                            
                             const isOpen = !turno.fecha_cierre
                             const isExpanded = expandedTurnoId === turno.id
                             const colorClass = isOpen ? "border-blue-200 bg-blue-50/50" : Math.abs(diferenciaReal) > 100 ? "border-red-200 bg-red-50/30" : "border-emerald-200 bg-emerald-50/30"
@@ -725,7 +732,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                                 </div>
                                                 <div className="space-y-1">
                                                     <div className="flex justify-between text-xs">
-                                                        <span className="text-muted-foreground flex items-center gap-1"><DollarSign className="h-3 w-3"/> Efectivo</span>
+                                                        <span className="text-muted-foreground flex items-center gap-1"><DollarSign className="h-3 w-3"/> Efectivo (Stock)</span>
                                                         <span className="font-mono">{formatMoney(facturacionEfectivo)}</span>
                                                     </div>
                                                     <div className="flex justify-between text-xs">
@@ -734,6 +741,24 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                                     </div>
                                                 </div>
                                             </div>
+                                            
+                                            {/* ✅ NUEVA SECCIÓN: VISUALIZACIÓN DE INGRESOS EXTRA */}
+                                            {totalIngresosExtra > 0 && (
+                                                <div className="pt-2 border-t border-dashed">
+                                                    <p className="text-xs font-bold text-emerald-600 mb-1 flex items-center gap-1"><TrendingUp className="h-3 w-3"/> Ingresos Extra / Servicios</p>
+                                                    {turno.movimientos_caja?.filter(m => m.tipo === 'ingreso').map(m => (
+                                                        <div key={m.id} className="flex justify-between text-xs py-1 border-b border-dashed border-gray-100 last:border-0">
+                                                            <span className="text-gray-600">{m.descripcion}</span>
+                                                            <span className="font-mono text-emerald-500">+{formatMoney(m.monto)}</span>
+                                                        </div>
+                                                    ))}
+                                                    <div className="flex justify-between text-xs font-bold mt-1 pt-1 border-t border-gray-100">
+                                                        <span>Total Extra:</span>
+                                                        <span>{formatMoney(totalIngresosExtra)}</span>
+                                                    </div>
+                                                </div>
+                                            )}
+
                                             {!isOpen && (
                                                 <div className={cn("p-2 rounded border flex justify-between items-center", Math.abs(diferenciaReal) > 100 ? "bg-red-50 border-red-200" : "bg-emerald-50 border-emerald-200")}>
                                                     <div>
@@ -747,10 +772,10 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                                     </span>
                                                 </div>
                                             )}
-                                            {turno.movimientos_caja?.length > 0 && (
+                                            {turno.movimientos_caja?.some(m => m.tipo === 'egreso') && (
                                                 <div className="pt-2 border-t border-dashed">
                                                     <p className="text-xs font-bold text-red-600 mb-1 flex items-center gap-1"><TrendingDown className="h-3 w-3"/> Gastos Registrados</p>
-                                                    {turno.movimientos_caja.map(m => (
+                                                    {turno.movimientos_caja.filter(m => m.tipo === 'egreso').map(m => (
                                                         <div key={m.id} className="flex justify-between text-xs py-1 border-b border-dashed border-gray-100 last:border-0">
                                                             <span className="text-gray-600">{m.descripcion}</span>
                                                             <span className="font-mono text-red-500">-{formatMoney(m.monto)}</span>
@@ -760,6 +785,7 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                                             )}
                                             {isOpen && (
                                                 <div className="mt-2 pt-2 border-t flex justify-end">
+                                                    {/* Esta AsignarMision es la versión pequeña de supervisión, funciona bien */}
                                                     <AsignarMision turnoId={turno.id} empleadoId={turno.empleado_id} empleadoNombre={turno.perfiles?.nombre || "Empleado"} onMisionCreated={fetchData} />
                                                 </div>
                                             )}
@@ -781,8 +807,19 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
                         <p className="text-emerald-100 font-medium text-sm mb-1">Facturación Total (Filtrada)</p>
                         <h2 className="text-4xl font-black tracking-tight">{formatMoney(totalVendido)}</h2>
                     </div>
-                    <div className="mt-4 pt-4 border-t border-white/20 text-sm text-emerald-50 relative z-10">
-                        <span className="bg-emerald-500/30 px-2 py-1 rounded-md"><Package className="h-4 w-4 inline mr-1" /> {ventasRecientes.length} operaciones</span>
+                    {/* ✅ BOTÓN PARA VER DETALLE DE OPERACIONES */}
+                    <div className="mt-4 pt-4 border-t border-white/20 text-sm text-emerald-50 relative z-10 flex justify-between items-center">
+                        <span className="flex items-center gap-1">
+                            <Package className="h-4 w-4" /> {ventasRecientes.length} operaciones
+                        </span>
+                        <Button 
+                            variant="secondary" 
+                            size="sm" 
+                            className="text-emerald-800 bg-white hover:bg-emerald-50 h-7 text-xs font-bold"
+                            onClick={() => setShowSalesDetail(true)}
+                        >
+                            Ver Detalle 🔎
+                        </Button>
                     </div>
                 </Card>
                 <Card className="p-5 border-2 shadow-sm">
@@ -851,13 +888,24 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
             </div>
         )}
         
-        {/* ✅ PESTAÑA EQUIPO (MEJORADA CON RANKING) */}
+        {/* ✅ PESTAÑA EQUIPO (CORREGIDA Y COMPLETA) */}
         {activeTab === "team" && (
             <div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
-                 {/* 1. Ranking y Métricas */}
+                 
+                 {/* 1. Header de Acciones Rápidas (Aquí está el botón AsignarMision) */}
+                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50 p-4 rounded-lg border">
+                    <div>
+                        <h3 className="font-bold text-gray-800">Ranking y Objetivos</h3>
+                        <p className="text-sm text-gray-500">Motiva a tu equipo asignando tareas.</p>
+                    </div>
+                    {/* Botón grande para asignar misiones a cualquier empleado */}
+                    <AsignarMision onMisionCreated={fetchData} />
+                 </div>
+
+                 {/* 2. Ranking */}
                  <TeamRanking />
 
-                 {/* 2. Gestión de Personal (Invitar) */}
+                 {/* 3. Gestión de Personal (Invitar) */}
                  <div className="border-t pt-6">
                     <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2">
                         <Users className="h-5 w-5" /> Gestión de Accesos
@@ -1004,8 +1052,6 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         )}
       </div>
 
-      <BottomNav active={activeTab === "catalog" ? "inventory" : activeTab as any} onChange={(val) => setActiveTab(val as any)} />
-
       {/* --- MODAL: EDICIÓN DE PRODUCTO --- */}
       <Dialog open={!!editingProduct} onOpenChange={(open) => !open && setEditingProduct(null)}>
         <DialogContent>
@@ -1050,6 +1096,55 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
         </DialogContent>
       </Dialog>
       
+      {/* --- MODAL: DETALLE DE VENTAS (AUDITORÍA) --- */}
+      <Dialog open={showSalesDetail} onOpenChange={setShowSalesDetail}>
+        <DialogContent className="max-h-[85vh] flex flex-col sm:max-w-lg">
+            <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-emerald-800">
+                    <Receipt className="h-5 w-5" /> Detalle de Operaciones
+                </DialogTitle>
+                <DialogDescription>
+                    Listado de todas las ventas en el rango seleccionado.
+                </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto pr-1">
+                {ventasRecientes.length === 0 ? (
+                    <div className="py-10 text-center text-muted-foreground">
+                        <Search className="h-10 w-10 mx-auto opacity-20 mb-2" />
+                        <p>No hay ventas registradas en este periodo.</p>
+                    </div>
+                ) : (
+                    <div className="space-y-2">
+                        {ventasRecientes.map((venta) => {
+                            const Icon = PAYMENT_ICONS[venta.metodo_pago as keyof typeof PAYMENT_ICONS] || Wallet
+                            return (
+                                <div key={venta.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-100 text-sm">
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-lg">{venta.productos?.emoji || '📦'}</span>
+                                        <div>
+                                            <p className="font-bold text-gray-800 line-clamp-1">{venta.productos?.nombre || 'Producto eliminado'}</p>
+                                            <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                                {format(parseISO(venta.fecha_venta), 'dd/MM HH:mm')} 
+                                                <span className="text-slate-300">•</span>
+                                                <Icon className="h-3 w-3" /> <span className="capitalize">{venta.metodo_pago?.replace('_', ' ')}</span>
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="font-bold text-emerald-600">{formatMoney(venta.productos?.precio_venta || 0)}</p>
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                )}
+            </div>
+            <DialogFooter>
+                <Button variant="outline" onClick={() => setShowSalesDetail(false)}>Cerrar</Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* --- MODAL: HISTORIAL DE PRECIOS --- */}
       <Dialog open={showPriceHistoryModal} onOpenChange={setShowPriceHistoryModal}>
         <DialogContent className="max-h-[80vh] flex flex-col">

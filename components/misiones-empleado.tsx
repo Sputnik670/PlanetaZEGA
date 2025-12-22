@@ -22,6 +22,8 @@ interface Mision {
     unidades_completadas: number
     es_completada: boolean
     puntos: number
+    // ✅ CAMBIO 1: Necesitamos este campo para saber si es global (null) o del turno
+    caja_diaria_id: string | null 
     created_at: string
 }
 
@@ -47,7 +49,6 @@ interface StockCritico {
     precio_venta: number
 }
 
-// 1. Interfaz corregida para recibir empleadoId
 interface MisionesEmpleadoProps {
     turnoId: string
     empleadoId: string 
@@ -64,45 +65,32 @@ export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdate
     const [stockParaMermar, setStockParaMermar] = useState<StockCritico[]>([])
     const [misionVencimiento, setMisionVencimiento] = useState<Mision | null>(null)
 
-    // 2. Helper para sumar XP real a la base de datos (CON LOGGING MEJORADO)
+    // Helper para sumar XP real a la base de datos
     const sumarPuntosAlPerfil = async (puntos: number) => {
         console.log(`Intentando sumar ${puntos} XP al empleado ${empleadoId}...`);
 
         try {
-            // A. Obtener XP actual
             const { data: perfil, error: fetchError } = await supabase
                 .from('perfiles')
                 .select('xp')
                 .eq('id', empleadoId)
                 .single()
             
-            if (fetchError) {
-                console.error("Error fetching perfil:", fetchError);
-                throw new Error(`No se pudo leer el perfil: ${fetchError.message}`);
-            }
+            if (fetchError) throw new Error(`No se pudo leer el perfil: ${fetchError.message}`);
 
-            // B. Calcular nuevo total
             const nuevoXP = (perfil?.xp || 0) + puntos
 
-            // C. Actualizar BDD
             const { error: updateError } = await supabase
                 .from('perfiles')
                 .update({ xp: nuevoXP })
                 .eq('id', empleadoId)
             
-            if (updateError) {
-                console.error("Error updating perfil:", updateError);
-                throw new Error(`No se pudo actualizar XP: ${updateError.message}`);
-            }
+            if (updateError) throw new Error(`No se pudo actualizar XP: ${updateError.message}`);
             
-            // D. Refrescar UI del padre (Header de nivel)
             onMisionesUpdated() 
 
         } catch (err: any) {
-            // Log detallado para evitar el error vacío {}
             console.error("❌ Error CRÍTICO sumando XP:", JSON.stringify(err, null, 2))
-            
-            // Si el error es de permisos (RLS), avisamos específicamente
             const msg = err.message || "Error desconocido";
             if (msg.includes("row-level security") || msg.includes("permission")) {
                 toast.error("Error de Permisos", { description: "Tu usuario no tiene permiso para actualizar su puntaje. Contacta al dueño." })
@@ -115,17 +103,28 @@ export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdate
     const fetchMisiones = useCallback(async () => {
         setLoading(true)
         try {
+            // ✅ CAMBIO 2: Lógica OR para traer misiones del turno actual O misiones huerfanas (globales)
             const { data, error } = await supabase
                 .from('misiones')
                 .select('*')
-                .eq('caja_diaria_id', turnoId)
+                .eq('empleado_id', empleadoId) // Filtro base: Solo mis misiones
+                .or(`caja_diaria_id.eq.${turnoId},caja_diaria_id.is.null`) // Del turno O huérfanas
                 .order('created_at', { ascending: true })
 
             if (error) throw error
-            setMisiones((data as any[]) || [])
             
-            // Identificar misión de vencimiento si existe
-            const vencimientoMision = data?.find(m => m.tipo === 'vencimiento')
+            // Filtramos en memoria para limpiar globales viejas que ya estén completadas pero no vinculadas
+            const misionesFiltradas = (data as Mision[]).filter(m => {
+                // 1. Si es del turno actual, la mostramos siempre
+                if (m.caja_diaria_id === turnoId) return true;
+                // 2. Si es global (null) y NO está completada, la mostramos (tarea pendiente)
+                if (!m.caja_diaria_id && !m.es_completada) return true;
+                return false; 
+            });
+
+            setMisiones(misionesFiltradas)
+            
+            const vencimientoMision = misionesFiltradas.find(m => m.tipo === 'vencimiento')
             setMisionVencimiento((vencimientoMision as Mision) || null)
 
         } catch (error) {
@@ -134,7 +133,7 @@ export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdate
         } finally {
             setLoading(false)
         }
-    }, [turnoId])
+    }, [turnoId, empleadoId]) // Agregamos empleadoId a dependencias
 
     const handleOpenMermarModal = async () => {
         if (!misionVencimiento) return
@@ -143,7 +142,6 @@ export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdate
             const hoy = new Date()
             const fechaLimite = format(addDays(hoy, 7), 'yyyy-MM-dd') 
             
-            // Buscar stock real próximo a vencer
             const { data, error } = await supabase.from('stock')
                 .select(`id, producto_id, fecha_vencimiento, productos(nombre, emoji, precio_venta)`)
                 .eq('estado', 'pendiente')
@@ -175,15 +173,22 @@ export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdate
     const handleCompletarManual = async (mision: Mision) => {
         setProcesando(true)
         try {
-            // Actualizar estado de la misión
+            // ✅ CAMBIO 3: Si la misión era global, la vinculamos al turno actual al completarla
+            const updateData: any = { 
+                es_completada: true, 
+                unidades_completadas: 1 
+            }
+            if (!mision.caja_diaria_id) {
+                updateData.caja_diaria_id = turnoId // Vinculación
+            }
+
             const { error } = await supabase
                 .from('misiones')
-                .update({ es_completada: true, unidades_completadas: 1 })
+                .update(updateData)
                 .eq('id', mision.id)
 
             if (error) throw error
 
-            // 3. PERSISTENCIA XP: Guardar puntos
             await sumarPuntosAlPerfil(mision.puntos)
 
             triggerConfetti()
@@ -208,7 +213,6 @@ export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdate
             const stockIdsToUpdate = stockParaMermar.map(item => item.id)
             const unidadesMermadas = stockIdsToUpdate.length
             
-            // 1. Marcar stock como mermado
             const { error: stockUpdateError } = await supabase
                 .from('stock')
                 .update({ estado: 'mermado', fecha_mermado: new Date().toISOString() })
@@ -216,13 +220,21 @@ export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdate
             
             if (stockUpdateError) throw stockUpdateError
 
-            // 2. Actualizar progreso de la misión
             const nuevoProgreso = misionVencimiento.unidades_completadas + unidadesMermadas
             const misionCompletada = nuevoProgreso >= misionVencimiento.objetivo_unidades
 
+            // ✅ CAMBIO 4: Vinculamos al turno también si se completa por mermas
+            const updateMisionData: any = { 
+                unidades_completadas: nuevoProgreso, 
+                es_completada: misionCompletada 
+            }
+            if (misionCompletada && !misionVencimiento.caja_diaria_id) {
+                updateMisionData.caja_diaria_id = turnoId
+            }
+
             const { error: misionUpdateError } = await supabase
                 .from('misiones')
-                .update({ unidades_completadas: nuevoProgreso, es_completada: misionCompletada })
+                .update(updateMisionData)
                 .eq('id', misionVencimiento.id)
             
             if (misionUpdateError) throw misionUpdateError
@@ -230,12 +242,11 @@ export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdate
             toast.success("Mermado Registrado ✅", { description: `Se procesaron ${unidadesMermadas} unidades.` })
             
             if (misionCompletada) {
-                // 3. PERSISTENCIA XP si se completó el objetivo total
                 await sumarPuntosAlPerfil(misionVencimiento.puntos)
                 triggerConfetti() 
                 toast.success(`✨ ¡MISIÓN COMPLETADA!`, { description: `Ganaste +${misionVencimiento.puntos} puntos.` })
             } else {
-                fetchMisiones() // Si no completó, solo refrescamos la barra
+                fetchMisiones() 
             }
 
             setStockParaMermar([])
@@ -248,10 +259,10 @@ export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdate
     }
 
     useEffect(() => {
-        if (turnoId) {
+        if (turnoId && empleadoId) {
             fetchMisiones()
         }
-    }, [turnoId, onMisionesUpdated, fetchMisiones])
+    }, [turnoId, empleadoId, onMisionesUpdated, fetchMisiones])
 
     if (loading) return <div className="p-8 text-center"><Loader2 className="animate-spin h-8 w-8 text-primary mx-auto" /></div>
     
@@ -303,6 +314,10 @@ export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdate
                                     <div>
                                         <p className="font-bold text-sm text-foreground">{m.descripcion}</p>
                                         <p className={cn("text-xs font-bold uppercase mt-0.5", status.color)}>{status.label}</p>
+                                        {/* Indicador de que es una misión global */}
+                                        {!m.caja_diaria_id && !m.es_completada && (
+                                            <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1 rounded ml-1 font-bold">GLOBAL</span>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="text-right flex-shrink-0">
@@ -324,7 +339,8 @@ export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdate
                     )
                 })
             )}
-
+            
+            {/* Modal de Mermas (Se mantiene igual) */}
             <Dialog open={showMermarModal} onOpenChange={setShowMermarModal}>
                 <DialogContent className="sm:max-w-[425px]">
                     <DialogHeader>

@@ -76,7 +76,37 @@ export default function WidgetServicios({ onVentaRegistrada }: { onVentaRegistra
                 return
             }
 
-            // 1. Stock
+            // ✅ 1. DESCONTAR SALDO DEL PROVEEDOR DE CARGAS
+            // Buscamos un proveedor que coincida con 'servicios' para descontar el saldo
+            const { data: proveedorData } = await supabase
+                .from('proveedores')
+                .select('id, saldo_actual, nombre')
+                .ilike('rubro', '%servicios%') // Asegúrate de tener un proveedor con este rubro
+                .limit(1)
+                .single()
+
+            if (proveedorData) {
+                // Opcional: Advertir si hay poco saldo
+                if ((proveedorData.saldo_actual || 0) < montoCarga) {
+                    toast.warning("Saldo bajo en plataforma", { 
+                        description: `Quedan $${proveedorData.saldo_actual} en ${proveedorData.nombre}.` 
+                    })
+                }
+
+                // Llamada a la función RPC para descontar saldo de forma segura
+                const { error: rpcError } = await supabase.rpc('descontar_saldo_proveedor', {
+                    proveedor_id_uuid: proveedorData.id,
+                    monto_descuento: montoCarga
+                })
+                
+                if (rpcError) {
+                    console.error("Error descontando saldo:", rpcError)
+                    // No bloqueamos la venta, pero avisamos
+                    toast.error("Error al descontar saldo del proveedor")
+                }
+            }
+
+            // ✅ 2. REGISTRAR VENTA EN STOCK (Historial)
             const { error: errorStock } = await supabase.from('stock').insert({
                 organization_id: turno.organization_id,
                 caja_diaria_id: turno.id,
@@ -84,14 +114,14 @@ export default function WidgetServicios({ onVentaRegistrada }: { onVentaRegistra
                 estado: 'vendido',
                 fecha_venta: fechaArgentina.toISOString(),
                 metodo_pago: metodoPago,
-                costo_unitario_historico: montoCarga,
+                costo_unitario_historico: montoCarga, // Lo que costó (se descontó del saldo)
                 // Guardamos en notas qué servicio fue
                 notas: `Servicio: ${nombreServicio}` 
             })
 
             if (errorStock) throw errorStock
 
-            // 2. Caja Física (Solo efectivo)
+            // ✅ 3. REGISTRAR EN CAJA FÍSICA (Solo efectivo)
             if (metodoPago === 'efectivo') {
                 const { error: errorCaja } = await supabase.from('movimientos_caja').insert({
                     organization_id: turno.organization_id,
@@ -105,7 +135,7 @@ export default function WidgetServicios({ onVentaRegistrada }: { onVentaRegistra
             }
 
             toast.success(`Carga ${nombreServicio} Exitosa`, {
-                description: `Cobrado: $${totalCobrar} (${metodoPago.replace('_', ' ')})`
+                description: `Cobrado: $${totalCobrar}. Saldo descontado.`
             })
             
             setMonto("")

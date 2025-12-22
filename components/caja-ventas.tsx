@@ -1,10 +1,10 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Search, Trash2, ShoppingCart, Plus, Minus, Loader2 } from "lucide-react"
+import { Search, Trash2, ShoppingCart, Plus, Minus, Loader2, ScanBarcode } from "lucide-react"
 import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -35,9 +35,12 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
   const [loading, setLoading] = useState(false)
   const [procesandoVenta, setProcesandoVenta] = useState(false)
   const [metodoPago, setMetodoPago] = useState<"efectivo" | "tarjeta" | "billetera_virtual">("efectivo")
+  
+  // Referencia para mantener el foco siempre en el input (modo cajero rápido)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  // Buscar productos (excluyendo los servicios como SUBE/Cargas que ya tienen widgets)
-  const buscarProductos = useCallback(async (query: string) => {
+  // Función de búsqueda optimizada para Scanner
+  const buscarProductos = useCallback(async (query: string, autoAdd: boolean = false) => {
     if (!query) {
       setProductos([])
       return
@@ -45,26 +48,46 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
 
     setLoading(true)
     try {
+      // Buscamos por nombre O por código de barras exacto
       const { data, error } = await supabase
         .from('productos')
         .select('*')
-        .ilike('nombre', `%${query}%`)
+        .or(`nombre.ilike.%${query}%,codigo_barras.eq.${query}`)
         .not('nombre', 'in', '("Carga SUBE","Carga Virtual")') 
         .limit(5)
 
       if (error) throw error
-      setProductos(data || [])
+      
+      const resultados = data || []
+      setProductos(resultados)
+
+      // LOGICA DE SCANNER:
+      // Si "autoAdd" es true (Enter presionado) y hay resultados...
+      if (autoAdd && resultados.length > 0) {
+        // 1. Buscamos coincidencia EXACTA de código de barras
+        const matchExacto = resultados.find(p => p.codigo_barras === query)
+        
+        if (matchExacto) {
+            agregarAlCarrito(matchExacto)
+        } 
+        // 2. Si no hay match exacto pero solo hay 1 resultado (ej: buscaste "coca" y solo salió coca), agregarlo.
+        else if (resultados.length === 1) {
+            agregarAlCarrito(resultados[0])
+        }
+        // Si hay varios y ninguno es exacto, dejamos que el usuario elija de la lista.
+      }
+
     } catch (error) {
       console.error("Error buscando:", error)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, []) // Dependencias vacías para evitar recreación infinita
 
-  // Debounce búsqueda
+  // Debounce solo para búsqueda visual (mientras escribes)
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      buscarProductos(busqueda)
+      if (busqueda.length > 2) buscarProductos(busqueda, false) // false = no agregar solo
     }, 300)
     return () => clearTimeout(timeoutId)
   }, [busqueda, buscarProductos])
@@ -77,8 +100,24 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
       }
       return [...prev, { ...producto, cantidad: 1 }]
     })
-    setBusqueda("") // Limpiar búsqueda al agregar
+    
+    // Reset para seguir escaneando
+    setBusqueda("") 
     setProductos([])
+    toast.success(`Agregado: ${producto.nombre}`, { position: 'bottom-center', duration: 1000 })
+    
+    // Devolver foco al input
+    setTimeout(() => inputRef.current?.focus(), 100)
+  }
+
+  // Manejador del scanner (Enter)
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+        e.preventDefault() // Evitar submit de formulario si lo hubiera
+        if (busqueda) {
+            buscarProductos(busqueda, true) // true = INTENTAR AGREGAR AUTOMÁTICAMENTE
+        }
+    }
   }
 
   const removerDelCarrito = (id: string) => {
@@ -118,7 +157,6 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
         
       if (!turnoData) throw new Error("Error de turno")
 
-      // 1. Registrar movimientos en Stock
       const movimientosStock = carrito.map(item => ({
         organization_id: turnoData.organization_id,
         caja_diaria_id: turnoId,
@@ -134,7 +172,6 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
       const { error: errorStock } = await supabase.from('stock').insert(movimientosStock)
       if (errorStock) throw errorStock
 
-      // 2. Registrar Ingreso en Caja (Solo si es efectivo)
       if (metodoPago === 'efectivo') {
         const { error: errorCaja } = await supabase.from('movimientos_caja').insert({
           organization_id: turnoData.organization_id,
@@ -150,6 +187,7 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
       toast.success("Venta Exitosa", { description: `Total: $${total}` })
       setCarrito([])
       setBusqueda("")
+      setTimeout(() => inputRef.current?.focus(), 100) // Foco de nuevo
       
     } catch (error: any) {
       console.error(error)
@@ -170,14 +208,19 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
       </div>
 
       <div className="p-4 space-y-4 flex-1">
-        {/* Buscador */}
+        {/* Buscador / Scanner Input */}
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-2 text-muted-foreground">
+             <ScanBarcode className="h-4 w-4" />
+          </div>
           <Input 
-            placeholder="Buscar golosinas, bebidas..." 
-            className="pl-9 bg-white"
+            ref={inputRef}
+            autoFocus
+            placeholder="Escanear producto o buscar..." 
+            className="pl-10 bg-white font-medium border-primary/30 focus-visible:ring-primary"
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
+            onKeyDown={handleKeyDown} // ✅ ESTO RECUPERA EL SCANNER
           />
           
           {/* Resultados Búsqueda (Dropdown) */}
@@ -204,12 +247,13 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
         <div className="space-y-2 min-h-[200px]">
           {carrito.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-muted-foreground border-2 border-dashed rounded-lg bg-slate-100/50">
-              <ShoppingCart className="h-8 w-8 mb-2 opacity-50" />
-              <p className="text-sm">Listo para vender</p>
+              <ScanBarcode className="h-10 w-10 mb-2 opacity-50" />
+              <p className="text-sm font-medium">Escanea un código de barras</p>
+              <p className="text-xs">o escribe el nombre del producto</p>
             </div>
           ) : (
             carrito.map(item => (
-              <div key={item.id} className="flex items-center justify-between bg-white p-3 rounded-lg shadow-sm border">
+              <div key={item.id} className="flex items-center justify-between bg-white p-3 rounded-lg shadow-sm border animate-in fade-in slide-in-from-left-2 duration-300">
                 <div className="flex-1">
                   <p className="font-bold text-sm line-clamp-1">{item.nombre}</p>
                   <p className="text-xs text-muted-foreground">${item.precio} u.</p>

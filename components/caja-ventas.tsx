@@ -36,10 +36,8 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
   const [procesandoVenta, setProcesandoVenta] = useState(false)
   const [metodoPago, setMetodoPago] = useState<"efectivo" | "tarjeta" | "billetera_virtual">("efectivo")
   
-  // Referencia para mantener el foco siempre en el input (modo cajero rápido)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Función de búsqueda optimizada para Scanner
   const buscarProductos = useCallback(async (query: string, autoAdd: boolean = false) => {
     if (!query) {
       setProductos([])
@@ -48,9 +46,9 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
 
     setLoading(true)
     try {
-      // Buscamos por nombre O por código de barras exacto
+      // ✅ CAMBIO CRÍTICO: Consultamos la VISTA, no la tabla directa
       const { data, error } = await supabase
-        .from('productos')
+        .from('view_productos_con_stock') 
         .select('*')
         .or(`nombre.ilike.%${query}%,codigo_barras.eq.${query}`)
         .not('nombre', 'in', '("Carga SUBE","Carga Virtual")') 
@@ -58,23 +56,26 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
 
       if (error) throw error
       
-      const resultados = data || []
+      // Mapeamos porque la vista puede traer nombres de columnas ligeramente distintos
+      const resultados: Producto[] = (data || []).map((p: any) => ({
+        id: p.id,
+        nombre: p.nombre,
+        precio: p.precio_venta,
+        stock: p.stock_disponible, // Usamos la columna calculada
+        codigo_barras: p.codigo_barras
+      }))
+
       setProductos(resultados)
 
-      // LOGICA DE SCANNER:
-      // Si "autoAdd" es true (Enter presionado) y hay resultados...
       if (autoAdd && resultados.length > 0) {
-        // 1. Buscamos coincidencia EXACTA de código de barras
         const matchExacto = resultados.find(p => p.codigo_barras === query)
         
         if (matchExacto) {
             agregarAlCarrito(matchExacto)
         } 
-        // 2. Si no hay match exacto pero solo hay 1 resultado (ej: buscaste "coca" y solo salió coca), agregarlo.
         else if (resultados.length === 1) {
             agregarAlCarrito(resultados[0])
         }
-        // Si hay varios y ninguno es exacto, dejamos que el usuario elija de la lista.
       }
 
     } catch (error) {
@@ -82,12 +83,11 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
     } finally {
       setLoading(false)
     }
-  }, []) // Dependencias vacías para evitar recreación infinita
+  }, []) 
 
-  // Debounce solo para búsqueda visual (mientras escribes)
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      if (busqueda.length > 2) buscarProductos(busqueda, false) // false = no agregar solo
+      if (busqueda.length > 2) buscarProductos(busqueda, false) 
     }, 300)
     return () => clearTimeout(timeoutId)
   }, [busqueda, buscarProductos])
@@ -101,21 +101,17 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
       return [...prev, { ...producto, cantidad: 1 }]
     })
     
-    // Reset para seguir escaneando
     setBusqueda("") 
     setProductos([])
     toast.success(`Agregado: ${producto.nombre}`, { position: 'bottom-center', duration: 1000 })
-    
-    // Devolver foco al input
     setTimeout(() => inputRef.current?.focus(), 100)
   }
 
-  // Manejador del scanner (Enter)
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-        e.preventDefault() // Evitar submit de formulario si lo hubiera
+        e.preventDefault() 
         if (busqueda) {
-            buscarProductos(busqueda, true) // true = INTENTAR AGREGAR AUTOMÁTICAMENTE
+            buscarProductos(busqueda, true)
         }
     }
   }
@@ -144,29 +140,18 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
 
     try {
       const total = calcularTotal()
-      const fechaArgentina = new Date()
-      fechaArgentina.setHours(fechaArgentina.getHours() - 3)
-
       const { data: { user } } = await supabase.auth.getUser()
       
-      const { data: turnoData } = await supabase
-        .from('caja_diaria')
-        .select('organization_id')
-        .eq('id', turnoId)
-        .single()
-        
-      if (!turnoData) throw new Error("Error de turno")
-
+      // ✅ CAMBIO CRÍTICO: Registramos la SALIDA de stock
       const movimientosStock = carrito.map(item => ({
-        organization_id: turnoData.organization_id,
         caja_diaria_id: turnoId,
         producto_id: item.id,
-        estado: 'vendido',
         cantidad: item.cantidad,
-        fecha_venta: fechaArgentina.toISOString(),
+        tipo_movimiento: 'salida', // Esto hace que la vista reste el stock
+        fecha_venta: new Date().toISOString(),
         metodo_pago: metodoPago,
         precio_venta: item.precio, 
-        costo_unitario_historico: 0 
+        estado: 'vendido'
       }))
 
       const { error: errorStock } = await supabase.from('stock').insert(movimientosStock)
@@ -174,7 +159,6 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
 
       if (metodoPago === 'efectivo') {
         const { error: errorCaja } = await supabase.from('movimientos_caja').insert({
-          organization_id: turnoData.organization_id,
           caja_diaria_id: turnoId,
           empleado_id: user?.id,
           tipo: 'ingreso',
@@ -187,7 +171,7 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
       toast.success("Venta Exitosa", { description: `Total: $${total}` })
       setCarrito([])
       setBusqueda("")
-      setTimeout(() => inputRef.current?.focus(), 100) // Foco de nuevo
+      setTimeout(() => inputRef.current?.focus(), 100) 
       
     } catch (error: any) {
       console.error(error)
@@ -199,7 +183,6 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
 
   return (
     <Card className="flex flex-col h-full shadow-md border-0 bg-slate-50/50">
-      {/* Header del Carrito */}
       <div className="p-4 border-b bg-white rounded-t-lg">
         <h3 className="font-bold flex items-center gap-2 text-lg">
           <ShoppingCart className="h-5 w-5 text-primary" />
@@ -208,7 +191,6 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
       </div>
 
       <div className="p-4 space-y-4 flex-1">
-        {/* Buscador / Scanner Input */}
         <div className="relative">
           <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-2 text-muted-foreground">
              <ScanBarcode className="h-4 w-4" />
@@ -220,10 +202,9 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
             className="pl-10 bg-white font-medium border-primary/30 focus-visible:ring-primary"
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
-            onKeyDown={handleKeyDown} // ✅ ESTO RECUPERA EL SCANNER
+            onKeyDown={handleKeyDown} 
           />
           
-          {/* Resultados Búsqueda (Dropdown) */}
           {productos.length > 0 && (
             <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-md shadow-xl border z-50 overflow-hidden">
               {productos.map(p => (
@@ -235,6 +216,7 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
                   <span className="font-medium text-sm">{p.nombre}</span>
                   <div className="flex items-center gap-2">
                     <Badge variant="secondary" className="text-xs">${p.precio}</Badge>
+                    <span className="text-xs text-muted-foreground">Stock: {p.stock}</span>
                     <Plus className="h-4 w-4 text-green-600" />
                   </div>
                 </button>
@@ -243,7 +225,6 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
           )}
         </div>
 
-        {/* Lista del Carrito */}
         <div className="space-y-2 min-h-[200px]">
           {carrito.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-muted-foreground border-2 border-dashed rounded-lg bg-slate-100/50">
@@ -282,7 +263,6 @@ export default function CajaVentas({ turnoId, empleadoNombre }: CajaVentasProps)
         </div>
       </div>
 
-      {/* Footer Total y Pago */}
       <div className="p-4 bg-white border-t mt-auto rounded-b-lg space-y-4 shadow-inner">
         <div className="flex justify-between items-end">
           <span className="text-muted-foreground font-medium">Total a Cobrar</span>

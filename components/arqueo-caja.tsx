@@ -25,7 +25,7 @@ export interface CajaDiaria {
     fecha_apertura: string
     empleado_id: string
     monto_final: number | null; 
-    organization_id?: string // ✅ NECESARIO
+    organization_id?: string
 }
 
 export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }: ArqueoCajaProps) {
@@ -35,30 +35,28 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
   
   const [caja, setCaja] = useState<CajaDiaria | null>(turnoActivo)
 
-  // 🎲 Gamificación: Generar Misiones (Incluyendo Rutinas)
   const generarMisiones = async (cajaId: string, empleadoId: string, orgId: string) => {
     try {
       const hoy = new Date()
       const fechaLimite = format(addDays(hoy, 7), 'yyyy-MM-dd')
 
-      // 1. Stock en Riesgo (Tu lógica original)
+      // 1. Stock en Riesgo (Lógica Ledger)
       const { data: stockCritico } = await supabase
         .from('stock')
-        .select('id, producto_id, fecha_vencimiento')
-        .eq('estado', 'pendiente')
+        .select('id, producto_id, fecha_vencimiento, cantidad') // ✅ TRAEMOS CANTIDAD
+        .eq('tipo_movimiento', 'entrada') // Solo entradas
         .lt('fecha_vencimiento', fechaLimite)
       
-      const productosEnRiesgo: { [key: string]: number } = {}
+      let totalUnidadesRiesgo = 0
       stockCritico?.forEach(item => {
-        productosEnRiesgo[item.producto_id] = (productosEnRiesgo[item.producto_id] || 0) + 1
+        totalUnidadesRiesgo += (item.cantidad || 1) // ✅ SUMA REAL
       })
 
       const misionesABulkInsert = []
-      const totalUnidadesRiesgo = Object.values(productosEnRiesgo).reduce((sum, count) => sum + count, 0)
       
       if (totalUnidadesRiesgo > 0) {
         misionesABulkInsert.push({
-          organization_id: orgId, // ✅ Importante
+          organization_id: orgId,
           empleado_id: empleadoId,
           caja_diaria_id: cajaId,
           tipo: 'vencimiento',
@@ -82,7 +80,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
         puntos: 20, 
       })
 
-      // 2. ✅ CARGAR RUTINAS DESDE BD (Lo nuevo)
       const { data: plantillas } = await supabase
           .from('plantillas_misiones')
           .select('*')
@@ -133,14 +130,13 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error("Sesión inválida")
       
-      // ✅ Obtener Org ID
       const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single()
       if (!perfil?.organization_id) throw new Error("No tienes organización asignada.")
 
       const { data, error } = await supabase
         .from('caja_diaria')
         .insert({
-          organization_id: perfil.organization_id, // ✅ Vinculación
+          organization_id: perfil.organization_id, 
           monto_inicial: monto,
           empleado_id: user.id,
           fecha_apertura: new Date().toISOString()
@@ -153,7 +149,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       const nuevoTurno = data as CajaDiaria
       setCaja(nuevoTurno)
       
-      // ✅ Pasar Org ID a la generación
       await generarMisiones(nuevoTurno.id, user.id, perfil.organization_id)
 
       onCajaAbierta(nuevoTurno.id)
@@ -166,7 +161,7 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
     }
   }
 
-  // --- Cierre (Igual que antes) ---
+  // --- Cierre ---
   const handleCerrarCaja = async () => {
     if (!caja) return
     const montoDeclarado = parseFloat(montoFinal)
@@ -181,17 +176,20 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error("Usuario no autenticado.")
 
-      // 1. VENTAS
+      // 1. VENTAS (Arreglo Crítico: Sumar Precio * Cantidad)
       const { data: ventasData, error: ventasError } = await supabase
         .from('stock')
-        .select('productos(precio_venta)') 
+        .select('cantidad, productos(precio_venta)') 
         .eq('caja_diaria_id', caja.id)
         .eq('metodo_pago', 'efectivo') 
+        .eq('tipo_movimiento', 'salida') // ✅ Solo ventas (salidas)
 
       if (ventasError) throw ventasError
 
       const totalVentasEfectivo = ventasData?.reduce((sum, item: any) => {
-          return sum + (item.productos?.precio_venta || 0)
+          const precio = item.productos?.precio_venta || 0
+          const cant = item.cantidad || 1 // ✅ Multiplicador clave
+          return sum + (precio * cant)
       }, 0) || 0
 
       // 2. GASTOS
@@ -221,7 +219,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
       
       if (error) throw error
 
-      // 5. COMPLETAR MISION DE CIERRE
       await supabase
           .from('misiones')
           .update({
@@ -231,7 +228,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo }
           .eq('caja_diaria_id', caja.id)
           .eq('tipo', 'arqueo_cierre')
 
-      // 6. PREMIO
       if (exitoArqueo) {
           const { data: perfil } = await supabase
             .from('perfiles').select('xp').eq('id', caja.empleado_id).single()

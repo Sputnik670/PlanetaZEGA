@@ -1,5 +1,3 @@
-// components/agregar-stock.tsx
-
 "use client"
 
 import { useState, useEffect } from "react"
@@ -26,7 +24,6 @@ interface Producto {
 interface AgregarStockProps {
   producto: Producto
   onStockAdded?: () => void 
-  // orgId eliminado para corregir el error de compatibilidad
 }
 
 export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
@@ -84,7 +81,6 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
             .from('compras')
             .insert([
                 {
-                    // organization_id eliminado
                     proveedor_id: selectedProveedor,
                     monto_total: montoTotal,
                     estado_pago: estadoPago, 
@@ -99,25 +95,27 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
           if (compraData) compraId = compraData.id
       }
 
-      // 2. Insertar STOCK
-      const stockItems = Array.from({ length: cantidad }).map(() => ({
-        // organization_id eliminado
+      // 2. Insertar STOCK (MODO LEDGER: 1 SOLA FILA)
+      // Eliminamos el Array.from y el map. Insertamos el lote completo.
+      const { error } = await supabase.from('stock').insert({
         producto_id: producto.id,
+        cantidad: cantidad,           // Cantidad total
+        tipo_movimiento: 'entrada',   // IMPORTANTE: Para que la vista sume
         fecha_vencimiento: format(fechaVencimiento, 'yyyy-MM-dd'),
-        estado: 'pendiente',
+        estado: 'disponible',         // Ya no usamos 'pendiente' para stock activo
         proveedor_id: selectedProveedor || null,
         compra_id: compraId,
-        costo_unitario_historico: costoNum > 0 ? costoNum : null
-      }))
+        costo_unitario_historico: costoNum > 0 ? costoNum : null,
+        fecha_ingreso: new Date().toISOString()
+      })
 
-      const { error } = await supabase.from('stock').insert(stockItems)
       if (error) throw error
 
       // 3. Actualizar Costo Producto
       if (costoNum > 0) {
           await supabase
             .from('productos')
-            .update({ costo: costoNum }) // organization_id eliminado
+            .update({ costo: costoNum })
             .eq('id', producto.id)
       }
 

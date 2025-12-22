@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils"
 import { useZxing } from "react-zxing"
 import { generarTicketVenta } from "@/lib/generar-ticket"
 import { format } from "date-fns"
-import WidgetSube from "@/components/widget-sube" // ✅ IMPORTAMOS EL WIDGET
+import WidgetSube from "@/components/widget-sube"
 
 // --- COMPONENTE SCANNER ---
 function BarcodeScanner({ onResult, onClose }: { onResult: (code: string) => void, onClose: () => void }) {
@@ -46,19 +46,23 @@ function BarcodeScanner({ onResult, onClose }: { onResult: (code: string) => voi
   )
 }
 
+// ✅ MODIFICACIÓN 1: Agregamos 'categoria' a la interfaz
 interface ProductoConStock {
   id: string
   nombre: string
   emoji: string
+  categoria: string // <--- Nuevo campo
   precio_venta: number
   stock_disponible: number
   codigo_barras?: string
 }
 
+// ✅ MODIFICACIÓN 2: Agregamos 'categoria' al item del carrito
 interface CartItem {
   id: string 
   nombre: string
   emoji: string
+  categoria: string // <--- Nuevo campo
   precio_venta: number
   cantidad: number
   stock_disponible: number
@@ -110,6 +114,7 @@ export default function CajaVentas({ turnoId, empleadoNombre = "Cajero" }: { tur
       const productosConStock = (prods || []).map(p => ({
         ...p,
         stock_disponible: p.stock_disponible || 0,
+        categoria: p.categoria || '', // ✅ Mapeamos la categoría
         precio_venta: parseFloat(p.precio_venta || 0)
       })) as ProductoConStock[]
       
@@ -151,31 +156,49 @@ export default function CajaVentas({ turnoId, empleadoNombre = "Cajero" }: { tur
     setShowPaymentModal(true)
   }
 
+  // ✅ MODIFICACIÓN 3: Lógica 'addToCart' permite Servicios sin stock
   const addToCart = (producto: ProductoConStock) => {
     const existingItem = cart.find(item => item.id === producto.id)
-    if (producto.stock_disponible === 0) return toast.warning("Sin Stock")
+    
+    // Si es servicio o Carga SUBE, ignoramos el stock 0
+    const esServicio = producto.categoria === 'Servicios' || producto.nombre === 'Carga SUBE';
+    
+    if (!esServicio && producto.stock_disponible === 0) return toast.warning("Sin Stock")
 
     if (existingItem) {
-        if (existingItem.cantidad < producto.stock_disponible) {
+        // Si es servicio, permitimos sumar siempre. Si es producto, validamos stock.
+        if (esServicio || existingItem.cantidad < producto.stock_disponible) {
             setCart(prev => prev.map(item => item.id === producto.id ? { ...item, cantidad: item.cantidad + 1 } : item))
         } else {
             toast.warning("Límite de Stock alcanzado")
         }
     } else {
         setCart(prev => [...prev, {
-            id: producto.id, nombre: producto.nombre, emoji: producto.emoji,
-            precio_venta: producto.precio_venta, cantidad: 1, stock_disponible: producto.stock_disponible
+            id: producto.id, 
+            nombre: producto.nombre, 
+            emoji: producto.emoji,
+            categoria: producto.categoria, // Guardamos la categoría
+            precio_venta: producto.precio_venta, 
+            cantidad: 1, 
+            stock_disponible: producto.stock_disponible
         }])
     }
   }
 
+  // ✅ MODIFICACIÓN 4: Lógica 'updateCartItemQuantity' permite sumar Servicios libremente
   const updateCartItemQuantity = (productId: string, delta: number) => {
     setCart(prev => {
         const item = prev.find(i => i.id === productId)
         if (!item) return prev
+        
         const newQuantity = item.cantidad + delta
+        const esServicio = item.categoria === 'Servicios' || item.nombre === 'Carga SUBE';
+
         if (newQuantity < 1) return prev.filter(i => i.id !== productId)
-        if (newQuantity > item.stock_disponible) return prev
+        
+        // Si NO es servicio y supera el stock, no dejamos subir
+        if (!esServicio && newQuantity > item.stock_disponible) return prev
+        
         return prev.map(i => i.id === productId ? { ...i, cantidad: newQuantity } : i)
     })
   }
@@ -187,6 +210,9 @@ export default function CajaVentas({ turnoId, empleadoNombre = "Cajero" }: { tur
     setProcesandoVenta(true)
     try {
       const updates = []
+      
+      // NOTA: Para que los Servicios funcionen aquí, necesitaremos el "Stock Infinito"
+      // o una lógica de inserción manual. Por ahora, asume que existen rows en stock.
       for (const item of cart) {
         const { data: stockItems, error: searchError } = await supabase
           .from('stock')
@@ -200,11 +226,15 @@ export default function CajaVentas({ turnoId, empleadoNombre = "Cajero" }: { tur
         updates.push(...stockItems.map(s => s.id))
       }
 
+      // ✅ MODIFICACIÓN 5: Fix de Zona Horaria (El Parche Argentino)
+      const fechaArgentina = new Date();
+      fechaArgentina.setHours(fechaArgentina.getHours() - 3);
+
       const { error: updateError } = await supabase
         .from('stock')
         .update({ 
             estado: 'vendido',
-            fecha_venta: new Date().toISOString(), 
+            fecha_venta: fechaArgentina.toISOString(), // Usamos la fecha ajustada 
             metodo_pago: metodo_pago,
             caja_diaria_id: turnoId 
         }) 
@@ -244,7 +274,6 @@ export default function CajaVentas({ turnoId, empleadoNombre = "Cajero" }: { tur
   }
 
   return (
-    // ✅ CAMBIO 1: Layout de Grid para separar Venta de Servicios
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full items-start">
       
       {/* COLUMNA IZQUIERDA: CAJA REGISTRADORA (Ocupa 2/3) */}
@@ -302,7 +331,7 @@ export default function CajaVentas({ turnoId, empleadoNombre = "Cajero" }: { tur
                       <div className="flex items-center gap-1">
                         <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => updateCartItemQuantity(item.id, -1)}><Minus className="h-3 w-3" /></Button>
                         <span className="font-bold w-6 text-center text-sm">{item.cantidad}</span>
-                        <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => updateCartItemQuantity(item.id, 1)} disabled={item.cantidad >= item.stock_disponible}><Plus className="h-3 w-3" /></Button>
+                        <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => updateCartItemQuantity(item.id, 1)} disabled={item.cantidad >= item.stock_disponible && item.categoria !== 'Servicios'}><Plus className="h-3 w-3" /></Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeCartItem(item.id)}><Trash2 className="h-4 w-4" /></Button>
                       </div>
                     </div>

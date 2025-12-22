@@ -1,3 +1,4 @@
+// components/caja-ventas.tsx
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
@@ -5,14 +6,14 @@ import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Search, ShoppingCart, Loader2, Minus, Plus, Trash2, X, Check, CreditCard, DollarSign, Wallet, Repeat2, ScanBarcode } from "lucide-react"
+import { Search, ShoppingCart, Loader2, Minus, Plus, Trash2, X, Check, CreditCard, DollarSign, Wallet, Repeat2, ScanBarcode, Zap } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { useZxing } from "react-zxing"
-// ✅ IMPORTAMOS LA LÓGICA DE TICKET
 import { generarTicketVenta } from "@/lib/generar-ticket"
 import { format } from "date-fns"
+import WidgetSube from "@/components/widget-sube" // ✅ IMPORTAMOS EL WIDGET
 
 // --- COMPONENTE SCANNER ---
 function BarcodeScanner({ onResult, onClose }: { onResult: (code: string) => void, onClose: () => void }) {
@@ -73,7 +74,6 @@ const PAYMENT_OPTIONS = [
     { key: 'otro', label: 'Otro / Cta. Corriente', icon: Wallet },
 ]
 
-// ✅ AHORA RECIBE EL NOMBRE DEL EMPLEADO PARA EL TICKET
 export default function CajaVentas({ turnoId, empleadoNombre = "Cajero" }: { turnoId?: string, empleadoNombre?: string }) {
   const [busqueda, setBusqueda] = useState("")
   const [productosBusqueda, setProductosBusqueda] = useState<ProductoConStock[]>([])
@@ -182,7 +182,6 @@ export default function CajaVentas({ turnoId, empleadoNombre = "Cajero" }: { tur
 
   const removeCartItem = (productId: string) => setCart(prev => prev.filter(item => item.id !== productId))
 
-  // ✅ LOGICA DE PAGO + IMPRESIÓN
   const confirmarVenta = async (metodo_pago: PaymentMethod) => {
     if (!turnoId) return
     setProcesandoVenta(true)
@@ -216,13 +215,11 @@ export default function CajaVentas({ turnoId, empleadoNombre = "Cajero" }: { tur
       toast.success("¡Venta Exitosa! 💰")
       setShowPaymentModal(false)
 
-      // 🖨️ IMPRIMIR TICKET AUTOMÁTICO (O PREGUNTAR)
-      // Usamos un pequeño timeout para asegurar que el modal se cierre visualmente antes del alert
       setTimeout(() => {
           const deseaTicket = confirm("¿Imprimir Ticket de Venta?")
           if (deseaTicket) {
               generarTicketVenta({
-                  organizacion: "Planeta ZEGA", // Podrías traer esto de la DB si quisieras
+                  organizacion: "Planeta ZEGA", 
                   fecha: format(new Date(), 'dd/MM/yyyy HH:mm'),
                   vendedor: empleadoNombre,
                   metodoPago: metodo_pago,
@@ -237,7 +234,7 @@ export default function CajaVentas({ turnoId, empleadoNombre = "Cajero" }: { tur
           }
       }, 100)
 
-      setCart([]) // Limpiar carrito después de todo
+      setCart([]) 
       
     } catch (error: any) {
       toast.error("Error al procesar")
@@ -247,77 +244,105 @@ export default function CajaVentas({ turnoId, empleadoNombre = "Cajero" }: { tur
   }
 
   return (
-    <div className="space-y-4">
-      <Card className="p-4 space-y-4 shadow-lg border-2 border-primary/10">
-        <div className="flex gap-2">
-            <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-                <Input
-                    placeholder="Busca o escanea..."
-                    className="h-12 pl-12 text-lg"
-                    value={busqueda}
-                    onChange={(e) => setBusqueda(e.target.value)}
-                />
-                {loading && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 animate-spin text-primary" />}
-            </div>
-            <Button size="icon" className="h-12 w-12 shrink-0 bg-blue-600 hover:bg-blue-700" onClick={() => setShowScanner(true)}>
-                <ScanBarcode className="h-6 w-6" />
-            </Button>
-        </div>
-
-        {/* Resultados */}
-        {busqueda.length > 0 && productosBusqueda.length > 0 && (
-            <div className="border rounded-lg max-h-40 overflow-y-auto bg-white shadow-sm z-10">
-                {productosBusqueda.map((prod) => (
-                    <div key={prod.id} className="flex items-center justify-between p-3 border-b last:border-b-0 cursor-pointer hover:bg-primary/5 transition-colors" onClick={() => addToCart(prod)}>
-                        <div className="flex items-center gap-3">
-                            <span className="text-xl">{prod.emoji}</span>
-                            <div>
-                                <h3 className="font-semibold leading-none truncate">{prod.nombre}</h3>
-                                <p className="text-xs text-muted-foreground mt-0.5">Stock: {prod.stock_disponible} | {formatMoney(prod.precio_venta)}</p>
-                            </div>
-                        </div>
-                        <Plus className="h-5 w-5 text-primary" />
-                    </div>
-                ))}
-            </div>
-        )}
-
-        {/* Carrito y Total */}
-        {cart.length > 0 && (
-          <div className="space-y-3 pt-4 border-t">
-            <h3 className="font-bold flex items-center gap-2 text-lg text-primary"><ShoppingCart className="h-5 w-5" /> Carrito ({cart.length})</h3>
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {cart.map((item) => (
-                <div key={item.id} className="flex items-center justify-between p-2 bg-slate-50/50 rounded-lg">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <span className="text-2xl">{item.emoji}</span>
-                    <div className="flex-1 min-w-0"><p className="font-semibold truncate">{item.nombre}</p></div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => updateCartItemQuantity(item.id, -1)}><Minus className="h-3 w-3" /></Button>
-                    <span className="font-bold w-6 text-center text-sm">{item.cantidad}</span>
-                    <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => updateCartItemQuantity(item.id, 1)} disabled={item.cantidad >= item.stock_disponible}><Plus className="h-3 w-3" /></Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeCartItem(item.id)}><Trash2 className="h-4 w-4" /></Button>
-                  </div>
+    // ✅ CAMBIO 1: Layout de Grid para separar Venta de Servicios
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full items-start">
+      
+      {/* COLUMNA IZQUIERDA: CAJA REGISTRADORA (Ocupa 2/3) */}
+      <div className="lg:col-span-2 space-y-4">
+          <Card className="p-4 space-y-4 shadow-lg border-2 border-primary/10">
+            <div className="flex gap-2">
+                <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                    <Input
+                        placeholder="Busca o escanea..."
+                        className="h-12 pl-12 text-lg"
+                        value={busqueda}
+                        onChange={(e) => setBusqueda(e.target.value)}
+                        autoFocus
+                    />
+                    {loading && <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 animate-spin text-primary" />}
                 </div>
-              ))}
+                <Button size="icon" className="h-12 w-12 shrink-0 bg-blue-600 hover:bg-blue-700" onClick={() => setShowScanner(true)}>
+                    <ScanBarcode className="h-6 w-6" />
+                </Button>
             </div>
-            <div className="pt-3 border-t">
-              <div className="flex justify-between items-center mb-3"><span className="text-xl font-bold">TOTAL:</span><span className="text-2xl font-black text-emerald-600">{formatMoney(totalCarrito)}</span></div>
-              <Button onClick={handlePagarClick} disabled={procesandoVenta} className="w-full h-12 text-lg bg-emerald-600 hover:bg-emerald-700 font-bold">COBRAR 💸</Button>
-            </div>
-          </div>
-        )}
-      </Card>
 
+            {/* Resultados */}
+            {busqueda.length > 0 && productosBusqueda.length > 0 && (
+                <div className="border rounded-lg max-h-40 overflow-y-auto bg-white shadow-sm z-10">
+                    {productosBusqueda.map((prod) => (
+                        <div key={prod.id} className="flex items-center justify-between p-3 border-b last:border-b-0 cursor-pointer hover:bg-primary/5 transition-colors" onClick={() => addToCart(prod)}>
+                            <div className="flex items-center gap-3">
+                                <span className="text-xl">{prod.emoji}</span>
+                                <div>
+                                    <h3 className="font-semibold leading-none truncate">{prod.nombre}</h3>
+                                    <p className="text-xs text-muted-foreground mt-0.5">Stock: {prod.stock_disponible} | {formatMoney(prod.precio_venta)}</p>
+                                </div>
+                            </div>
+                            <Plus className="h-5 w-5 text-primary" />
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Carrito y Total */}
+            {cart.length > 0 ? (
+              <div className="space-y-3 pt-4 border-t">
+                <h3 className="font-bold flex items-center gap-2 text-lg text-primary"><ShoppingCart className="h-5 w-5" /> Carrito ({cart.length})</h3>
+                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                  {cart.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between p-2 bg-slate-50/50 rounded-lg border border-slate-100">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <span className="text-2xl">{item.emoji}</span>
+                        <div className="flex-1 min-w-0">
+                            <p className="font-semibold truncate text-sm">{item.nombre}</p>
+                            <p className="text-xs text-muted-foreground">{formatMoney(item.precio_venta)} x {item.cantidad}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => updateCartItemQuantity(item.id, -1)}><Minus className="h-3 w-3" /></Button>
+                        <span className="font-bold w-6 text-center text-sm">{item.cantidad}</span>
+                        <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => updateCartItemQuantity(item.id, 1)} disabled={item.cantidad >= item.stock_disponible}><Plus className="h-3 w-3" /></Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeCartItem(item.id)}><Trash2 className="h-4 w-4" /></Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="pt-3 border-t bg-slate-50 p-4 rounded-xl">
+                  <div className="flex justify-between items-center mb-3"><span className="text-xl font-bold text-slate-700">TOTAL:</span><span className="text-3xl font-black text-emerald-600">{formatMoney(totalCarrito)}</span></div>
+                  <Button onClick={handlePagarClick} disabled={procesandoVenta} className="w-full h-14 text-xl bg-emerald-600 hover:bg-emerald-700 font-bold shadow-md transition-all active:scale-95">COBRAR 💸</Button>
+                </div>
+              </div>
+            ) : (
+                <div className="h-40 flex flex-col items-center justify-center text-muted-foreground border-2 border-dashed rounded-xl">
+                    <ShoppingCart className="h-10 w-10 mb-2 opacity-20" />
+                    <p>Carrito vacío</p>
+                </div>
+            )}
+          </Card>
+      </div>
+
+      {/* COLUMNA DERECHA: SERVICIOS RÁPIDOS (Ocupa 1/3) */}
+      <div className="space-y-4">
+          {/* ✅ WIDGET SUBE INTEGRADO AQUÍ */}
+          <WidgetSube onVentaRegistrada={() => {}} />
+          
+          {/* Aquí podrías agregar más widgets futuros: Carga Virtual, Retiro de Efectivo, etc. */}
+          <Card className="p-4 border-dashed border-2 flex flex-col items-center justify-center text-muted-foreground opacity-50 hover:opacity-100 transition-opacity cursor-pointer">
+              <Zap className="h-6 w-6 mb-2" />
+              <p className="text-xs font-bold">Carga Virtual (Próx.)</p>
+          </Card>
+      </div>
+
+      {/* --- MODALES (Fuera del grid) --- */}
+      
       {/* Modal de Pago */}
       <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle className="text-center text-2xl">Método de Pago</DialogTitle></DialogHeader>
           <div className="flex flex-col gap-3 py-4">
             {PAYMENT_OPTIONS.map((option) => (
-                <Card key={option.key} className={cn("p-4 cursor-pointer", selectedPaymentMethod === option.key ? "border-2 border-primary bg-primary/5" : "border")} onClick={() => setSelectedPaymentMethod(option.key as PaymentMethod)}>
+                <Card key={option.key} className={cn("p-4 cursor-pointer hover:bg-slate-50 transition-colors", selectedPaymentMethod === option.key ? "border-2 border-primary bg-primary/5" : "border")} onClick={() => setSelectedPaymentMethod(option.key as PaymentMethod)}>
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                             <option.icon className={cn("h-6 w-6", selectedPaymentMethod === option.key ? "text-primary" : "text-muted-foreground")} />

@@ -106,6 +106,16 @@ interface TurnoAudit {
   movimientos_caja: any[]
 }
 
+// ✅ NUEVA INTERFAZ: Asistencia
+interface AsistenciaRecord {
+    id: string
+    entrada: string
+    salida: string | null
+    empleado_id: string
+    perfiles: { nombre: string } | null
+    sucursal_id: string
+}
+
 const PAYMENT_ICONS: any = {
     efectivo: DollarSign,
     tarjeta: CreditCard,
@@ -122,6 +132,7 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
 
   // --- ESTADOS DE UI ---
   const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "catalog" | "sales" | "finance" | "supervision" | "suppliers" | "team">("sales")
+  const [supervisionTab, setSupervisionTab] = useState<"cajas" | "asistencia">("cajas") // ✅ Control interno de Supervisión
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
@@ -140,6 +151,7 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
   })
   const [topProductos, setTopProductos] = useState<{name: string, count: number}[]>([])
   const [turnosAudit, setTurnosAudit] = useState<TurnoAudit[]>([])
+  const [asistencias, setAsistencias] = useState<AsistenciaRecord[]>([]) // ✅ Estado para fichajes
   const [expandedTurnoId, setExpandedTurnoId] = useState<string | null>(null)
   const [sugerencias, setSugerencias] = useState<any[]>([])
 
@@ -172,15 +184,13 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
   const fetchData = useCallback(async () => {
     if (!currentSucursalId || !organizationId) return
 
-    // A. Inventario con Stock Local
+    // A. Inventario
     const { data: cat } = await supabase.from('productos').select('*').eq('organization_id', organizationId).order('nombre')
     const { data: stk } = await supabase.from('view_productos_con_stock').select('id, stock_disponible').eq('sucursal_id', currentSucursalId)
 
     if (cat) {
         const fusion = cat.map(p => ({ ...p, stock_disponible: stk?.find(s => s.id === p.id)?.stock_disponible || 0 }))
         setProductos(fusion)
-
-        // Sugerencias de Reposición
         const bajas = fusion.filter(p => (p.stock_disponible || 0) <= UMBRAL_STOCK_BAJO && p.categoria !== "Servicios")
         const sugs = []
         for (const p of bajas) {
@@ -190,7 +200,7 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
         setSugerencias(sugs)
     }
 
-    // B. Ventas y Pagos
+    // B. Ventas
     let vQ = supabase.from('stock').select('*, productos(nombre, precio_venta, emoji)').eq('sucursal_id', currentSucursalId).eq('tipo_movimiento', 'salida')
     if (dateRange?.from) vQ = vQ.gte('fecha_venta', dateRange.from.toISOString())
     if (dateRange?.to) vQ = vQ.lte('fecha_venta', dateRange.to.toISOString())
@@ -213,14 +223,21 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
         setTopProductos(Object.entries(counts).map(([name, count]) => ({ name, count })).sort((a,b) => b.count - a.count).slice(0, 5))
     }
 
-    // C. Turnos y Auditoría
+    // C. Turnos
     let cQ = supabase.from('caja_diaria').select(`*, perfiles(nombre), misiones(*), movimientos_caja(*)`).eq('sucursal_id', currentSucursalId)
     if (dateRange?.from) cQ = cQ.gte('fecha_apertura', dateRange.from.toISOString())
     if (dateRange?.to) cQ = cQ.lte('fecha_apertura', dateRange.to.toISOString())
     const { data: cData } = await cQ.order('fecha_apertura', { ascending: false }).returns<TurnoAudit[]>()
     setTurnosAudit(cData || [])
 
-    // D. Vencimientos
+    // ✅ D. Asistencia (Fichajes)
+    let aQ = supabase.from('asistencia').select('*, perfiles(nombre)').eq('sucursal_id', currentSucursalId)
+    if (dateRange?.from) aQ = aQ.gte('entrada', dateRange.from.toISOString())
+    if (dateRange?.to) aQ = aQ.lte('entrada', dateRange.to.toISOString())
+    const { data: aData } = await aQ.order('entrada', { ascending: false }).limit(50)
+    if (aData) setAsistencias(aData as unknown as AsistenciaRecord[])
+
+    // E. Vencimientos
     const { data: stkRiesgo } = await supabase.from('stock').select('*, productos(nombre, precio_venta, emoji)').eq('sucursal_id', currentSucursalId).eq('tipo_movimiento', 'entrada').eq('estado', 'disponible')
     if (stkRiesgo) {
         const hoy = new Date(); const limite = new Date(); limite.setDate(hoy.getDate() + 10)
@@ -239,7 +256,7 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
 
   useEffect(() => { setLoading(true); fetchData().finally(() => setLoading(false)) }, [fetchData])
 
-  // --- 3. BUSINESS INTELLIGENCE (MEMOS) ---
+  // --- 3. BUSINESS INTELLIGENCE ---
 
   const biMetrics = useMemo(() => {
     let bruto = 0, costo = 0, blanco = 0
@@ -280,13 +297,7 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
     return `${from} - ${to}`
   }, [dateRange])
 
-  // --- 4. ACCIONES DE AUDITORÍA ---
-
-  const loadStockBatches = async (pid: string) => {
-      setManagingStockId(pid)
-      const { data } = await supabase.from('stock').select('*').eq('producto_id', pid).eq('tipo_movimiento', 'entrada').eq('sucursal_id', currentSucursalId).order('created_at', { ascending: false })
-      setStockBatchList(data || [])
-  }
+  // --- 4. HANDLERS ---
 
   const handleUpdateProduct = async () => {
     if (!editingProduct) return; setActionLoading(true)
@@ -316,6 +327,12 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
     setShowPriceHistoryModal(true); setLoading(false)
   }
 
+  const loadStockBatches = async (pid: string) => {
+    setManagingStockId(pid)
+    const { data } = await supabase.from('stock').select('*').eq('producto_id', pid).eq('tipo_movimiento', 'entrada').eq('sucursal_id', currentSucursalId).order('created_at', { ascending: false })
+    setStockBatchList(data || [])
+  }
+
   const handlePrintTurno = (t: TurnoAudit) => {
     const vT = ventasRecientes.filter(v => {
         const fV = parseISO(v.fecha_venta); const fA = parseISO(t.fecha_apertura); const fC = t.fecha_cierre ? parseISO(t.fecha_cierre) : new Date()
@@ -337,7 +354,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
   }
 
   // --- 5. RENDER PRINCIPAL ---
-
   const inventarioFiltrado = productos.filter(p => p.nombre.toLowerCase().includes(searchQuery.toLowerCase()) || p.codigo_barras?.includes(searchQuery))
 
   return (
@@ -346,7 +362,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
       <div className="bg-slate-900 text-white p-6 rounded-b-[3rem] shadow-2xl">
         <div className="flex justify-between items-center mb-6">
             <Button variant="ghost" size="icon" onClick={onBack} className="text-white hover:bg-white/10"><ArrowLeft className="h-6 w-6" /></Button>
-            
             <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2 bg-white/10 rounded-full px-4 py-1.5 border border-white/10 backdrop-blur-md">
                     <MapPin className="h-3.5 w-3.5 text-blue-400" />
@@ -361,202 +376,145 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
                 </div>
                 <Dialog>
                     <DialogTrigger asChild><Button variant="ghost" size="icon" className="h-9 w-9 rounded-full bg-white/5 hover:bg-white/20"><Settings className="h-4 w-4" /></Button></DialogTrigger>
-                    <DialogContent className="sm:max-w-lg">
-                        <DialogHeader><DialogTitle>Configuración de Sucursales</DialogTitle></DialogHeader>
-                        <GestionSucursales onUpdate={fetchContext} />
-                    </DialogContent>
+                    <DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Configuración de Sucursales</DialogTitle></DialogHeader><GestionSucursales onUpdate={fetchContext} /></DialogContent>
                 </Dialog>
             </div>
         </div>
-        
         <div className="flex justify-between items-end">
-            <div>
-                <h1 className="text-2xl font-black tracking-tight flex items-center gap-2 uppercase">Torre de Control <Sparkles className="h-5 w-5 text-yellow-400" /></h1>
-                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.2em]">Panel Administrativo Global</p>
-            </div>
-            <div className="text-right">
-                <p className="text-[10px] text-slate-400 font-bold uppercase">Capital Neto en Stock</p>
-                <p className="text-xl font-black text-emerald-400">{formatMoney(productos.reduce((a,b) => a + (b.costo * (b.stock_disponible || 0)), 0))}</p>
-            </div>
+            <div><h1 className="text-2xl font-black tracking-tight flex items-center gap-2 uppercase">Torre de Control <Sparkles className="h-5 w-5 text-yellow-400" /></h1><p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Panel Administrativo Global</p></div>
+            <div className="text-right"><p className="text-[10px] text-slate-400 font-bold uppercase">Capital Stock</p><p className="text-xl font-black text-emerald-400">{formatMoney(productos.reduce((a,b) => a + (b.costo * (b.stock_disponible || 0)), 0))}</p></div>
         </div>
-
-        {/* NAVEGACIÓN */}
         <div className="flex gap-2 mt-8 overflow-x-auto pb-2 scrollbar-hide">
           {[
             { id: "sales", label: "Caja y Ventas", icon: DollarSign },
             { id: "inventory", label: "Inventario Real", icon: Package },
             { id: "finance", label: "Inteligencia BI", icon: TrendingUp },
-            { id: "supervision", label: "Auditoría Turnos", icon: Eye },
+            { id: "supervision", label: "Supervisión 360°", icon: Eye }, // ✅ Renombrado para Auditoría Total
             { id: "catalog", label: "Dato Maestro", icon: Plus },
             { id: "suppliers", label: "Logística", icon: Users },
             { id: "team", label: "Mi Equipo", icon: Briefcase },
             { id: "alerts", label: "Gestión Riesgos", icon: AlertTriangle },
           ].map(t => (
-            <Button key={t.id} onClick={() => setActiveTab(t.id as any)} variant={activeTab === t.id ? "secondary" : "ghost"} size="sm" className="rounded-full text-xs font-bold whitespace-nowrap">
-                <t.icon className="mr-1.5 h-3.5 w-3.5" /> {t.label}
-            </Button>
+            <Button key={t.id} onClick={() => setActiveTab(t.id as any)} variant={activeTab === t.id ? "secondary" : "ghost"} size="sm" className="rounded-full text-xs font-bold whitespace-nowrap"><t.icon className="mr-1.5 h-3.5 w-3.5" /> {t.label}</Button>
           ))}
         </div>
       </div>
 
       <div className="p-4 space-y-4">
-        {/* FILTRO DE FECHA GLOBAL */}
+        {/* FILTRO FECHA */}
         {["sales", "supervision", "finance"].includes(activeTab) && (
             <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-                <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start h-14 border-2 shadow-sm bg-white font-black text-slate-700">
-                        <CalendarIcon className="mr-2 h-5 w-5 text-primary" /> {dateRangeLabel.toUpperCase()}
-                    </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="center">
-                    <Calendar mode="range" selected={dateRange} onSelect={r => { setDateRange(r); if(r?.to) setIsCalendarOpen(false) }} locale={es} />
-                </PopoverContent>
+                <PopoverTrigger asChild><Button variant="outline" className="w-full justify-start h-14 border-2 shadow-sm bg-white font-black text-slate-700"><CalendarIcon className="mr-2 h-5 w-5 text-primary" /> {dateRangeLabel.toUpperCase()}</Button></PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="center"><Calendar mode="range" selected={dateRange} onSelect={r => { setDateRange(r); if(r?.to) setIsCalendarOpen(false) }} locale={es} /></PopoverContent>
             </Popover>
         )}
 
-        {/* --- PESTAÑA: SALES (CAJA) --- */}
+        {/* --- PESTAÑA: SALES --- */}
         {activeTab === "sales" && (
-            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
-                <Card className="p-8 bg-gradient-to-br from-blue-600 to-indigo-800 text-white border-0 shadow-xl relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-4 opacity-10"><DollarSign className="h-32 w-32 rotate-12"/></div>
-                    <p className="text-blue-100 text-[10px] font-black uppercase tracking-widest mb-1">Facturación Sucursal Seleccionada</p>
-                    <h2 className="text-5xl font-black tracking-tighter">{formatMoney(totalVendido)}</h2>
-                    <div className="flex justify-between items-center mt-8 pt-6 border-t border-white/10">
-                        <span className="text-xs font-bold text-blue-100 flex items-center gap-1.5"><ShoppingBag className="h-4 w-4" /> {ventasRecientes.length} tickets emitidos</span>
-                        <Button variant="secondary" size="sm" className="font-black text-[10px] px-4" onClick={() => setShowSalesDetail(true)}>VER DETALLE OPERATIVO</Button>
-                    </div>
-                </Card>
-
+            <div className="space-y-4">
+                <Card className="p-8 bg-gradient-to-br from-blue-600 to-indigo-800 text-white border-0 shadow-xl relative overflow-hidden"><p className="text-blue-100 text-[10px] font-black uppercase tracking-widest mb-1">Facturación Sucursal</p><h2 className="text-5xl font-black">{formatMoney(totalVendido)}</h2><div className="flex justify-between items-center mt-8 pt-6 border-t border-white/10"><span className="text-xs font-bold text-blue-100 flex items-center gap-1.5"><ShoppingBag className="h-4 w-4" /> {ventasRecientes.length} tickets emitidos</span><Button variant="secondary" size="sm" className="font-black text-[10px]" onClick={() => setShowSalesDetail(true)}>AUDITAR OPERACIONES</Button></div></Card>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Card className="p-5 border-2 shadow-sm">
-                        <h3 className="text-[10px] font-black uppercase text-slate-400 mb-6 tracking-widest flex items-center gap-2"><CreditCard className="h-4 w-4" /> Composición de Ingresos</h3>
-                        <div className="space-y-5">
-                            {Object.entries(paymentBreakdown).map(([k, v]) => v > 0 && (
-                                <div key={k}>
-                                    <div className="flex justify-between text-xs font-black mb-2 uppercase">
-                                        <span className="text-slate-600">{k.replace('_', ' ')}</span>
-                                        <span className="font-mono text-slate-900">{formatMoney(v)}</span>
-                                    </div>
-                                    <Progress value={(v/totalVendido)*100} className="h-2 bg-slate-100" />
-                                </div>
-                            ))}
-                        </div>
-                    </Card>
-
-                    <Card className="p-5 border-2 shadow-sm">
-                        <h3 className="text-[10px] font-black uppercase text-slate-400 mb-6 tracking-widest flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Curva de Ventas</h3>
-                        <div className="h-[200px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={chartData}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
-                                    <XAxis dataKey="fecha" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} />
-                                    <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)'}} />
-                                    <Bar dataKey="total" fill="oklch(0.6 0.2 250)" radius={[4, 4, 0, 0]} />
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </Card>
+                    <Card className="p-5 border-2 shadow-sm"><h3 className="text-[10px] font-black uppercase text-slate-400 mb-6 tracking-widest">Ingresos por Método</h3><div className="space-y-5">{Object.entries(paymentBreakdown).map(([k, v]) => v > 0 && (<div key={k}><div className="flex justify-between text-xs font-black mb-2 uppercase"><span className="text-slate-600">{k.replace('_', ' ')}</span><span className="font-mono">{formatMoney(v)}</span></div><Progress value={(v/totalVendido)*100} className="h-2 bg-slate-100" /></div>))}</div></Card>
+                    <Card className="p-5 border-2 shadow-sm"><h3 className="text-[10px] font-black uppercase text-slate-400 mb-6 tracking-widest">Evolución Diaria</h3><div className="h-[200px] w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={chartData}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/><XAxis dataKey="fecha" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} /><Tooltip cursor={{fill: '#f8fafc'}} /><Bar dataKey="total" fill="oklch(0.6 0.2 250)" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></div></Card>
                 </div>
             </div>
         )}
 
-        {/* --- PESTAÑA: FINANCE (BI PROFUNDO) --- */}
-        {activeTab === "finance" && (
+        {/* --- PESTAÑA: SUPERVISIÓN 360° (INTEGRADA) --- */}
+        {activeTab === "supervision" && (
             <div className="space-y-6 animate-in fade-in">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <Card className="p-5 bg-emerald-50 border-2 border-emerald-200">
-                        <p className="text-[10px] font-black text-emerald-600 uppercase mb-2">Utilidad Neta Estimada</p>
-                        <h3 className="text-3xl font-black text-emerald-900">{formatMoney(biMetrics.neta)}</h3>
-                        <div className="mt-2 flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-100 w-fit px-2 py-0.5 rounded">
-                            <TrendingUp className="h-3 w-3" /> ROI PERIODO: {biMetrics.margen.toFixed(1)}%
-                        </div>
-                    </Card>
-                    <Card className="p-5 bg-blue-50 border-2 border-blue-200">
-                        <p className="text-[10px] font-black text-blue-600 uppercase mb-2">Ventas Declaradas (Bco)</p>
-                        <h3 className="text-3xl font-black text-blue-900">{formatMoney(biMetrics.blanco)}</h3>
-                        <p className="text-[10px] text-blue-500 font-bold mt-1 uppercase">Tickets Electrónicos / Digitales</p>
-                    </Card>
-                    <Card className="p-5 bg-slate-100 border-2 border-slate-300">
-                        <p className="text-[10px] font-black text-slate-500 uppercase mb-2">Ventas Efectivo (Negro)</p>
-                        <h3 className="text-3xl font-black text-slate-700">{formatMoney(biMetrics.negro)}</h3>
-                        <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">Flujo de caja manual</p>
-                    </Card>
+                {/* 🛡️ SELECTOR DE AUDITORÍA */}
+                <div className="flex bg-white p-1.5 rounded-2xl w-full max-w-sm mx-auto shadow-md border-2">
+                    <button 
+                        onClick={() => setSupervisionTab("cajas")}
+                        className={cn("flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all", 
+                        supervisionTab === "cajas" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400 hover:text-slate-600")}
+                    >
+                        Cierres de Caja
+                    </button>
+                    <button 
+                        onClick={() => setSupervisionTab("asistencia")}
+                        className={cn("flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all", 
+                        supervisionTab === "asistencia" ? "bg-slate-900 text-white shadow-lg" : "text-slate-400 hover:text-slate-600")}
+                    >
+                        Asistencia
+                    </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <Card className="p-6 border-2 border-yellow-200 bg-yellow-50/20">
-                        <div className="flex items-center justify-between mb-6">
-                            <h4 className="text-sm font-black text-yellow-800 uppercase tracking-tighter flex items-center gap-2"><Star className="h-5 w-5 fill-yellow-400" /> Matriz: Productos Estrella</h4>
-                            <Badge className="bg-yellow-400 text-yellow-900 text-[10px] font-black">ALTA ROTACIÓN</Badge>
-                        </div>
-                        <div className="space-y-3">
-                            {matrizRentabilidad.stars.map((p, i) => (
-                                <div key={i} className="flex justify-between items-center bg-white p-3 rounded-xl border border-yellow-100 shadow-sm">
-                                    <div className="flex items-center gap-3">
-                                        <span className="text-2xl">{p.emoji}</span>
-                                        <div>
-                                            <p className="text-xs font-black uppercase text-slate-700">{p.nombre}</p>
-                                            <p className="text-[9px] font-bold text-slate-400">{p.sales} ventas registradas</p>
+                {supervisionTab === "cajas" ? (
+                    <div className="space-y-4">
+                        {turnosAudit.map(t => {
+                            const isOpen = !t.fecha_cierre; const isExpanded = expandedTurnoId === t.id
+                            return (
+                                <Card key={t.id} className={cn("border-2 overflow-hidden transition-all rounded-2xl", isOpen ? "border-blue-400" : "border-slate-200")}>
+                                    <div className="p-5 flex justify-between items-center bg-white cursor-pointer" onClick={() => setExpandedTurnoId(isExpanded ? null : t.id)}>
+                                        <div className="flex items-center gap-4">
+                                            <div className="h-12 w-12 bg-slate-900 rounded-2xl flex items-center justify-center font-black text-white text-lg">{t.perfiles?.nombre?.charAt(0)}</div>
+                                            <div><p className="font-black text-sm text-slate-800 uppercase tracking-tight">{t.perfiles?.nombre || 'Empleado'}</p><p className="text-[11px] font-bold text-slate-400">{format(parseISO(t.fecha_apertura), 'dd MMM • HH:mm')} hs</p></div>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <Button variant="ghost" size="icon" className="h-10 w-10 text-slate-400 hover:text-primary" onClick={(e) => { e.stopPropagation(); handlePrintTurno(t); }}><Printer className="h-5 w-5" /></Button>
+                                            {isOpen ? <Badge className="bg-blue-600 animate-pulse text-[9px] h-4">EN CURSO</Badge> : <ChevronDown className={cn("h-5 w-5 text-slate-300 transition-transform", isExpanded && "rotate-180")} />}
                                         </div>
                                     </div>
-                                    <span className="font-black text-emerald-600 text-sm">{p.marg}% Mg.</span>
-                                </div>
-                            ))}
-                        </div>
-                    </Card>
-
-                    <Card className="p-6 border-2 border-slate-200">
-                        <div className="flex items-center justify-between mb-6">
-                            <h4 className="text-sm font-black text-slate-500 uppercase tracking-tighter flex items-center gap-2"><Trash2 className="h-5 w-5" /> Matriz: Productos Hueso</h4>
-                            <Badge variant="outline" className="text-[10px] font-black">SIN MOVIMIENTO</Badge>
-                        </div>
-                        <div className="space-y-3">
-                            {matrizRentabilidad.bones.map((p, i) => (
-                                <div key={i} className="flex justify-between items-center opacity-60 grayscale bg-slate-50 p-3 rounded-xl border">
-                                    <span className="text-xs font-bold uppercase text-slate-600">{p.emoji} {p.nombre}</span>
-                                    <span className="text-[10px] font-black text-red-400">LIQUIDAR?</span>
-                                </div>
-                            ))}
-                        </div>
-                    </Card>
-                </div>
-            </div>
-        )}
-
-        {/* --- PESTAÑA: INVENTORY (GESTIÓN LOCAL) --- */}
-        {activeTab === "inventory" && (
-            <div className="space-y-4 animate-in fade-in">
-                <div className="relative">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-                    <Input placeholder="FILTRAR STOCK LOCAL POR NOMBRE O CÓDIGO..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-12 h-16 text-sm font-bold shadow-inner border-2 rounded-2xl" />
-                </div>
-                
-                {loading ? <div className="flex justify-center py-20"><Loader2 className="animate-spin h-12 w-12 text-primary" /></div> : (
-                    <div className="grid gap-4">
-                        {inventarioFiltrado.map(item => {
-                            const marg = item.costo > 0 ? (((item.precio_venta - item.costo) / item.costo) * 100).toFixed(0) : "100"
+                                    {isExpanded && (
+                                        <div className="p-6 bg-slate-50 border-t-2 border-dashed space-y-6">
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="p-4 bg-white rounded-2xl border shadow-sm text-center"><p className="text-[10px] font-black text-slate-400 uppercase mb-1">Efectivo Final</p><p className="text-2xl font-black text-slate-900">{t.monto_final ? formatMoney(t.monto_final) : '---'}</p></div>
+                                                <div className="p-4 bg-white rounded-2xl border shadow-sm text-center"><p className="text-[10px] font-black text-slate-400 uppercase mb-1">Misiones</p><p className="text-2xl font-black text-slate-900">{t.misiones?.filter(m => m.es_completada).length} / {t.misiones?.length}</p></div>
+                                            </div>
+                                            {isOpen && <div className="pt-4 border-t border-slate-200"><AsignarMision turnoId={t.id} empleadoId={t.empleado_id} sucursalId={currentSucursalId} onMisionCreated={fetchData} /></div>}
+                                        </div>
+                                    )}
+                                </Card>
+                            )
+                        })}
+                    </div>
+                ) : (
+                    /* 🕒 REPORTE DE ASISTENCIA PREMIUM */
+                    <div className="space-y-4">
+                        {asistencias.length === 0 ? (
+                            <p className="text-center py-20 text-xs font-black text-slate-400 uppercase tracking-widest italic">Sin registros de asistencia</p>
+                        ) : asistencias.map((asist) => {
+                            const hEntrada = parseISO(asist.entrada)
+                            const hSalida = asist.salida ? parseISO(asist.salida) : null
+                            let duracion = "---"
+                            if (hSalida) {
+                                const diffMs = hSalida.getTime() - hEntrada.getTime()
+                                const diffHrs = Math.floor(diffMs / 3600000)
+                                const diffMins = Math.floor((diffMs % 3600000) / 60000)
+                                duracion = `${diffHrs}h ${diffMins}m`
+                            }
                             return (
-                                <Card key={item.id} className="p-5 border-2 shadow-sm hover:border-primary/40 transition-all rounded-2xl group">
-                                    <div className="flex justify-between items-start mb-5">
-                                        <div className="flex gap-4">
-                                            <div className="text-4xl bg-slate-100 p-3 rounded-2xl group-hover:bg-primary/5 transition-colors">{item.emoji}</div>
+                                <Card key={asist.id} className="p-5 border-2 hover:border-slate-400 transition-all group rounded-2xl">
+                                    <div className="flex justify-between items-center">
+                                        <div className="flex items-center gap-4">
+                                            <div className={cn("h-12 w-12 rounded-2xl flex items-center justify-center font-black text-white text-lg", asist.salida ? "bg-slate-400 shadow-inner" : "bg-emerald-500 animate-pulse shadow-lg shadow-emerald-200")}>
+                                                {asist.perfiles?.nombre?.charAt(0)}
+                                            </div>
                                             <div>
-                                                <h4 className="font-black text-slate-800 uppercase text-sm tracking-tight">{item.nombre}</h4>
-                                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1">{item.categoria}</p>
-                                                <div className="flex items-center gap-3 mt-3">
-                                                    <Badge className="bg-slate-900 text-white text-[11px] font-black px-3 py-1 shadow-md">${item.precio_venta}</Badge>
-                                                    <button onClick={() => loadPriceHistory(item.id)} className="text-[10px] font-black text-primary hover:underline uppercase flex items-center gap-1"><History className="h-3 w-3"/> HISTORIAL PRECIOS</button>
-                                                </div>
+                                                <p className="font-black text-sm uppercase text-slate-800 leading-none mb-1">{asist.perfiles?.nombre}</p>
+                                                <p className="text-[10px] font-bold text-slate-400 tracking-tighter uppercase">{format(hEntrada, 'dd MMMM yyyy', {locale: es})}</p>
                                             </div>
                                         </div>
                                         <div className="text-right">
-                                            <p className={cn("text-3xl font-black tabular-nums", item.stock_disponible! <= UMBRAL_STOCK_BAJO ? "text-red-500" : "text-emerald-500")}>{item.stock_disponible}</p>
-                                            <button onClick={() => loadStockBatches(item.id)} className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1 justify-end hover:text-orange-500 transition-colors">VER LOTES <ChevronRight className="h-3 w-3"/></button>
+                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-1 tracking-widest">Jornada Total</p>
+                                            <Badge variant={asist.salida ? "outline" : "default"} className={cn("font-mono font-bold border-2", !asist.salida && "bg-emerald-100 text-emerald-700 border-emerald-300 shadow-sm")}>
+                                                {asist.salida ? duracion : "ACTIVO AHORA"}
+                                            </Badge>
                                         </div>
                                     </div>
-                                    <div className="flex gap-2">
-                                        <AgregarStock producto={item} sucursalId={currentSucursalId} onStockAdded={fetchData} />
-                                        <Button variant="outline" size="icon" className="h-12 w-12 rounded-xl shrink-0" onClick={() => setEditingProduct(item)} title="Editar Catálogo"><Pencil className="h-4 w-4" /></Button>
+                                    <div className="grid grid-cols-2 gap-4 mt-6 pt-5 border-t border-dashed border-slate-100">
+                                        <div className="bg-slate-50 p-2 rounded-xl border">
+                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Entrada</p>
+                                            <p className="text-sm font-black text-slate-700 tracking-tight">{format(hEntrada, 'HH:mm:ss')} HS</p>
+                                        </div>
+                                        <div className="bg-slate-50 p-2 rounded-xl border text-right">
+                                            <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Salida</p>
+                                            <p className="text-sm font-black text-slate-700 tracking-tight">
+                                                {hSalida ? `${format(hSalida, 'HH:mm:ss')} HS` : '---:---:---'}
+                                            </p>
+                                        </div>
                                     </div>
                                 </Card>
                             )
@@ -566,117 +524,31 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
             </div>
         )}
 
-        {/* --- PESTAÑA: SUPERVISIÓN (AUDITORÍA DE TURNOS) --- */}
-        {activeTab === "supervision" && (
-            <div className="space-y-4 animate-in fade-in">
-                <div className="bg-white p-4 rounded-xl border-2 mb-6 flex items-center justify-between">
-                    <div>
-                        <h3 className="font-black uppercase text-xs text-slate-400">Estado de Supervisión</h3>
-                        <p className="text-sm font-bold text-slate-700">Auditando turnos en {sucursales.find(s => s.id === currentSucursalId)?.nombre}</p>
-                    </div>
-                    <Badge className="bg-slate-100 text-slate-600 border-slate-200">{turnosAudit.length} Registros</Badge>
+        {/* --- PESTAÑA: FINANCE (BI) --- */}
+        {activeTab === "finance" && (
+            <div className="space-y-6 animate-in fade-in">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Card className="p-5 bg-emerald-50 border-2 border-emerald-200">
+                        <p className="text-[10px] font-black text-emerald-600 uppercase mb-2">Utilidad Neta Est.</p>
+                        <h3 className="text-3xl font-black text-emerald-900">{formatMoney(biMetrics.neta)}</h3>
+                        <div className="mt-2 flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-100 w-fit px-2 py-0.5 rounded"><TrendingUp className="h-3 w-3" /> ROI: {biMetrics.margen.toFixed(1)}%</div>
+                    </Card>
+                    <Card className="p-5 bg-blue-50 border-2 border-blue-200"><p className="text-[10px] font-black text-blue-600 uppercase mb-2">Ventas Blanco</p><h3 className="text-3xl font-black text-blue-900">{formatMoney(biMetrics.blanco)}</h3></Card>
+                    <Card className="p-5 bg-slate-100 border-2 border-slate-300"><p className="text-[10px] font-black text-slate-500 uppercase mb-2">Ventas Efectivo</p><h3 className="text-3xl font-black text-slate-700">{formatMoney(biMetrics.negro)}</h3></Card>
                 </div>
-
-                {turnosAudit.map(t => {
-                    const isOpen = !t.fecha_cierre
-                    const isExpanded = expandedTurnoId === t.id
-                    return (
-                        <Card key={t.id} className={cn("border-2 overflow-hidden transition-all rounded-2xl mb-4 shadow-sm", isOpen ? "border-blue-400" : "border-slate-200")}>
-                            <div className="p-5 flex justify-between items-center bg-white cursor-pointer" onClick={() => setExpandedTurnoId(isExpanded ? null : t.id)}>
-                                <div className="flex items-center gap-4">
-                                    <div className="h-12 w-12 bg-slate-900 rounded-2xl flex items-center justify-center font-black text-white text-lg">{t.perfiles?.nombre?.charAt(0)}</div>
-                                    <div>
-                                        <p className="font-black text-sm text-slate-800 uppercase tracking-tight">{t.perfiles?.nombre || 'Empleado S/N'}</p>
-                                        <div className="flex items-center gap-2 mt-1">
-                                            <p className="text-[11px] font-bold text-slate-400">{format(parseISO(t.fecha_apertura), 'dd MMM • HH:mm')} hs</p>
-                                            {isOpen && <Badge className="bg-blue-600 animate-pulse text-[9px] h-4">EN CURSO</Badge>}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <Button variant="ghost" size="icon" className="h-10 w-10 text-slate-400 hover:text-primary" onClick={(e) => { e.stopPropagation(); handlePrintTurno(t); }}><Printer className="h-5 w-5" /></Button>
-                                    <ChevronDown className={cn("h-5 w-5 text-slate-300 transition-transform duration-300", isExpanded && "rotate-180")} />
-                                </div>
-                            </div>
-                            
-                            {isExpanded && (
-                                <div className="p-6 bg-slate-50 border-t-2 border-dashed space-y-6 animate-in slide-in-from-top-2">
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="p-4 bg-white rounded-2xl border shadow-sm text-center">
-                                            <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Efectivo Final</p>
-                                            <p className="text-2xl font-black text-slate-900">{t.monto_final ? formatMoney(t.monto_final) : '---'}</p>
-                                        </div>
-                                        <div className="p-4 bg-white rounded-2xl border shadow-sm text-center">
-                                            <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Diferencia</p>
-                                            {/* Aquí vendría el cálculo de diferencia que ya tenemos en handlePrintTurno */}
-                                            <p className="text-2xl font-black text-slate-900">AUDITAR</p> 
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="space-y-2">
-                                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Log de Misiones</h5>
-                                        {t.misiones?.map((m, i) => (
-                                            <div key={i} className="flex items-center justify-between p-3 bg-white rounded-xl border text-xs">
-                                                <span className="font-bold text-slate-700">{m.descripcion}</span>
-                                                {m.es_completada ? <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">EXITO</Badge> : <Badge variant="outline" className="text-slate-400">PENDIENTE</Badge>}
-                                            </div>
-                                        ))}
-                                    </div>
-
-                                    {isOpen && (
-                                        <div className="pt-4 border-t border-slate-200">
-                                            <AsignarMision turnoId={t.id} empleadoId={t.empleado_id} sucursalId={currentSucursalId} onMisionCreated={fetchData} />
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </Card>
-                    )
-                })}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <Card className="p-6 border-2 border-yellow-200 bg-yellow-50/20"><div className="flex items-center justify-between mb-6"><h4 className="text-sm font-black text-yellow-800 uppercase flex items-center gap-2"><Star className="h-5 w-5 fill-yellow-400" /> Estrellas</h4><Badge className="bg-yellow-400 text-yellow-900 text-[10px] font-black">ALTA ROTACIÓN</Badge></div><div className="space-y-3">{matrizRentabilidad.stars.map((p, i) => (<div key={i} className="flex justify-between items-center bg-white p-3 rounded-xl border border-yellow-100 shadow-sm"><div className="flex items-center gap-3"><span className="text-2xl">{p.emoji}</span><div><p className="text-xs font-black uppercase text-slate-700">{p.nombre}</p><p className="text-[9px] font-bold text-slate-400">{p.sales} ventas</p></div></div><span className="font-black text-emerald-600 text-sm">{p.marg}% Mg.</span></div>))}</div></Card>
+                    <Card className="p-6 border-2 border-slate-200"><div className="flex items-center justify-between mb-6"><h4 className="text-sm font-black text-slate-500 uppercase flex items-center gap-2"><Trash2 className="h-5 w-5" /> Huesos</h4><Badge variant="outline" className="text-[10px] font-black">SIN MOVIMIENTO</Badge></div><div className="space-y-3">{matrizRentabilidad.bones.map((p, i) => (<div key={i} className="flex justify-between items-center opacity-60 bg-slate-50 p-3 rounded-xl border"><span className="text-xs font-bold uppercase text-slate-600">{p.emoji} {p.nombre}</span></div>))}</div></Card>
+                </div>
             </div>
         )}
 
-        {/* --- PESTAÑA: RIESGOS & ALERTS --- */}
-        {activeTab === "alerts" && (
-            <div className="space-y-6 animate-in fade-in">
-                <HappyHour criticos={capitalEnRiesgo.criticos} onDiscountApplied={fetchData} />
-                
-                <div className="grid grid-cols-2 gap-4">
-                    <Card className="p-5 border-2 border-orange-200 bg-orange-50/50 shadow-sm">
-                        <p className="text-[11px] font-black text-orange-600 uppercase mb-2">Pérdida Potencial (Venc.)</p>
-                        <h3 className="text-3xl font-black text-slate-800">{formatMoney(capitalEnRiesgo.capital)}</h3>
-                        <p className="text-[10px] font-bold text-orange-400 uppercase mt-2">{capitalEnRiesgo.unidades} UNIDADES CRÍTICAS</p>
-                    </Card>
-                    <Card className="p-5 border-2 border-red-200 bg-red-50/50 shadow-sm">
-                        <p className="text-[11px] font-black text-red-600 uppercase mb-2">Quiebres de Stock</p>
-                        <h3 className="text-3xl font-black text-slate-800">{productos.filter(p => p.stock_disponible! <= 0).length}</h3>
-                        <p className="text-[10px] font-bold text-red-400 uppercase mt-2">PRODUCTOS AGOTADOS</p>
-                    </Card>
-                </div>
-
-                {sugerencias.length > 0 && (
-                    <Card className="p-6 bg-slate-900 text-white border-0 shadow-2xl rounded-3xl relative overflow-hidden">
-                        <div className="absolute top-0 right-0 p-4 opacity-10"><Sparkles className="h-24 w-24"/></div>
-                        <h3 className="font-black text-sm uppercase mb-6 flex items-center gap-2 tracking-widest"><Package className="h-4 w-4 text-primary" /> Sugerencias de Reposición</h3>
-                        <div className="grid gap-3">
-                            {sugerencias.slice(0, 5).map(s => (
-                                <div key={s.id} className="bg-white/5 backdrop-blur-md p-4 rounded-2xl flex justify-between items-center border border-white/10">
-                                    <div className="flex items-center gap-3">
-                                        <span className="text-2xl">{s.emoji}</span>
-                                        <div>
-                                            <p className="text-xs font-black uppercase">{s.producto}</p>
-                                            <p className="text-[9px] text-slate-400 font-bold uppercase mt-0.5">Stock actual: {s.stock_actual} u.</p>
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className="text-[9px] text-primary font-black uppercase">Mejor Proveedor</p>
-                                        <p className="text-xs font-black text-white">{s.mejor_proveedor || 'S/N'}</p>
-                                        <p className="text-[10px] font-mono text-emerald-400">{formatMoney(s.mejor_precio)}</p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </Card>
+        {/* --- PESTAÑA: STOCK --- */}
+        {activeTab === "inventory" && (
+            <div className="space-y-4 animate-in fade-in">
+                <div className="relative"><Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" /><Input placeholder="FILTRAR STOCK LOCAL..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-12 h-16 text-sm font-bold shadow-inner border-2 rounded-2xl" /></div>
+                {loading ? <div className="flex justify-center py-20"><Loader2 className="animate-spin h-12 w-12 text-primary" /></div> : (
+                    <div className="grid gap-4">{inventarioFiltrado.map(item => (<Card key={item.id} className="p-5 border-2 shadow-sm hover:border-primary/40 rounded-2xl group"><div className="flex justify-between items-start mb-5"><div className="flex gap-4"><div className="text-4xl bg-slate-100 p-3 rounded-2xl">{item.emoji}</div><div><h4 className="font-black text-slate-800 uppercase text-sm">{item.nombre}</h4><p className="text-[10px] text-slate-400 font-black uppercase mt-1">{item.categoria}</p><div className="flex items-center gap-3 mt-3"><Badge className="bg-slate-900 text-white text-[11px] font-black px-3 shadow-md">${item.precio_venta}</Badge><button onClick={() => loadPriceHistory(item.id)} className="text-[10px] font-black text-primary uppercase"><History className="h-3 w-3 inline mr-1"/> Historial</button></div></div></div><div className="text-right"><p className={cn("text-3xl font-black tabular-nums", item.stock_disponible! <= UMBRAL_STOCK_BAJO ? "text-red-500" : "text-emerald-500")}>{item.stock_disponible}</p><button onClick={() => loadStockBatches(item.id)} className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1 justify-end font-bold">Lotes <ChevronRight className="h-3 w-3"/></button></div></div><div className="flex gap-2"><AgregarStock producto={item} sucursalId={currentSucursalId} onStockAdded={fetchData} /><Button variant="outline" size="icon" className="h-12 w-12 rounded-xl shrink-0" onClick={() => setEditingProduct(item)}><Pencil className="h-4 w-4" /></Button></div></Card>))}</div>
                 )}
             </div>
         )}
@@ -685,105 +557,63 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
         {activeTab === "catalog" && <CrearProducto sucursalId={currentSucursalId} onProductCreated={() => { setActiveTab("inventory"); fetchData(); }} />}
         {activeTab === "suppliers" && <div className="space-y-6 animate-in fade-in"><ControlSaldoProveedor /><GestionProveedores sucursalId={currentSucursalId} organizationId={organizationId} /></div>}
         {activeTab === "team" && <div className="space-y-6 animate-in fade-in"><TeamRanking /><InvitarEmpleado /></div>}
-
+        {activeTab === "alerts" && (
+            <div className="space-y-6 animate-in fade-in">
+                <HappyHour criticos={capitalEnRiesgo.criticos} onDiscountApplied={fetchData} />
+                <div className="grid grid-cols-2 gap-4">
+                    <Card className="p-5 border-2 border-orange-200 bg-orange-50/50 shadow-sm"><p className="text-[11px] font-black text-orange-600 uppercase mb-2">Riesgo Vencimiento</p><h3 className="text-3xl font-black text-slate-800">{formatMoney(capitalEnRiesgo.capital)}</h3><p className="text-[10px] font-bold text-orange-400 uppercase mt-2">{capitalEnRiesgo.unidades} UNIDADES CRÍTICAS</p></Card>
+                    <Card className="p-5 border-2 border-red-200 bg-red-50/50 shadow-sm"><p className="text-[11px] font-black text-red-600 uppercase mb-2">Quiebres Stock</p><h3 className="text-3xl font-black text-slate-800">{productos.filter(p => p.stock_disponible! <= 0).length}</h3><p className="text-[10px] font-bold text-red-400 uppercase mt-2">AGOTADOS</p></Card>
+                </div>
+            </div>
+        )}
       </div>
 
-      {/* --- BLOQUE DE DIALOGOS Y AUDITORÍA PROFUNDA --- */}
-
-      {/* 1. Modal: Editar Producto y Registrar Historial de Precios */}
+      {/* --- MODALES DE EDICIÓN Y AUDITORÍA --- */}
       <Dialog open={!!editingProduct} onOpenChange={o => !o && setEditingProduct(null)}>
         <DialogContent className="max-w-md rounded-3xl">
-            <DialogHeader><DialogTitle className="font-black uppercase flex items-center gap-2 text-slate-800"><Pencil className="h-5 w-5 text-primary"/> Editar Catálogo Global</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle className="font-black uppercase flex items-center gap-2"><Pencil className="h-5 w-5 text-primary"/> Editar Catálogo</DialogTitle></DialogHeader>
             {editingProduct && (
                 <div className="space-y-6 py-4">
-                    <div className="grid grid-cols-4 gap-3">
-                        <div className="col-span-1"><Label className="text-[10px] font-black uppercase mb-1 block">Icono</Label><Input value={editingProduct.emoji} onChange={e => setEditingProduct({...editingProduct, emoji: e.target.value})} className="text-center text-3xl h-16 rounded-2xl bg-slate-50" /></div>
-                        <div className="col-span-3"><Label className="text-[10px] font-black uppercase mb-1 block">Nombre Comercial</Label><Input value={editingProduct.nombre} onChange={e => setEditingProduct({...editingProduct, nombre: e.target.value})} className="h-16 font-bold rounded-2xl" /></div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                        <div><Label className="text-[10px] font-black uppercase text-slate-400 mb-1 block">Costo de Reposición ($)</Label><Input type="number" value={editingProduct.costo} onChange={e => setEditingProduct({...editingProduct, costo: parseFloat(e.target.value)})} className="rounded-xl h-12" /></div>
-                        <div><Label className="text-[10px] font-black uppercase text-primary mb-1 block">Precio de Venta ($)</Label><Input type="number" value={editingProduct.precio_venta} onChange={e => setEditingProduct({...editingProduct, precio_venta: parseFloat(e.target.value)})} className="border-primary/40 font-black h-12 rounded-xl text-lg" /></div>
-                    </div>
-                    <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 text-center">
-                        <p className="text-[10px] font-black text-blue-600 uppercase mb-1">Margen de Ganancia Bruta</p>
-                        <p className="text-2xl font-black text-blue-900">
-                            {editingProduct.costo > 0 ? (((editingProduct.precio_venta - editingProduct.costo) / editingProduct.costo) * 100).toFixed(1) : '100'}%
-                        </p>
-                    </div>
-                    <Button onClick={handleUpdateProduct} disabled={actionLoading} className="w-full h-14 font-black text-lg rounded-2xl shadow-lg">{actionLoading ? <Loader2 className="animate-spin"/> : "CONFIRMAR Y GUARDAR"}</Button>
-                    <Button variant="ghost" className="w-full text-red-500 text-[10px] font-black hover:bg-red-50" onClick={async () => { if(confirm("¿Eliminar del catálogo?")){ await supabase.from('productos').delete().eq('id', editingProduct.id); fetchData(); setEditingProduct(null); } }}>ELIMINAR PRODUCTO PERMANENTEMENTE</Button>
+                    <div className="grid grid-cols-4 gap-3"><div className="col-span-1"><Label className="text-[10px] font-black uppercase">Icono</Label><Input value={editingProduct.emoji} onChange={e => setEditingProduct({...editingProduct, emoji: e.target.value})} className="text-center text-3xl h-16 rounded-2xl bg-slate-50" /></div><div className="col-span-3"><Label className="text-[10px] font-black uppercase">Nombre</Label><Input value={editingProduct.nombre} onChange={e => setEditingProduct({...editingProduct, nombre: e.target.value})} className="h-16 font-bold rounded-2xl" /></div></div>
+                    <div className="grid grid-cols-2 gap-4"><div><Label className="text-[10px] font-black uppercase text-slate-400">Costo</Label><Input type="number" value={editingProduct.costo} onChange={e => setEditingProduct({...editingProduct, costo: parseFloat(e.target.value)})} className="rounded-xl h-12" /></div><div><Label className="text-[10px] font-black uppercase text-primary">Precio</Label><Input type="number" value={editingProduct.precio_venta} onChange={e => setEditingProduct({...editingProduct, precio_venta: parseFloat(e.target.value)})} className="border-primary/40 font-black h-12 rounded-xl text-lg" /></div></div>
+                    <Button onClick={handleUpdateProduct} disabled={actionLoading} className="w-full h-14 font-black text-lg rounded-2xl shadow-lg">{actionLoading ? <Loader2 className="animate-spin"/> : "GUARDAR CAMBIOS"}</Button>
+                    <Button variant="ghost" className="w-full text-red-500 text-[10px] font-black" onClick={async () => { if(confirm("¿Eliminar?")){ await supabase.from('productos').delete().eq('id', editingProduct.id); fetchData(); setEditingProduct(null); } }}>ELIMINAR PRODUCTO</Button>
                 </div>
             )}
         </DialogContent>
       </Dialog>
 
-      {/* 2. Modal: Historial de Cambios de Precio (Audit) */}
       <Dialog open={showPriceHistoryModal} onOpenChange={setShowPriceHistoryModal}>
         <DialogContent className="max-h-[80vh] overflow-y-auto rounded-3xl">
-            <DialogHeader><DialogTitle className="font-black uppercase tracking-tighter flex items-center gap-2"><Clock className="h-5 w-5 text-primary"/> Historial de Precios</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle className="font-black uppercase tracking-tighter flex items-center gap-2"><Clock className="h-5 w-5 text-primary"/> Historial Precios</DialogTitle></DialogHeader>
             <div className="space-y-3 mt-4">
-                {historyData.length === 0 ? <p className="text-center text-slate-400 py-10 font-bold italic text-sm">Sin registros previos de cambios.</p> : historyData.map((h, i) => (
-                    <div key={i} className="p-4 border-l-4 border-primary bg-slate-50 rounded-xl relative">
-                        <div className="flex justify-between items-start mb-3">
-                            <p className="font-black text-slate-900 text-xs uppercase">{format(parseISO(h.fecha_cambio), 'dd MMMM yyyy')}</p>
-                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{format(parseISO(h.fecha_cambio), 'HH:mm')} HS</p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-6">
-                            <div><p className="text-[9px] font-black text-slate-400 uppercase mb-1">Venta</p><p className="text-sm font-bold text-slate-600 line-through decoration-red-400">{formatMoney(h.precio_venta_anterior)}</p><p className="text-lg font-black text-primary">{formatMoney(h.precio_venta_nuevo)}</p></div>
-                            <div><p className="text-[9px] font-black text-slate-400 uppercase mb-1">Costo</p><p className="text-sm font-bold text-slate-600 line-through decoration-red-400">{formatMoney(h.costo_anterior)}</p><p className="text-lg font-black text-slate-900">{formatMoney(h.costo_nuevo)}</p></div>
-                        </div>
-                        <div className="mt-3 pt-3 border-t border-slate-200 flex items-center gap-1.5"><User className="h-3 w-3 text-slate-400"/><span className="text-[9px] font-black text-slate-400 uppercase">Autorizado por: {h.perfiles?.nombre || 'Admin'}</span></div>
-                    </div>
+                {historyData.map((h, i) => (
+                    <div key={i} className="p-4 border-l-4 border-primary bg-slate-50 rounded-xl relative"><div className="flex justify-between items-start mb-3"><p className="font-black text-slate-900 text-xs uppercase">{format(parseISO(h.fecha_cambio), 'dd MMM yyyy')}</p><p className="text-[9px] font-black text-slate-400">{format(parseISO(h.fecha_cambio), 'HH:mm')} HS</p></div><div className="grid grid-cols-2 gap-6"><div><p className="text-[9px] font-black uppercase">Venta</p><p className="text-lg font-black text-primary">{formatMoney(h.precio_venta_nuevo)}</p></div><div><p className="text-[9px] font-black uppercase">Costo</p><p className="text-lg font-black text-slate-900">{formatMoney(h.costo_nuevo)}</p></div></div><div className="mt-3 pt-3 border-t flex items-center gap-1.5"><span className="text-[9px] font-black text-slate-400 uppercase">Autor: {h.perfiles?.nombre || 'Admin'}</span></div></div>
                 ))}
             </div>
         </DialogContent>
       </Dialog>
 
-      {/* 3. Modal: Auditoría de Lotes de Stock (Local) */}
       <Dialog open={!!managingStockId} onOpenChange={o => !o && setManagingStockId(null)}>
         <DialogContent className="rounded-3xl">
-            <DialogHeader><DialogTitle className="font-black uppercase flex items-center gap-2"><History className="h-5 w-5 text-orange-500"/> Auditoría de Lotes</DialogTitle><DialogDescription className="font-bold text-xs uppercase text-slate-400">Ingresos físicos en esta sucursal.</DialogDescription></DialogHeader>
+            <DialogHeader><DialogTitle className="font-black uppercase flex items-center gap-2"><History className="h-5 w-5 text-orange-500"/> Lotes Locales</DialogTitle></DialogHeader>
             <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 mt-4">
-                {stockBatchList.length === 0 ? <p className="text-center text-slate-400 py-10 font-black italic">Sin stock activo en este local.</p> : stockBatchList.map(b => (
-                    <div key={b.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 hover:border-orange-200 transition-colors">
-                        <div>
-                            <div className="flex items-center gap-2 mb-1">
-                                <p className="font-black text-xs uppercase text-slate-800">CANT: {b.cantidad} u.</p>
-                                <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[9px] h-4">FISICO</Badge>
-                            </div>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase">Ingreso: {format(parseISO(b.created_at), 'dd/MM/yy HH:mm')} hs</p>
-                            {b.fecha_vencimiento && <p className="text-[10px] font-black text-orange-600 uppercase mt-0.5">VENCE: {format(parseISO(b.fecha_vencimiento), 'dd/MM/yy')}</p>}
-                        </div>
-                        <Button variant="ghost" size="icon" className="text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full" onClick={async () => { if(confirm("¿Eliminar este lote del stock local?")){ await supabase.from('stock').delete().eq('id', b.id); fetchData(); setManagingStockId(null); } }}><Trash2 className="h-5 w-5"/></Button>
-                    </div>
+                {stockBatchList.map(b => (
+                    <div key={b.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 hover:border-orange-200"><div className="space-y-1"><p className="font-black text-xs">CANT: {b.cantidad} u.</p><p className="text-[10px] font-bold text-slate-400 uppercase">Ingreso: {format(parseISO(b.created_at), 'dd/MM/yy HH:mm')} hs</p></div><Button variant="ghost" size="icon" className="text-red-400 hover:bg-red-50 rounded-full" onClick={async () => { if(confirm("¿Eliminar lote?")){ await supabase.from('stock').delete().eq('id', b.id); fetchData(); setManagingStockId(null); } }}><Trash2 className="h-5 w-5"/></Button></div>
                 ))}
             </div>
         </DialogContent>
       </Dialog>
 
-      {/* 4. Modal: Detalle de Operaciones (Sales Audit) */}
       <Dialog open={showSalesDetail} onOpenChange={setShowSalesDetail}>
         <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col rounded-3xl">
-            <DialogHeader className="border-b pb-4"><DialogTitle className="font-black uppercase tracking-widest text-slate-800 flex items-center gap-2"><Receipt className="h-6 w-6 text-primary"/> Libro Diario de Ventas</DialogTitle></DialogHeader>
+            <DialogHeader className="border-b pb-4"><DialogTitle className="font-black uppercase tracking-widest text-slate-800 flex items-center gap-2"><Receipt className="h-6 w-6 text-primary"/> Libro de Ventas</DialogTitle></DialogHeader>
             <div className="flex-1 overflow-y-auto pr-3 space-y-3 mt-6">
-                {ventasRecientes.length === 0 ? <div className="text-center py-20 opacity-30 font-black uppercase text-sm tracking-[0.3em]">Sin operaciones</div> : ventasRecientes.map(v => (
-                    <div key={v.id} className="flex justify-between items-center p-4 bg-white border-2 rounded-2xl shadow-sm hover:bg-slate-50 transition-colors">
-                        <div className="flex items-center gap-4">
-                            <span className="text-3xl bg-slate-100 w-12 h-12 flex items-center justify-center rounded-xl">{v.productos?.emoji}</span>
-                            <div>
-                                <p className="font-black uppercase text-slate-800 text-sm leading-none mb-1">{v.productos?.nombre}</p>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase">{format(parseISO(v.fecha_venta), 'HH:mm')} hs • {v.metodo_pago?.replace('_',' ')}</p>
-                                {v.notas && <p className="text-[10px] font-black text-indigo-600 mt-1 uppercase italic tracking-tighter">💬 {v.notas}</p>}
-                            </div>
-                        </div>
-                        <div className="text-right">
-                            <p className="font-black text-emerald-600 text-lg leading-none mb-0.5">{formatMoney((v.precio_venta_historico || v.productos?.precio_venta || 0) * (v.cantidad || 1))}</p>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">{v.cantidad || 1} UNIDADES</p>
-                        </div>
-                    </div>
+                {ventasRecientes.map(v => (
+                    <div key={v.id} className="flex justify-between items-center p-4 bg-white border-2 rounded-2xl shadow-sm"><div className="flex items-center gap-4"><span className="text-3xl bg-slate-100 w-12 h-12 flex items-center justify-center rounded-xl">{v.productos?.emoji}</span><div><p className="font-black uppercase text-slate-800 text-sm leading-none mb-1">{v.productos?.nombre}</p><p className="text-[10px] font-bold text-slate-400 uppercase">{format(parseISO(v.fecha_venta), 'HH:mm')} hs • {v.metodo_pago?.replace('_',' ')}</p>{v.notas && <p className="text-[10px] font-black text-indigo-600 mt-1 italic tracking-tighter">💬 {v.notas}</p>}</div></div><div className="text-right"><p className="font-black text-emerald-600 text-lg leading-none mb-0.5">{formatMoney((v.precio_venta_historico || v.productos?.precio_venta || 0) * (v.cantidad || 1))}</p><p className="text-[10px] font-black text-slate-400 uppercase">{v.cantidad || 1} U.</p></div></div>
                 ))}
             </div>
-            <DialogFooter className="border-t pt-4 mt-2"><Button variant="outline" className="w-full font-black text-[11px] h-12 rounded-2xl uppercase tracking-widest" onClick={() => setShowSalesDetail(false)}>Cerrar Auditoría</Button></DialogFooter>
+            <DialogFooter className="border-t pt-4"><Button variant="outline" className="w-full font-black text-[11px] h-12 rounded-2xl uppercase tracking-widest" onClick={() => setShowSalesDetail(false)}>Cerrar Auditoría</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -2,11 +2,12 @@
 
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
-import { Loader2, LogOut, Package } from "lucide-react"
+import { Loader2, Package } from "lucide-react"
 import DashboardDueno from "@/components/dashboard-dueno"
 import VistaEmpleado from "@/components/vista-empleado"
 import AuthForm from "@/components/auth-form"
 import ProfileSetup from "@/components/profile-setup"
+import SeleccionarSucursal from "@/components/seleccionar-sucursal" // ✅ Importamos el nuevo componente
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { toast } from "sonner"
@@ -15,14 +16,18 @@ interface UserProfile {
     id: string
     rol: "dueño" | "empleado"
     nombre: string
+    organization_id: string // ✅ Agregado: Necesario para filtrar sucursales
 }
 
-function AppRouter({ userProfile, onLogout }: { userProfile: UserProfile, onLogout: () => void }) {
+// ✅ AppRouter ahora recibe sucursalId
+function AppRouter({ userProfile, onLogout, sucursalId }: { userProfile: UserProfile, onLogout: () => void, sucursalId: string }) {
     if (userProfile.rol === "dueño") {
-        return <DashboardDueno onBack={onLogout} /> 
+        // @ts-ignore - (El siguiente paso será actualizar DashboardDueno para que acepte esta prop)
+        return <DashboardDueno onBack={onLogout} sucursalId={sucursalId} /> 
     }
     if (userProfile.rol === "empleado") {
-        return <VistaEmpleado onBack={onLogout} />
+        // @ts-ignore - (El siguiente paso será actualizar VistaEmpleado para que acepte esta prop)
+        return <VistaEmpleado onBack={onLogout} sucursalId={sucursalId} />
     }
     return (
         <div className="min-h-screen flex items-center justify-center p-4">
@@ -39,6 +44,9 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [hasProfile, setHasProfile] = useState(false)
+  
+  // ✅ Nuevo Estado: Guardamos la sucursal elegida
+  const [sucursalId, setSucursalId] = useState<string | null>(null)
 
   const fetchProfile = async (userId: string) => {
     setLoading(true)
@@ -79,6 +87,7 @@ export default function HomePage() {
             setLoading(false)
             setUserProfile(null)
             setHasProfile(false)
+            setSucursalId(null) // ✅ Reseteamos sucursal al salir
         }
     }
     
@@ -96,6 +105,7 @@ export default function HomePage() {
   const handleLogout = async () => {
     setLoading(true)
     await supabase.auth.signOut()
+    setSucursalId(null) // ✅ Limpiamos sucursal
     setLoading(false)
   }
 
@@ -113,7 +123,20 @@ export default function HomePage() {
   }
 
   if (session && userProfile) {
-    return <AppRouter userProfile={userProfile} onLogout={handleLogout} />
+    // ✅ PASO CRÍTICO: Si no hay sucursal seleccionada, mostramos el selector
+    if (!sucursalId) {
+        return (
+            <SeleccionarSucursal 
+                organizationId={userProfile.organization_id} 
+                userId={userProfile.id}
+                userRol={userProfile.rol}
+                onSelect={(id) => setSucursalId(id)}
+            />
+        )
+    }
+
+    // ✅ Si ya eligió, mostramos la App pasándole el ID
+    return <AppRouter userProfile={userProfile} onLogout={handleLogout} sucursalId={sucursalId} />
   }
 
   return (

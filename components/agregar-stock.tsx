@@ -1,9 +1,10 @@
+// components/agregar-stock.tsx
 "use client"
 
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase" 
 
-import { CalendarIcon, PlusIcon, MinusIcon, PackagePlus, DollarSign, Users, CreditCard } from "lucide-react" 
+import { CalendarIcon, PlusIcon, MinusIcon, PackagePlus, DollarSign, Users, CreditCard, Loader2 } from "lucide-react" 
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
 import { toast } from "sonner" 
@@ -24,22 +25,20 @@ interface Producto {
 interface AgregarStockProps {
   producto: Producto
   onStockAdded?: () => void 
+  sucursalId: string 
 }
 
-export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
+export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStockProps) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   
-  // Estado local
   const [cantidad, setCantidad] = useState(1)
   const [fechaVencimiento, setFechaVencimiento] = useState<Date | undefined>(undefined)
   
-  // Estados Proveedores
   const [proveedores, setProveedores] = useState<{id: string, nombre: string}[]>([])
   const [selectedProveedor, setSelectedProveedor] = useState<string>("")
   const [costoUnitario, setCostoUnitario] = useState<string>("")
   
-  // Estados Pago
   const [estadoPago, setEstadoPago] = useState<string>("pendiente") 
   const [medioPago, setMedioPago] = useState<string>("efectivo") 
 
@@ -57,7 +56,10 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
   const decrementar = () => setCantidad((prev) => (prev > 1 ? prev - 1 : 1))
 
   const handleGuardar = async () => {
-    // Validaciones
+    if (!sucursalId) {
+        toast.error("Error", { description: "No se seleccionó una sucursal." })
+        return
+    }
     if (!fechaVencimiento) {
       toast.error("Falta fecha", { description: "Selecciona cuándo vence el producto." })
       return
@@ -70,17 +72,21 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
     setLoading(true)
 
     try {
+      const { data: { user } } = await supabase.auth.getUser()
+      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user?.id).single()
+      
+      if (!perfil?.organization_id) throw new Error("No se encontró la organización del usuario.")
+
       let compraId: string | null = null;
       const costoNum = parseFloat(costoUnitario) || 0;
 
-      // 1. Registrar COMPRA (si corresponde)
       if (selectedProveedor && costoNum > 0) {
           const montoTotal = costoNum * cantidad;
-          
           const { data: compraData, error: compraError } = await supabase
             .from('compras')
             .insert([
                 {
+                    organization_id: perfil.organization_id,
                     proveedor_id: selectedProveedor,
                     monto_total: montoTotal,
                     estado_pago: estadoPago, 
@@ -95,14 +101,14 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
           if (compraData) compraId = compraData.id
       }
 
-      // 2. Insertar STOCK (MODO LEDGER: 1 SOLA FILA)
-      // Eliminamos el Array.from y el map. Insertamos el lote completo.
       const { error } = await supabase.from('stock').insert({
+        organization_id: perfil.organization_id,
+        sucursal_id: sucursalId,
         producto_id: producto.id,
-        cantidad: cantidad,           // Cantidad total
-        tipo_movimiento: 'entrada',   // IMPORTANTE: Para que la vista sume
+        cantidad: cantidad,           
+        tipo_movimiento: 'entrada',   
         fecha_vencimiento: format(fechaVencimiento, 'yyyy-MM-dd'),
-        estado: 'disponible',         // Ya no usamos 'pendiente' para stock activo
+        estado: 'disponible',         
         proveedor_id: selectedProveedor || null,
         compra_id: compraId,
         costo_unitario_historico: costoNum > 0 ? costoNum : null,
@@ -111,26 +117,18 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
 
       if (error) throw error
 
-      // 3. Actualizar Costo Producto
       if (costoNum > 0) {
-          await supabase
-            .from('productos')
-            .update({ costo: costoNum })
-            .eq('id', producto.id)
+          await supabase.from('productos').update({ costo: costoNum }).eq('id', producto.id)
       }
 
-      toast.success("Stock guardado", { description: `${cantidad} unidades ingresadas.` })
-      
-      // Reset
+      toast.success("Stock guardado")
       setCantidad(1)
       setFechaVencimiento(undefined)
       setSelectedProveedor("")
       setCostoUnitario("")
       setEstadoPago("pendiente")
       setOpen(false)
-      
       if (onStockAdded) onStockAdded()
-
     } catch (error: any) {
       console.error(error)
       toast.error("Error al guardar", { description: error.message })
@@ -143,8 +141,7 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button className="w-full gap-2 bg-slate-900 text-white hover:bg-slate-800">
-          <PackagePlus className="h-4 w-4" />
-          Ingresar Lote
+          <PackagePlus className="h-4 w-4" /> Ingresar Lote
         </Button>
       </DialogTrigger>
       
@@ -154,13 +151,12 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
         </DialogHeader>
         
         <div className="flex flex-col gap-5 py-2">
-          
           <div className="space-y-2">
             <Label className="text-center block text-xs uppercase font-bold text-muted-foreground">Cantidad</Label>
             <div className="flex items-center justify-center gap-4">
-              <Button variant="outline" size="icon" onClick={decrementar} className="h-10 w-10 rounded-full"><MinusIcon className="h-5 w-5" /></Button>
-              <Input type="number" min="1" value={cantidad} onChange={(e) => setCantidad(parseInt(e.target.value) || 0)} className="h-12 w-20 text-center text-xl font-bold"/>
-              <Button variant="outline" size="icon" onClick={incrementar} className="h-10 w-10 rounded-full"><PlusIcon className="h-5 w-5" /></Button>
+              <Button variant="outline" size="icon" onClick={decrementar} className="h-10 w-10 rounded-full" aria-label="Disminuir cantidad"><MinusIcon className="h-5 w-5" /></Button>
+              <Input type="number" min="1" value={cantidad} onChange={(e) => setCantidad(parseInt(e.target.value) || 0)} className="h-12 w-20 text-center text-xl font-bold" aria-label="Cantidad a ingresar"/>
+              <Button variant="outline" size="icon" onClick={incrementar} className="h-10 w-10 rounded-full" aria-label="Aumentar cantidad"><PlusIcon className="h-5 w-5" /></Button>
             </div>
           </div>
 
@@ -187,9 +183,12 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
             
             <div className="space-y-1">
                 <Label htmlFor="proveedor-select" className="text-xs text-muted-foreground">Proveedor</Label>
+                {/* ✅ CORRECCIÓN 1: Select con id, title y aria-label */}
                 <select 
                     id="proveedor-select"
-                    aria-label="Seleccionar Proveedor" 
+                    name="proveedor"
+                    title="Seleccionar Proveedor"
+                    aria-label="Seleccionar Proveedor"
                     className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:ring-1 focus:ring-primary"
                     value={selectedProveedor}
                     onChange={(e) => setSelectedProveedor(e.target.value)}
@@ -212,10 +211,13 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
                 
                 {selectedProveedor && (
                     <div className="space-y-1 animate-in fade-in">
-                        <Label htmlFor="estado-pago" className="text-xs text-muted-foreground">Estado Pago</Label>
+                        <Label htmlFor="estado-pago-select" className="text-xs text-muted-foreground">Estado Pago</Label>
+                        {/* ✅ CORRECCIÓN 2: Select con id, title y aria-label */}
                         <select 
-                            id="estado-pago"
-                            aria-label="Estado del Pago" 
+                            id="estado-pago-select"
+                            name="estadoPago"
+                            title="Seleccionar Estado del Pago"
+                            aria-label="Seleccionar Estado del Pago"
                             className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:ring-1 focus:ring-primary"
                             value={estadoPago}
                             onChange={(e) => setEstadoPago(e.target.value)}
@@ -229,12 +231,15 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
 
             {selectedProveedor && estadoPago === 'pagado' && (
                 <div className="space-y-1 animate-in slide-in-from-top-2">
-                    <Label htmlFor="medio-pago" className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Label htmlFor="medio-pago-select" className="text-xs text-muted-foreground flex items-center gap-1">
                         <CreditCard className="h-3 w-3"/> Medio de Pago
                     </Label>
+                    {/* ✅ CORRECCIÓN 3: Select con id, title y aria-label */}
                     <select 
-                        id="medio-pago"
-                        aria-label="Medio de Pago" 
+                        id="medio-pago-select"
+                        name="medioPago"
+                        title="Seleccionar Medio de Pago"
+                        aria-label="Seleccionar Medio de Pago"
                         className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:ring-1 focus:ring-primary font-medium"
                         value={medioPago}
                         onChange={(e) => setMedioPago(e.target.value)}
@@ -251,9 +256,8 @@ export function AgregarStock({ producto, onStockAdded }: AgregarStockProps) {
           </div>
 
           <Button onClick={handleGuardar} disabled={loading} size="lg" className="w-full font-bold mt-2">
-            {loading ? "Guardando..." : "Confirmar Ingreso"}
+            {loading ? <span className="flex items-center gap-2"><Loader2 className="animate-spin h-4 w-4"/> Guardando...</span> : "Confirmar Ingreso"}
           </Button>
-
         </div>
       </DialogContent>
     </Dialog>

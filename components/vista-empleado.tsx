@@ -24,9 +24,10 @@ interface UserProfile {
 
 interface VistaEmpleadoProps {
     onBack: () => void 
+    sucursalId: string // ✅ Recibimos la sucursal seleccionada
 }
 
-export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
+export default function VistaEmpleado({ onBack, sucursalId }: VistaEmpleadoProps) {
     const [loading, setLoading] = useState(true)
     const [activeTab, setActiveTab] = useState<"caja" | "misiones" | "vencimientos">("caja")
     const [turnoActivo, setTurnoActivo] = useState<CajaDiaria | null>(null)
@@ -57,17 +58,17 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
             
             fetchProfile(user.id) 
 
+            // ✅ Modificado: Buscamos caja abierta EN ESTA SUCURSAL
             const { data, error } = await supabase
                 .from('caja_diaria')
                 .select('*')
                 .eq('empleado_id', user.id)
+                .eq('sucursal_id', sucursalId) // Filtro crucial
                 .is('fecha_cierre', null)
                 .order('fecha_apertura', { ascending: false })
-                .single()
+                .maybeSingle() // Usamos maybeSingle para no lanzar error si no hay
 
-            if (error && error.code !== 'PGRST116') { 
-                throw error
-            }
+            if (error) throw error
             
             setTurnoActivo(data as CajaDiaria || null)
 
@@ -77,7 +78,7 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
         } finally {
             setLoading(false)
         }
-    }, [fetchProfile]) 
+    }, [fetchProfile, sucursalId]) 
     
     useEffect(() => {
         setLoading(true)
@@ -184,6 +185,9 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                             onCajaAbierta={handleCajaAbierta}
                             onCajaCerrada={handleCajaCerrada}
                             turnoActivo={turnoActivo}
+                            // ✅ Pasamos sucursalId para que al abrir caja se asocie correctamente
+                            // @ts-ignore - (ArqueoCaja debe actualizarse en el siguiente paso)
+                            sucursalId={sucursalId} 
                         />
                     </div>
                 )}
@@ -225,27 +229,33 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                                     <CajaVentas 
                                         turnoId={turnoActivo.id} 
                                         empleadoNombre={userProfile?.nombre || "Cajero"}
+                                        // ✅ Pasamos sucursalId para filtrar productos y descontar stock correcto
+                                        // @ts-ignore - (CajaVentas debe actualizarse)
+                                        sucursalId={sucursalId}
                                     />
 
                                     {/* 2. Sección de Servicios Rápidos (Widgets) */}
+                                    {/* Estos widgets no tocan stock, así que pueden quedar igual por ahora */}
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <WidgetSube onVentaRegistrada={handleDataUpdated} />
                                         <WidgetServicios onVentaRegistrada={handleDataUpdated} />
                                     </div>
 
-                                    {/* 3. Registrar Gastos / Salidas (Menos frecuente) */}
+                                    {/* 3. Registrar Gastos */}
                                     <RegistrarGasto 
                                         turnoId={turnoActivo.id} 
-                                        empleadoId={turnoActivo.empleado_id} 
                                     />
 
-                                    {/* 4. Fin de Turno (Abajo del todo) */}
+                                    {/* 4. Fin de Turno */}
                                     <div className="pt-6 border-t border-dashed border-gray-300 mt-4">
                                         <p className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-4">Fin de Jornada</p>
                                         <ArqueoCaja 
                                             onCajaAbierta={handleCajaAbierta}
                                             onCajaCerrada={handleCajaCerrada}
                                             turnoActivo={turnoActivo}
+                                            // ✅ Pasamos sucursalId también aquí para cierres correctos
+                                            // @ts-ignore
+                                            sucursalId={sucursalId}
                                         />
                                     </div>
                                 </div>
@@ -265,6 +275,9 @@ export default function VistaEmpleado({ onBack }: VistaEmpleadoProps) {
                                     turnoId={turnoActivo.id}
                                     empleadoId={turnoActivo.empleado_id}
                                     onAccionRealizada={handleDataUpdated}
+                                    // ✅ Pasamos sucursalId para filtrar stock a vencer
+                                    // @ts-ignore
+                                    sucursalId={sucursalId}
                                 />
                             )}
                         </div>

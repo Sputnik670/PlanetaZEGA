@@ -1,6 +1,7 @@
+// components/gestion-proveedores.tsx
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -8,24 +9,26 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { 
   Users, Plus, Phone, Mail, ChevronRight, DollarSign, Loader2, 
-  ShoppingBag, Receipt
+  ShoppingBag, Receipt, Globe, MapPin
 } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { format, parseISO } from "date-fns"
 import { es } from "date-fns/locale"
+import { cn } from "@/lib/utils"
 
-// --- Interfaces ---
+// --- Interfaces Actualizadas ---
 interface Proveedor {
     id: string
+    organization_id: string
+    sucursal_id: string | null // NULL = Global
     nombre: string
-    rubro: string
-    contacto_nombre: string
-    telefono: string
-    email: string
-    condicion_pago: string
-    saldo_actual: number          // ✅ NUEVO
-    saldo_minimo_alerta: number   // ✅ NUEVO
+    rubro: string | null
+    contacto_nombre: string | null
+    telefono: string | null
+    email: string | null
+    condicion_pago: string | null
+    saldo_actual: number
 }
 
 interface Compra {
@@ -35,47 +38,64 @@ interface Compra {
     estado_pago: string
     medio_pago: string
     fecha_compra: string
-    comprobante_nro?: string
 }
 
-export default function GestionProveedores() {
+interface GestionProveedoresProps {
+    sucursalId: string | null // Sucursal que el dueño tiene seleccionada
+    organizationId: string
+}
+
+export default function GestionProveedores({ sucursalId, organizationId }: GestionProveedoresProps) {
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
   const [loading, setLoading] = useState(true)
-  
-  // Modales
   const [showAddModal, setShowAddModal] = useState(false)
   const [selectedProveedor, setSelectedProveedor] = useState<Proveedor | null>(null)
-  
-  // Datos del proveedor seleccionado
   const [historialCompras, setHistorialCompras] = useState<Compra[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
 
   // Formulario nuevo proveedor
   const [formData, setFormData] = useState({
     nombre: "", rubro: "", contacto_nombre: "", 
-    telefono: "", email: "", condicion_pago: "contado"
+    telefono: "", email: "", condicion_pago: "contado",
+    esGlobal: true // Controla si sucursal_id será null o sucursalId
   })
 
-  useEffect(() => { fetchProveedores() }, [])
-
-  async function fetchProveedores() {
+  const fetchProveedores = useCallback(async () => {
+    if (!organizationId) return
     setLoading(true)
-    const { data } = await supabase.from('proveedores').select('*').order('nombre')
-    setProveedores(data || [])
-    setLoading(false)
-  }
+    
+    // 🧠 Query Meticulosa: 
+    // 1. Filtrar por mi Organización
+    // 2. Traer los globales (sucursal_id IS NULL)
+    // 3. O traer los de la sucursal que estoy viendo
+    let query = supabase
+        .from('proveedores')
+        .select('*')
+        .eq('organization_id', organizationId)
 
-  // Cargar historial al abrir un proveedor
+    if (sucursalId) {
+        query = query.or(`sucursal_id.is.null,sucursal_id.eq.${sucursalId}`)
+    } else {
+        query = query.is('sucursal_id', null) // Si no hay sucursal seleccionada, solo globales
+    }
+
+    const { data, error } = await query.order('nombre')
+    
+    if (error) console.error(error)
+    else setProveedores(data || [])
+    setLoading(false)
+  }, [organizationId, sucursalId])
+
+  useEffect(() => { fetchProveedores() }, [fetchProveedores])
+
   const handleSelectProveedor = async (prov: Proveedor) => {
       setSelectedProveedor(prov)
       setLoadingHistory(true)
-      
       const { data } = await supabase
         .from('compras')
         .select('*')
         .eq('proveedor_id', prov.id)
         .order('fecha_compra', { ascending: false })
-      
       setHistorialCompras(data || [])
       setLoadingHistory(false)
   }
@@ -83,66 +103,83 @@ export default function GestionProveedores() {
   async function handleAddProveedor() {
     if (!formData.nombre) return toast.error("El nombre es obligatorio")
     
-    const { error } = await supabase.from('proveedores').insert([formData])
+    setLoading(true)
+    const { error } = await supabase.from('proveedores').insert([{
+        organization_id: organizationId,
+        sucursal_id: formData.esGlobal ? null : sucursalId, // ✅ Lógica de Alcance
+        nombre: formData.nombre,
+        rubro: formData.rubro,
+        contacto_nombre: formData.contacto_nombre,
+        telefono: formData.telefono,
+        email: formData.email,
+        condicion_pago: formData.condicion_pago
+    }])
     
     if (error) {
-        console.error("Error al guardar proveedor:", error)
-        return toast.error("Error al guardar")
+        toast.error("Error al guardar")
+    } else {
+        toast.success(formData.esGlobal ? "Proveedor Global añadido" : "Proveedor Local añadido")
+        setShowAddModal(false)
+        setFormData({ nombre: "", rubro: "", contacto_nombre: "", telefono: "", email: "", condicion_pago: "contado", esGlobal: true })
+        fetchProveedores()
     }
-    
-    toast.success("Proveedor registrado")
-    setShowAddModal(false)
-    setFormData({ nombre: "", rubro: "", contacto_nombre: "", telefono: "", email: "", condicion_pago: "contado" })
-    fetchProveedores()
+    setLoading(false)
   }
 
   const formatMoney = (amount: number) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(amount)
 
   return (
-    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+    <div className="space-y-4">
       
       {/* HEADER */}
-      <div className="flex justify-between items-center bg-white p-4 rounded-xl border-2 border-primary/10 shadow-sm">
+      <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
         <div>
             <h3 className="text-lg font-bold flex items-center gap-2">
                 <Users className="h-5 w-5 text-primary" /> Directorio de Proveedores
             </h3>
-            <p className="text-xs text-muted-foreground">{proveedores.length} proveedores registrados</p>
+            <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                {sucursalId ? "Mostrando: Globales + Sucursal Actual" : "Mostrando: Solo Globales"}
+            </p>
         </div>
-        <Button onClick={() => setShowAddModal(true)} size="sm" className="rounded-full shadow-md">
+        <Button onClick={() => setShowAddModal(true)} size="sm" className="rounded-full">
             <Plus className="h-4 w-4 mr-1" /> Nuevo
         </Button>
       </div>
 
-      {/* LISTA DE PROVEEDORES */}
+      {/* LISTA */}
       {loading ? (
         <div className="flex justify-center py-10"><Loader2 className="animate-spin h-8 w-8 text-primary" /></div>
       ) : (
-        <div className="grid gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {proveedores.map(p => (
                 <Card 
                     key={p.id} 
                     onClick={() => handleSelectProveedor(p)}
-                    className="p-4 hover:border-primary/50 hover:bg-slate-50 transition-all cursor-pointer shadow-sm group"
+                    className="p-4 hover:border-primary/50 transition-all cursor-pointer shadow-sm group relative overflow-hidden"
                 >
-                    <div className="flex justify-between items-start">
-                        <div className="flex gap-3">
-                            <div className="h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center text-primary font-bold group-hover:bg-primary group-hover:text-white transition-colors">
-                                {p.nombre.charAt(0)}
-                            </div>
-                            <div>
-                                <h4 className="font-bold text-sm leading-tight group-hover:text-primary">{p.nombre}</h4>
-                                <p className="text-[10px] text-muted-foreground font-bold uppercase mt-0.5">{p.rubro || 'General'}</p>
-                            </div>
+                    {/* Badge de Alcance */}
+                    <div className={cn(
+                        "absolute top-0 right-0 px-2 py-0.5 text-[8px] font-bold uppercase rounded-bl-lg",
+                        p.sucursal_id ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
+                    )}>
+                        {p.sucursal_id ? "Local" : "Global (Cadena)"}
+                    </div>
+
+                    <div className="flex gap-3">
+                        <div className="h-10 w-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 font-bold group-hover:bg-primary group-hover:text-white transition-colors">
+                            {p.nombre.charAt(0)}
                         </div>
-                        <ChevronRight className="h-5 w-5 text-muted-foreground/50 group-hover:text-primary" />
+                        <div>
+                            <h4 className="font-bold text-sm leading-tight group-hover:text-primary">{p.nombre}</h4>
+                            <p className="text-[10px] text-muted-foreground font-bold uppercase mt-0.5">{p.rubro || 'General'}</p>
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-dashed">
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                             <Phone className="h-3 w-3" /> {p.telefono || '---'}
                         </div>
-                        <div className="flex items-center gap-2 text-xs font-bold text-orange-600">
+                        <div className="flex items-center gap-2 text-[11px] font-bold text-emerald-600">
                             <DollarSign className="h-3 w-3" /> {p.condicion_pago}
                         </div>
                     </div>
@@ -151,82 +188,42 @@ export default function GestionProveedores() {
         </div>
       )}
 
-      {/* --- MODAL DETALLE DEL PROVEEDOR --- */}
+      {/* MODAL DETALLE */}
       <Dialog open={!!selectedProveedor} onOpenChange={(open) => !open && setSelectedProveedor(null)}>
-        <DialogContent className="max-w-lg max-h-[85vh] flex flex-col">
-            <DialogHeader className="border-b pb-2">
+        <DialogContent className="max-w-lg">
+            <DialogHeader className="border-b pb-4">
                 <DialogTitle className="flex items-center gap-2 text-xl">
-                    <Users className="h-5 w-5 text-primary"/> {selectedProveedor?.nombre}
+                    {selectedProveedor?.nombre}
                 </DialogTitle>
-                <div className="flex gap-4 text-xs text-muted-foreground mt-1">
-                    <span className="flex items-center gap-1"><Mail className="h-3 w-3"/> {selectedProveedor?.email || 'Sin mail'}</span>
-                    <span className="flex items-center gap-1"><Phone className="h-3 w-3"/> {selectedProveedor?.telefono || 'Sin tel'}</span>
+                <div className="flex items-center gap-2 mt-1">
+                    {selectedProveedor?.sucursal_id ? (
+                        <span className="flex items-center gap-1 text-[10px] font-black bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full"><MapPin className="h-3 w-3"/> EXCLUSIVO SUCURSAL</span>
+                    ) : (
+                        <span className="flex items-center gap-1 text-[10px] font-black bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full"><Globe className="h-3 w-3"/> DISPONIBLE EN TODA LA CADENA</span>
+                    )}
                 </div>
             </DialogHeader>
 
-            <div className="flex-1 overflow-y-auto py-2 space-y-4">
-                {/* Resumen */}
+            <div className="space-y-4 mt-4">
                 <div className="grid grid-cols-2 gap-3">
-                    <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
-                        <p className="text-[10px] uppercase font-bold text-blue-600 mb-1">Compras Totales</p>
-                        <p className="text-xl font-black text-blue-900">{historialCompras.length}</p>
+                    <div className="p-3 bg-slate-50 rounded-lg border">
+                        <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">Compras Realizadas</p>
+                        <p className="text-xl font-black">{historialCompras.length}</p>
                     </div>
-                    <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-100">
-                        <p className="text-[10px] uppercase font-bold text-emerald-600 mb-1">Última Compra</p>
-                        <p className="text-sm font-bold text-emerald-900">
-                            {historialCompras.length > 0 
-                                ? format(parseISO(historialCompras[0].fecha_compra), 'dd/MM/yy', {locale: es}) 
-                                : '---'}
-                        </p>
+                    <div className="p-3 bg-slate-50 rounded-lg border">
+                        <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">Condición</p>
+                        <p className="text-sm font-bold uppercase">{selectedProveedor?.condicion_pago}</p>
                     </div>
                 </div>
 
-                {/* Lista de Movimientos */}
-                <div>
-                    <h4 className="text-sm font-bold flex items-center gap-2 mb-3">
-                        <Receipt className="h-4 w-4 text-muted-foreground"/> Historial de Pedidos
-                    </h4>
-                    
-                    {loadingHistory ? (
-                        <div className="py-8 text-center"><Loader2 className="animate-spin h-6 w-6 mx-auto text-primary"/></div>
-                    ) : historialCompras.length === 0 ? (
-                        <div className="text-center py-8 text-muted-foreground bg-slate-50 rounded-lg border border-dashed">
-                            <ShoppingBag className="h-8 w-8 mx-auto mb-2 opacity-50"/>
-                            <p className="text-sm">No hay compras registradas con este proveedor.</p>
+                <div className="max-h-[300px] overflow-y-auto pr-2">
+                    <h4 className="text-xs font-bold uppercase text-muted-foreground mb-3">Últimos Pedidos</h4>
+                    {loadingHistory ? <Loader2 className="animate-spin h-5 w-5 mx-auto"/> : historialCompras.map(compra => (
+                        <div key={compra.id} className="flex justify-between items-center p-2 mb-2 bg-white border rounded shadow-sm text-xs">
+                            <span className="font-medium">{format(parseISO(compra.fecha_compra), 'dd/MM/yy')}</span>
+                            <span className="font-bold">{formatMoney(compra.monto_total)}</span>
                         </div>
-                    ) : (
-                        <div className="space-y-2">
-                            {historialCompras.map(compra => (
-                                <div key={compra.id} className="flex justify-between items-center p-3 bg-white border rounded-lg shadow-sm hover:bg-slate-50 transition-colors">
-                                    <div className="flex items-start gap-3">
-                                        <div className="mt-1 h-2 w-2 rounded-full bg-primary"></div>
-                                        <div>
-                                            <p className="text-xs font-bold text-muted-foreground uppercase">
-                                                {format(parseISO(compra.fecha_compra), 'dd MMMM yyyy', {locale: es})}
-                                            </p>
-                                            <div className="flex items-center gap-2 mt-1">
-                                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
-                                                    compra.estado_pago === 'pagado' 
-                                                        ? 'bg-emerald-100 text-emerald-700 border-emerald-200' 
-                                                        : 'bg-orange-100 text-orange-700 border-orange-200'
-                                                }`}>
-                                                    {compra.estado_pago === 'pagado' ? 'PAGADO' : 'PENDIENTE'}
-                                                </span>
-                                                {compra.medio_pago && (
-                                                    <span className="text-[10px] text-muted-foreground border px-1 rounded bg-slate-50 capitalize">
-                                                        {compra.medio_pago}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <span className="font-mono font-bold text-sm">
-                                        {formatMoney(compra.monto_total)}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
+                    ))}
                 </div>
             </div>
         </DialogContent>
@@ -235,51 +232,77 @@ export default function GestionProveedores() {
       {/* MODAL AGREGAR */}
       <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
         <DialogContent className="max-w-md">
-            <DialogHeader><DialogTitle>Nuevo Proveedor</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle>Registrar Proveedor</DialogTitle></DialogHeader>
             <div className="space-y-4 py-2">
-                <div>
-                    <Label className="text-xs uppercase font-bold text-muted-foreground">Nombre Empresa</Label>
-                    <Input placeholder="Ej: Arcor, Coca-Cola..." value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} />
+                
+                {/* 🎯 LOGÍSTICA DE ALCANCE */}
+                <div className="bg-slate-50 p-3 rounded-lg border-2 border-primary/10">
+                    <Label className="text-xs font-black uppercase mb-3 block">Alcance del Proveedor</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                        <button 
+                            type="button"
+                            onClick={() => setFormData({...formData, esGlobal: true})}
+                            className={cn("flex flex-col items-center p-3 rounded-md border-2 transition-all", 
+                                formData.esGlobal ? "bg-white border-primary shadow-sm" : "bg-transparent border-transparent grayscale opacity-60")}
+                        >
+                            <Globe className="h-5 w-5 mb-1 text-blue-600" />
+                            <span className="text-[10px] font-bold">Toda la Cadena</span>
+                        </button>
+                        <button 
+                            type="button"
+                            disabled={!sucursalId}
+                            onClick={() => setFormData({...formData, esGlobal: false})}
+                            className={cn("flex flex-col items-center p-3 rounded-md border-2 transition-all", 
+                                !formData.esGlobal ? "bg-white border-amber-500 shadow-sm" : "bg-transparent border-transparent grayscale opacity-60")}
+                        >
+                            <MapPin className="h-5 w-5 mb-1 text-amber-600" />
+                            <span className="text-[10px] font-bold">Solo este Local</span>
+                        </button>
+                    </div>
                 </div>
+
+                <div>
+                    <Label className="text-xs font-bold uppercase text-muted-foreground">Nombre / Razón Social</Label>
+                    <Input placeholder="Ej: Arcor" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} />
+                </div>
+                
                 <div className="grid grid-cols-2 gap-3">
                     <div>
-                        <Label className="text-xs uppercase font-bold text-muted-foreground">Rubro</Label>
+                        <Label className="text-xs font-bold uppercase text-muted-foreground">Rubro</Label>
                         <Input placeholder="Golosinas" value={formData.rubro} onChange={e => setFormData({...formData, rubro: e.target.value})} />
                     </div>
                     <div>
-                        <Label className="text-xs uppercase font-bold text-muted-foreground">Persona Contacto</Label>
-                        <Input placeholder="Juan Perez" value={formData.contacto_nombre} onChange={e => setFormData({...formData, contacto_nombre: e.target.value})} />
+                        <Label className="text-xs font-bold uppercase text-muted-foreground">Condición Pago</Label>
+                        <select 
+                            title="Condición de Pago"
+                            className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={formData.condicion_pago} 
+                            onChange={e => setFormData({...formData, condicion_pago: e.target.value})}
+                        >
+                            <option value="contado">Contado</option>
+                            <option value="7 dias">Cta. Cte. (7d)</option>
+                            <option value="15 dias">Cta. Cte. (15d)</option>
+                            <option value="30 dias">Cta. Cte. (30d)</option>
+                        </select>
                     </div>
                 </div>
+                
                 <div className="grid grid-cols-2 gap-3">
                     <div>
-                        <Label className="text-xs uppercase font-bold text-muted-foreground">Teléfono</Label>
+                        <Label className="text-xs font-bold uppercase text-muted-foreground">Teléfono</Label>
                         <Input placeholder="11..." value={formData.telefono} onChange={e => setFormData({...formData, telefono: e.target.value})} />
                     </div>
                     <div>
-                        <Label className="text-xs uppercase font-bold text-muted-foreground">Email</Label>
+                        <Label className="text-xs font-bold uppercase text-muted-foreground">Email</Label>
                         <Input placeholder="prov@mail.com" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
                     </div>
                 </div>
-                <div>
-                    <Label htmlFor="condicion-pago" className="text-xs uppercase font-bold text-muted-foreground">Condición de Pago</Label>
-                    <select 
-                        id="condicion-pago"
-                        title="Condición de Pago"
-                        aria-label="Condición de Pago"
-                        className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:ring-2 focus:ring-primary"
-                        value={formData.condicion_pago} 
-                        onChange={e => setFormData({...formData, condicion_pago: e.target.value})}
-                    >
-                        <option value="contado">Contado / Efectivo</option>
-                        <option value="7 dias">Cuenta Corriente (7 días)</option>
-                        <option value="15 dias">Cuenta Corriente (15 días)</option>
-                        <option value="30 dias">Cuenta Corriente (30 días)</option>
-                    </select>
-                </div>
             </div>
             <DialogFooter>
-                <Button onClick={handleAddProveedor} className="w-full font-bold">Guardar Proveedor</Button>
+                <Button onClick={handleAddProveedor} disabled={loading} className="w-full font-bold">
+                    {loading ? <Loader2 className="animate-spin h-4 w-4 mr-2"/> : <Plus className="h-4 w-4 mr-2"/>}
+                    Confirmar Alta
+                </Button>
             </DialogFooter>
         </DialogContent>
       </Dialog>

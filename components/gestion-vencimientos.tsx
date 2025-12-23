@@ -15,9 +15,10 @@ interface GestionVencimientosProps {
     turnoId: string
     empleadoId: string
     onAccionRealizada?: () => void
+    sucursalId: string // ✅ Recibimos sucursalId
 }
 
-export default function GestionVencimientos({ turnoId, empleadoId, onAccionRealizada }: GestionVencimientosProps) {
+export default function GestionVencimientos({ turnoId, empleadoId, onAccionRealizada, sucursalId }: GestionVencimientosProps) {
     const [loading, setLoading] = useState(true)
     const [productosVencidos, setProductosVencidos] = useState<any[]>([])
     const [procesandoId, setProcesandoId] = useState<string | null>(null)
@@ -31,6 +32,8 @@ export default function GestionVencimientos({ turnoId, empleadoId, onAccionReali
                 .from('stock')
                 .select('*, productos(nombre, emoji, categoria)')
                 .eq('estado', 'pendiente')
+                .eq('tipo_movimiento', 'entrada') // Asegurar que es stock físico
+                .eq('sucursal_id', sucursalId) // ✅ FILTRO CRÍTICO POR SUCURSAL
                 .lt('fecha_vencimiento', fechaLimite)
                 .order('fecha_vencimiento', { ascending: true })
 
@@ -42,7 +45,7 @@ export default function GestionVencimientos({ turnoId, empleadoId, onAccionReali
         } finally {
             setLoading(false)
         }
-    }, [])
+    }, [sucursalId]) // Dependencia sucursalId
 
     useEffect(() => {
         fetchVencimientos()
@@ -58,16 +61,13 @@ export default function GestionVencimientos({ turnoId, empleadoId, onAccionReali
                 .from('stock')
                 .update({ 
                     estado: 'mermado',
-                    // Si tienes campos de auditoría de merma, agrégalos aquí:
-                    // fecha_merma: new Date().toISOString(),
-                    // empleado_merma_id: empleadoId
+                    fecha_mermado: new Date().toISOString() // Es buena práctica registrar cuándo
                 })
                 .eq('id', stockId)
 
             if (updateError) throw updateError
 
             // 2. Actualizar Misión de Vencimiento (Si existe y está activa)
-            // Buscamos si hay una misión de tipo 'vencimiento' activa para este turno
             const { data: misiones } = await supabase
                 .from('misiones')
                 .select('*')
@@ -90,11 +90,11 @@ export default function GestionVencimientos({ turnoId, empleadoId, onAccionReali
 
                 if (completada) {
                     toast.success("¡Misión Completada! 🎯", { description: "Has gestionado todos los vencimientos." })
-                     // Sumar XP al perfil
-                     const { data: perfil } = await supabase.from('perfiles').select('xp').eq('id', empleadoId).single()
-                     if (perfil) {
+                      // Sumar XP al perfil
+                      const { data: perfil } = await supabase.from('perfiles').select('xp').eq('id', empleadoId).single()
+                      if (perfil) {
                         await supabase.from('perfiles').update({ xp: perfil.xp + mision.puntos }).eq('id', empleadoId)
-                     }
+                      }
                 }
             }
 

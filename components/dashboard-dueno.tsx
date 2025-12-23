@@ -1,5 +1,4 @@
 // components/dashboard-dueno.tsx
-
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
@@ -8,13 +7,14 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Badge } from "@/components/ui/badge"
 import { 
   ArrowLeft, AlertTriangle, TrendingUp, Package, Search, Plus, 
   Loader2, ShieldCheck, DollarSign, CreditCard, 
   Repeat2, Wallet, Calendar as CalendarIcon, 
   Eye, TrendingDown, Star, User, ShoppingBag, Clock, 
   Pencil, Trash2, History, Save, ChevronDown, ChevronUp, Calculator, ScanBarcode,
-  Users, Sparkles, Printer, Briefcase, Receipt, X
+  Users, Sparkles, Printer, Briefcase, Receipt, X, MapPin, Settings, ChevronRight
 } from "lucide-react" 
 import { BarChart, Bar, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts" 
 import CrearProducto from "@/components/crear-producto"
@@ -27,7 +27,7 @@ import { format, subDays, startOfDay, endOfDay, parseISO } from "date-fns"
 import { es } from "date-fns/locale" 
 import AsignarMision from "@/components/asignar-mision" 
 import { toast } from "sonner" 
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription, DialogTrigger } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
 import GestionProveedores from "@/components/gestion-proveedores"
 import ControlSaldoProveedor from "@/components/control-saldo-proveedor"
@@ -35,6 +35,8 @@ import { InvitarEmpleado } from "@/components/invitar-empleado"
 import { generarTicketPDF } from "@/lib/generar-ticket"
 import HappyHour from "@/components/happy-hour"
 import TeamRanking from "@/components/team-ranking"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import GestionSucursales from "@/components/gestion-sucursales"
 
 // --- Configuración ---
 const UMBRAL_STOCK_BAJO = 5 
@@ -43,6 +45,7 @@ const UMBRAL_SALDO_BAJO = 10000
 // --- Interfaces ---
 interface DashboardDuenoProps {
   onBack: () => void
+  sucursalId: string 
 }
 
 interface MetricaStock {
@@ -68,16 +71,17 @@ interface HistorialPrecio {
     precio_venta_nuevo: number;
     costo_anterior: number;
     costo_nuevo: number;
-    empleado_id: string;
+    perfiles?: { nombre: string };
 }
 
 interface VentaJoin {
     id: string
     fecha_venta: string
     metodo_pago: string
+    precio_venta_historico?: number
     costo_unitario_historico?: number
     notas?: string | null
-    cantidad: number // ✅ NUEVO CAMPO IMPORTANTE
+    cantidad: number 
     productos: { nombre: string; precio_venta: number; emoji: string } | null 
 }
 
@@ -89,22 +93,6 @@ interface PaymentBreakdown {
   billetera_virtual: number
 }
 
-interface MisionAudit {
-  id: string
-  descripcion: string
-  tipo: string
-  es_completada: boolean
-  puntos: number
-}
-
-interface MovimientoCaja {
-  id: string
-  monto: number
-  descripcion: string
-  tipo: 'ingreso' | 'egreso'
-  created_at: string
-}
-
 interface TurnoAudit {
   id: string
   fecha_apertura: string
@@ -112,19 +100,10 @@ interface TurnoAudit {
   monto_inicial: number
   monto_final: number | null
   empleado_id: string
+  sucursal_id: string
   perfiles: { nombre: string } | null 
-  misiones: MisionAudit[]
-  movimientos_caja: MovimientoCaja[]
-}
-
-interface SugerenciaCompra {
-    id: string
-    producto: string
-    stock_actual: number
-    mejor_proveedor: string | null
-    mejor_precio_historico: number | null
-    emoji: string
-    es_saldo?: boolean 
+  misiones: any[]
+  movimientos_caja: any[]
 }
 
 const PAYMENT_ICONS: any = {
@@ -135,8 +114,14 @@ const PAYMENT_ICONS: any = {
     billetera_virtual: Wallet, 
 }
 
-export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
-  const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "tasks" | "catalog" | "sales" | "finance" | "supervision" | "suppliers" | "team">("sales")
+export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoProps) {
+  // --- ESTADOS DE CONTEXTO ---
+  const [currentSucursalId, setCurrentSucursalId] = useState(sucursalId)
+  const [organizationId, setOrganizationId] = useState<string>("")
+  const [sucursales, setSucursales] = useState<{id: string, nombre: string}[]>([])
+
+  // --- ESTADOS DE UI ---
+  const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "catalog" | "sales" | "finance" | "supervision" | "suppliers" | "team">("sales")
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
@@ -145,9 +130,9 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   })
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
 
+  // --- ESTADOS DE DATOS ---
   const [productos, setProductos] = useState<Producto[]>([])
   const [capitalEnRiesgo, setCapitalEnRiesgo] = useState<MetricaStock>({ capital: 0, unidades: 0, criticos: [] })
-  const [capitalSaludable, setCapitalSaludable] = useState<MetricaStock>({ capital: 0, unidades: 0, criticos: [] })
   const [ventasRecientes, setVentasRecientes] = useState<VentaJoin[]>([])
   const [totalVendido, setTotalVendido] = useState(0)
   const [paymentBreakdown, setPaymentBreakdown] = useState<PaymentBreakdown>({
@@ -156,673 +141,651 @@ export default function DashboardDueno({ onBack }: DashboardDuenoProps) {
   const [topProductos, setTopProductos] = useState<{name: string, count: number}[]>([])
   const [turnosAudit, setTurnosAudit] = useState<TurnoAudit[]>([])
   const [expandedTurnoId, setExpandedTurnoId] = useState<string | null>(null)
-  
-  const [sugerencias, setSugerencias] = useState<SugerenciaCompra[]>([])
+  const [sugerencias, setSugerencias] = useState<any[]>([])
 
+  // --- MODALES ---
   const [editingProduct, setEditingProduct] = useState<Producto | null>(null)
   const [managingStockId, setManagingStockId] = useState<string | null>(null)
   const [stockBatchList, setStockBatchList] = useState<any[]>([])
   const [actionLoading, setActionLoading] = useState(false)
   const [showSalesDetail, setShowSalesDetail] = useState(false)
-  
-  const [showPriceHistoryModal, setShowPriceHistoryModal] = useState(false);
-  const [historyData, setHistoryData] = useState<HistorialPrecio[]>([]);
+  const [showPriceHistoryModal, setShowPriceHistoryModal] = useState(false)
+  const [historyData, setHistoryData] = useState<HistorialPrecio[]>([])
 
   const formatMoney = (amount: number | null) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(amount || 0)
 
-  const calcularMetricasVentas = (ventas: VentaJoin[]) => { 
-    let total = 0
-    const breakdown: PaymentBreakdown = { efectivo: 0, tarjeta: 0, transferencia: 0, otro: 0, billetera_virtual: 0 } 
-    
-    ventas.forEach(item => {
-        const precioUnitario = parseFloat(item.productos?.precio_venta?.toString() ?? '0')
-        const cantidad = item.cantidad || 1 // ✅ CORRECCIÓN: Usar cantidad
-        const totalOperacion = precioUnitario * cantidad
+  // --- 1. CARGA DE CONTEXTO ---
+  const fetchContext = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if(!user) return
+    const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single()
+    if(!perfil?.organization_id) return
+    setOrganizationId(perfil.organization_id)
 
-        let metodo = (item.metodo_pago || 'efectivo') as keyof PaymentBreakdown
-        if (!breakdown.hasOwnProperty(metodo)) metodo = 'otro'
-        
-        total += totalOperacion
-        breakdown[metodo] += totalOperacion 
-    })
-    
-    setTotalVendido(total)
-    setPaymentBreakdown(breakdown)
-  }
+    const { data } = await supabase.from('sucursales').select('id, nombre').eq('organization_id', perfil.organization_id).order('created_at')
+    if(data) setSucursales(data)
+  }, [])
 
-  const calcularMetricasStock = (stock: any[]) => {
-    let riesgo: MetricaStock = { capital: 0, unidades: 0, criticos: [] }
-    let saludable: MetricaStock = { capital: 0, unidades: 0, criticos: [] }
-    const hoy = new Date()
-    const fechaLimite = new Date(); fechaLimite.setDate(hoy.getDate() + 10)
-    const criticosAgrupados: { [key: string]: any } = {}
+  useEffect(() => { fetchContext() }, [fetchContext])
 
-    stock.forEach(item => {
-      // Filtrar solo entradas activas para el cálculo de riesgo
-      if (item.tipo_movimiento === 'salida') return; 
-
-      const precio = parseFloat(item.productos?.precio_venta || 0)
-      const cantidad = item.cantidad || 1 // ✅ CORRECCIÓN
-      const valorLote = precio * cantidad
-
-      if (!item.fecha_vencimiento) {
-        saludable.capital += valorLote; saludable.unidades += cantidad; return
-      }
-
-      const fechaVenc = new Date(item.fecha_vencimiento)
-      if (fechaVenc <= fechaLimite) {
-        riesgo.capital += valorLote; riesgo.unidades += cantidad
-        
-        if (!criticosAgrupados[item.producto_id]) {
-             criticosAgrupados[item.producto_id] = {
-                producto_id: item.producto_id,
-                nombre: item.productos?.nombre || "Desconocido",
-                emoji: item.productos?.emoji || "📦",
-                unidades: 0,
-                precioTotal: 0,
-                fechaVenc: item.fecha_vencimiento
-             }
-        }
-        criticosAgrupados[item.producto_id].unidades += cantidad
-        criticosAgrupados[item.producto_id].precioTotal += valorLote
-      } else {
-        saludable.capital += valorLote; saludable.unidades += cantidad
-      }
-    })
-    
-    riesgo.criticos = Object.values(criticosAgrupados).sort((a, b) => new Date(a.fechaVenc).getTime() - new Date(b.fechaVenc).getTime())
-    setCapitalEnRiesgo(riesgo)
-    setCapitalSaludable(saludable)
-  }
-
-  const getMargenInfo = (precio: number, costo: number) => {
-      if (!costo || costo === 0) return { margen: 100, ganancia: precio, color: 'text-gray-400' }
-      const ganancia = precio - costo
-      const margen = (ganancia / costo) * 100
-      return { margen: margen.toFixed(0), ganancia: ganancia.toFixed(0), color: margen < 30 ? 'text-red-600' : 'text-emerald-600' }
-  }
-
+  // --- 2. CARGA DE DATOS FILTRADOS ---
   const fetchData = useCallback(async () => {
-    // A. Inventario (Vista)
-    const { data: dataProductosView, error: errorProductosView } = await supabase
-        .from('view_productos_con_stock') 
-        .select('*')
-        .order('nombre', { ascending: true })
-        
-    if (errorProductosView) {
-        setProductos([])
-    } else {
-        const productosCalculados = (dataProductosView as Producto[]) || []
-        setProductos(productosCalculados)
+    if (!currentSucursalId || !organizationId) return
 
-        // SUGERENCIAS (Lógica igual, OK)
-        const nuevasSugerencias: SugerenciaCompra[] = []
-        const productosBajos = productosCalculados.filter(p => 
-            (p.stock_disponible || 0) <= UMBRAL_STOCK_BAJO && 
-            !["Carga Virtual", "Carga SUBE", "Servicios"].includes(p.nombre)
-        )
+    // A. Inventario con Stock Local
+    const { data: cat } = await supabase.from('productos').select('*').eq('organization_id', organizationId).order('nombre')
+    const { data: stk } = await supabase.from('view_productos_con_stock').select('id, stock_disponible').eq('sucursal_id', currentSucursalId)
 
-        for (const prod of productosBajos) {
-            const { data: historial } = await supabase
-                .from('stock')
-                .select('costo_unitario_historico, proveedores(nombre)')
-                .eq('producto_id', prod.id)
-                .not('proveedor_id', 'is', null) 
-                .order('created_at', { ascending: false }) // Buscar el último ingreso
-                .limit(1)
-            
-            let mejorProv = null
-            let mejorPrecio = null
-            if (historial && historial.length > 0) {
-                // @ts-ignore
-                mejorProv = historial[0].proveedores?.nombre
-                mejorPrecio = historial[0].costo_unitario_historico
+    if (cat) {
+        const fusion = cat.map(p => ({ ...p, stock_disponible: stk?.find(s => s.id === p.id)?.stock_disponible || 0 }))
+        setProductos(fusion)
+
+        // Sugerencias de Reposición
+        const bajas = fusion.filter(p => (p.stock_disponible || 0) <= UMBRAL_STOCK_BAJO && p.categoria !== "Servicios")
+        const sugs = []
+        for (const p of bajas) {
+             const { data: h } = await supabase.from('stock').select('costo_unitario_historico, proveedores(nombre)').eq('producto_id', p.id).not('proveedor_id', 'is', null).order('created_at', { ascending: false }).limit(1)
+             sugs.push({ id: p.id, producto: p.nombre, emoji: p.emoji, stock_actual: p.stock_disponible, mejor_proveedor: h?.[0]?.proveedores ? (h[0].proveedores as any).nombre : null, mejor_precio: h?.[0]?.costo_unitario_historico })
+        }
+        setSugerencias(sugs)
+    }
+
+    // B. Ventas y Pagos
+    let vQ = supabase.from('stock').select('*, productos(nombre, precio_venta, emoji)').eq('sucursal_id', currentSucursalId).eq('tipo_movimiento', 'salida')
+    if (dateRange?.from) vQ = vQ.gte('fecha_venta', dateRange.from.toISOString())
+    if (dateRange?.to) vQ = vQ.lte('fecha_venta', dateRange.to.toISOString())
+    
+    const { data: vData } = await vQ.order('fecha_venta', { ascending: false }).returns<VentaJoin[]>()
+    if (vData) {
+        setVentasRecientes(vData)
+        const brk: PaymentBreakdown = { efectivo: 0, tarjeta: 0, transferencia: 0, otro: 0, billetera_virtual: 0 }
+        let tot = 0
+        const counts: Record<string, number> = {}
+        vData.forEach(v => {
+            const val = (v.precio_venta_historico || v.productos?.precio_venta || 0) * (v.cantidad || 1)
+            tot += val
+            const m = (v.metodo_pago || 'efectivo') as keyof PaymentBreakdown
+            brk[brk.hasOwnProperty(m) ? m : 'otro'] += val
+            counts[v.productos?.nombre || "Varios"] = (counts[v.productos?.nombre || "Varios"] || 0) + (v.cantidad || 1)
+        })
+        setTotalVendido(tot)
+        setPaymentBreakdown(brk)
+        setTopProductos(Object.entries(counts).map(([name, count]) => ({ name, count })).sort((a,b) => b.count - a.count).slice(0, 5))
+    }
+
+    // C. Turnos y Auditoría
+    let cQ = supabase.from('caja_diaria').select(`*, perfiles(nombre), misiones(*), movimientos_caja(*)`).eq('sucursal_id', currentSucursalId)
+    if (dateRange?.from) cQ = cQ.gte('fecha_apertura', dateRange.from.toISOString())
+    if (dateRange?.to) cQ = cQ.lte('fecha_apertura', dateRange.to.toISOString())
+    const { data: cData } = await cQ.order('fecha_apertura', { ascending: false }).returns<TurnoAudit[]>()
+    setTurnosAudit(cData || [])
+
+    // D. Vencimientos
+    const { data: stkRiesgo } = await supabase.from('stock').select('*, productos(nombre, precio_venta, emoji)').eq('sucursal_id', currentSucursalId).eq('tipo_movimiento', 'entrada').eq('estado', 'disponible')
+    if (stkRiesgo) {
+        const hoy = new Date(); const limite = new Date(); limite.setDate(hoy.getDate() + 10)
+        let cap = 0, units = 0; const crit: any[] = []
+        stkRiesgo.forEach(i => {
+            const vDate = i.fecha_vencimiento ? new Date(i.fecha_vencimiento) : null
+            if (vDate && vDate <= limite) {
+                cap += (i.productos?.precio_venta || 0) * (i.cantidad || 1)
+                units += (i.cantidad || 1)
+                crit.push({ ...i, nombre: i.productos?.nombre, emoji: i.productos?.emoji })
             }
-
-            nuevasSugerencias.push({
-                id: prod.id,
-                producto: prod.nombre,
-                emoji: prod.emoji,
-                stock_actual: prod.stock_disponible || 0,
-                mejor_proveedor: mejorProv,
-                mejor_precio_historico: mejorPrecio,
-                es_saldo: false 
-            })
-        }
-
-        const { data: proveedoresServicios } = await supabase
-            .from('proveedores')
-            .select('id, nombre, saldo_actual')
-            .ilike('rubro', '%servicios%')
-        
-        if (proveedoresServicios) {
-            proveedoresServicios.forEach(prov => {
-                if ((prov.saldo_actual || 0) < UMBRAL_SALDO_BAJO) {
-                    nuevasSugerencias.push({
-                        id: `prov-${prov.id}`,
-                        producto: `Saldo ${prov.nombre}`,
-                        emoji: "💳",
-                        stock_actual: prov.saldo_actual || 0,
-                        mejor_proveedor: "Plataforma",
-                        mejor_precio_historico: null,
-                        es_saldo: true 
-                    })
-                }
-            })
-        }
-
-        setSugerencias(nuevasSugerencias)
+        })
+        setCapitalEnRiesgo({ capital: cap, unidades: units, criticos: crit.sort((a,b) => new Date(a.fecha_vencimiento).getTime() - new Date(b.fecha_vencimiento).getTime()) })
     }
+  }, [currentSucursalId, organizationId, dateRange])
 
-    // Capital en Riesgo (Lotes pendientes de consumo)
-    // Buscamos solo entradas para calcular lo que podría vencerse
-    const { data: dataStock } = await supabase
-        .from('stock')
-        .select('*, productos(nombre, precio_venta, emoji)')
-        .eq('tipo_movimiento', 'entrada') // ✅ Solo entradas
-        .eq('estado', 'disponible') // Opcional, según tu lógica de borrado
+  useEffect(() => { setLoading(true); fetchData().finally(() => setLoading(false)) }, [fetchData])
 
-    if (dataStock) calcularMetricasStock(dataStock)
+  // --- 3. BUSINESS INTELLIGENCE (MEMOS) ---
 
-    // B. Ventas
-    let ventasQuery = supabase.from('stock')
-        .select('id, fecha_venta, metodo_pago, costo_unitario_historico, notas, cantidad, productos(nombre, precio_venta, emoji)') // ✅ AGREGADO "cantidad"
-        .eq('tipo_movimiento', 'salida') // ✅ Usamos tipo_movimiento en lugar de estado
-        
-    if (dateRange?.from) { ventasQuery = ventasQuery.gte('fecha_venta', format(startOfDay(dateRange.from), 'yyyy-MM-dd HH:mm:ss')) }
-    if (dateRange?.to) { ventasQuery = ventasQuery.lte('fecha_venta', format(endOfDay(dateRange.to), 'yyyy-MM-dd HH:mm:ss')) }
-    
-    const { data: dataVentas } = await ventasQuery.order('fecha_venta', { ascending: false }).returns<VentaJoin[]>()
-    if (dataVentas) {
-      setVentasRecientes(dataVentas)
-      calcularMetricasVentas(dataVentas)
-      
-      const conteoProductos: Record<string, number> = {}
-      dataVentas.forEach(v => { 
-          const nombre = v.productos?.nombre || "Varios"
-          conteoProductos[nombre] = (conteoProductos[nombre] || 0) + (v.cantidad || 1) // ✅ Sumar cantidad real
-      })
-      const ranking = Object.entries(conteoProductos).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 5) 
-      setTopProductos(ranking)
-    }
-
-    // C. Supervisión
-    let cajasQuery = supabase.from('caja_diaria').select(`*, perfiles(nombre), misiones(*), movimientos_caja(*)`).order('fecha_apertura', { ascending: false })
-    if (dateRange?.from) { cajasQuery = cajasQuery.gte('fecha_apertura', format(startOfDay(dateRange.from), 'yyyy-MM-dd HH:mm:ss')) }
-    if (dateRange?.to) { cajasQuery = cajasQuery.lte('fecha_apertura', format(endOfDay(dateRange.to), 'yyyy-MM-dd HH:mm:ss')) }
-    const { data: dataCajas } = await cajasQuery.returns<TurnoAudit[]>()
-    setTurnosAudit(dataCajas || [])
-
-  }, [dateRange]) 
-
-  useEffect(() => {
-    setLoading(true)
-    fetchData().finally(() => setLoading(false))
-  }, [fetchData])
-
-  // --- MEMOS ---
-  
-  const matrizRentabilidad = useMemo(() => {
-    if (ventasRecientes.length === 0 || productos.length === 0) return { estrellas: [], vacas: [], interrogantes: [], huesos: [] };
-    const conteoVentas: Record<string, number> = {}
-    ventasRecientes.forEach(v => { 
-        const nombre = v.productos?.nombre || "Desconocido"
-        conteoVentas[nombre] = (conteoVentas[nombre] || 0) + (v.cantidad || 1) // ✅ Sumar cantidad
-    })
-    const estrellas: any[] = [], vacas: any[] = [], interrogantes: any[] = [], huesos: any[] = []    
-    const totalVentas = Object.values(conteoVentas).reduce((a, b) => a + b, 0)
-    const promedioVentas = totalVentas / (Object.keys(conteoVentas).length || 1)
-    
-    productos.forEach(p => {
-        const ventas = conteoVentas[p.nombre] || 0
-        const costo = p.costo || 1
-        const margen = ((p.precio_venta - costo) / costo) * 100
-        const esAltaRotacion = ventas >= promedioVentas
-        const esAltoMargen = margen >= 40 
-        const data = { ...p, ventas, margen: margen.toFixed(0) }
-        if (esAltaRotacion && esAltoMargen) estrellas.push(data)
-        else if (esAltaRotacion && !esAltoMargen) vacas.push(data)
-        else if (!esAltaRotacion && esAltoMargen) interrogantes.push(data)
-        else huesos.push(data)
-    })
-    return { estrellas, vacas, interrogantes, huesos }
-  }, [ventasRecientes, productos])
-
-  const metricasFinancieras = useMemo(() => {
-    let ventaBruta = 0, costoMercaderia = 0, ventaBlanco = 0, ventaNegro = 0 
+  const biMetrics = useMemo(() => {
+    let bruto = 0, costo = 0, blanco = 0
     ventasRecientes.forEach(v => {
         const cant = v.cantidad || 1
-        const precio = (v.productos?.precio_venta || 0) * cant
-        const costo = (v.costo_unitario_historico || ((v.productos?.precio_venta || 0) * 0.5)) * cant 
-        
-        ventaBruta += precio; costoMercaderia += costo
-        if (['tarjeta', 'transferencia', 'billetera_virtual'].includes(v.metodo_pago)) ventaBlanco += precio; else ventaNegro += precio
+        bruto += (v.precio_venta_historico || v.productos?.precio_venta || 0) * cant
+        costo += (v.costo_unitario_historico || 0) * cant
+        if (['tarjeta', 'transferencia', 'billetera_virtual'].includes(v.metodo_pago)) blanco += (v.precio_venta_historico || v.productos?.precio_venta || 0) * cant
     })
-    const gananciaNeta = ventaBruta - costoMercaderia
-    const margenGeneral = ventaBruta > 0 ? (gananciaNeta / ventaBruta) * 100 : 0
-    return { ventaBruta, costoMercaderia, gananciaNeta, margenGeneral, ventaBlanco, ventaNegro }
+    return { bruto, neta: bruto - costo, margen: bruto > 0 ? ((bruto - costo) / bruto) * 100 : 0, blanco, negro: bruto - blanco }
   }, [ventasRecientes])
+
+  const matrizRentabilidad = useMemo(() => {
+    const stars: any[] = [], bones: any[] = []
+    productos.forEach(p => {
+        const sales = ventasRecientes.filter(v => v.productos?.nombre === p.nombre).reduce((acc, curr) => acc + (curr.cantidad || 1), 0)
+        const marg = p.costo > 0 ? ((p.precio_venta - p.costo) / p.costo) * 100 : 0
+        if (sales > 5 && marg > 40) stars.push({ ...p, sales, marg: marg.toFixed(0) })
+        else if (sales === 0) bones.push(p)
+    })
+    return { stars: stars.sort((a,b) => b.sales - a.sales), bones: bones.slice(0, 10) }
+  }, [ventasRecientes, productos])
 
   const chartData = useMemo(() => {
-    const agrupado: { [key: string]: number } = {}
-    const ventasCronologicas = [...ventasRecientes].reverse()
-    ventasCronologicas.forEach(v => {
-        if (!v.fecha_venta) return
-        const fechaKey = format(parseISO(v.fecha_venta), 'dd/MM')
-        const monto = (v.productos?.precio_venta ?? 0) * (v.cantidad || 1) // ✅ Multiplicar cantidad
-        agrupado[fechaKey] = (agrupado[fechaKey] || 0) + monto
+    const map: Record<string, number> = {}
+    ventasRecientes.slice().reverse().forEach(v => {
+        const k = format(parseISO(v.fecha_venta), 'dd/MM')
+        map[k] = (map[k] || 0) + (v.precio_venta_historico || v.productos?.precio_venta || 0) * (v.cantidad || 1)
     })
-    return Object.entries(agrupado).map(([fecha, total]) => ({ fecha, total }))
+    return Object.entries(map).map(([fecha, total]) => ({ fecha, total }))
   }, [ventasRecientes])
 
-  const alertasStockBajo = useMemo(() => {
-      return productos
-        .filter(p => (p.stock_disponible || 0) <= UMBRAL_STOCK_BAJO && !["Carga Virtual", "Carga SUBE", "Servicios"].includes(p.nombre))
-        .sort((a, b) => (a.stock_disponible || 0) - (b.stock_disponible || 0))
-  }, [productos])
-
   const dateRangeLabel = useMemo(() => {
-    if (!dateRange?.from) return "Selecciona Rango"
+    if (!dateRange?.from) return "Filtro de Fecha"
     const from = format(dateRange.from, 'dd/MM', { locale: es })
     if (!dateRange.to || format(dateRange.from, 'yyyy-MM-dd') === format(dateRange.to, 'yyyy-MM-dd')) return `Día: ${from}`
     const to = format(dateRange.to, 'dd/MM', { locale: es })
     return `${from} - ${to}`
   }, [dateRange])
 
-  const inventarioFiltrado = productos.filter((item) => {
-    if (["Carga Virtual", "Carga SUBE", "Servicios"].includes(item.nombre)) return false
-    const term = searchQuery.toLowerCase()
-    return item.nombre.toLowerCase().includes(term) || (item.codigo_barras && item.codigo_barras.includes(term))
-  })
+  // --- 4. ACCIONES DE AUDITORÍA ---
 
-  // --- HANDLERS ---
-  
-  const handlePrintTurno = (turno: TurnoAudit, ventasTurno: VentaJoin[]) => {
-      // ✅ CALCULO CORRECTO DE TOTALES MULTIPLICANDO CANTIDAD
-      const facturacionTotal = ventasTurno.reduce((acc, curr) => acc + ((curr.productos?.precio_venta || 0) * (curr.cantidad || 1)), 0)
-      const facturacionEfectivo = ventasTurno
-        .filter(v => v.metodo_pago === 'efectivo' || !v.metodo_pago)
-        .reduce((acc, curr) => acc + ((curr.productos?.precio_venta || 0) * (curr.cantidad || 1)), 0)
-      
-      const totalGastos = turno.movimientos_caja?.filter(m => m.tipo === 'egreso').reduce((acc, curr) => acc + curr.monto, 0) || 0
-      const totalIngresosExtra = turno.movimientos_caja?.filter(m => m.tipo === 'ingreso').reduce((acc, curr) => acc + curr.monto, 0) || 0
-      
-      const cajaEsperada = turno.monto_inicial + facturacionEfectivo + totalIngresosExtra - totalGastos
-      const diferencia = (turno.monto_final || 0) - cajaEsperada
-
-      generarTicketPDF({
-          empleado: turno.perfiles?.nombre || "Empleado",
-          fechaApertura: format(parseISO(turno.fecha_apertura), 'dd/MM/yyyy HH:mm'),
-          fechaCierre: turno.fecha_cierre ? format(parseISO(turno.fecha_cierre), 'dd/MM/yyyy HH:mm') : null,
-          montoInicial: turno.monto_inicial,
-          totalVentas: facturacionTotal,
-          totalGastos: totalGastos,
-          cajaEsperada: cajaEsperada,
-          cajaReal: turno.monto_final,
-          diferencia: diferencia,
-          gastos: turno.movimientos_caja?.filter(m => m.tipo === 'egreso') || []
-      })
-      
-      toast.success("PDF Generado correctamente")
-  }
-
-  const loadPriceHistory = useCallback(async (productId: string) => {
-    if (!productId) return;
-    setLoading(true);
-    try {
-        const { data, error } = await supabase.from('historial_precios').select(`*, perfiles(nombre)`).eq('producto_id', productId).order('fecha_cambio', { ascending: false });
-        if (error) throw error;
-        setHistoryData(data as HistorialPrecio[] || []);
-        setShowPriceHistoryModal(true);
-    } catch (error) { toast.error("Error al cargar historial"); } 
-    finally { setLoading(false); }
-  }, []);
-
-  const handleSaveProduct = async () => {
-      if (!editingProduct) return
-      setActionLoading(true)
-      try {
-          const { data: oldProduct, error: fetchError } = await supabase.from('productos').select('precio_venta, costo').eq('id', editingProduct.id).single();
-          if (fetchError) throw fetchError;
-          const { error: updateError } = await supabase.from('productos').update({
-              nombre: editingProduct.nombre, categoria: editingProduct.categoria, precio_venta: editingProduct.precio_venta, costo: editingProduct.costo || 0, emoji: editingProduct.emoji, codigo_barras: editingProduct.codigo_barras || null
-          }).eq('id', editingProduct.id)
-          if (updateError) throw updateError
-          const precioCambio = oldProduct.precio_venta !== editingProduct.precio_venta;
-          const costoCambio = oldProduct.costo !== editingProduct.costo;
-          if (precioCambio || costoCambio) {
-              const { data: { user } } = await supabase.auth.getUser();
-              const { error: historyError } = await supabase.from('historial_precios').insert({
-                  producto_id: editingProduct.id, precio_venta_anterior: oldProduct.precio_venta, precio_venta_nuevo: editingProduct.precio_venta, costo_anterior: oldProduct.costo, costo_nuevo: editingProduct.costo, empleado_id: user?.id,
-              });
-              if (historyError) console.error("Error registrando historial:", historyError);
-          }
-          toast.success("Producto Actualizado")
-          setEditingProduct(null)
-          fetchData()
-      } catch (error: any) { toast.error("Error", { description: error.message }) } 
-      finally { setActionLoading(false) }
-  }
-
-  const handleDeleteProduct = async (id: string) => {
-      if (!confirm("⚠️ ¿Estás seguro? Esto borrará el producto...")) return
-      try {
-          await supabase.from('stock').delete().eq('producto_id', id)
-          await supabase.from('historial_precios').delete().eq('producto_id', id)
-          await supabase.from('productos').delete().eq('id', id)
-          toast.success("Producto eliminado")
-          fetchData()
-      } catch (error: any) { console.error(error); toast.error("Error al eliminar") }
-  }
-
-  const loadStockBatches = async (productId: string) => {
-      setManagingStockId(productId)
-      // Buscamos solo entradas activas para auditar
-      const { data } = await supabase.from('stock')
-        .select('*')
-        .eq('producto_id', productId)
-        .eq('tipo_movimiento', 'entrada')
-        .order('created_at', { ascending: false })
+  const loadStockBatches = async (pid: string) => {
+      setManagingStockId(pid)
+      const { data } = await supabase.from('stock').select('*').eq('producto_id', pid).eq('tipo_movimiento', 'entrada').eq('sucursal_id', currentSucursalId).order('created_at', { ascending: false })
       setStockBatchList(data || [])
   }
 
-  const handleDeleteStockItem = async (stockId: string) => {
-      try {
-          await supabase.from('stock').delete().eq('id', stockId)
-          toast.success("Item eliminado")
-          setStockBatchList(prev => prev.filter(i => i.id !== stockId))
-          fetchData() 
-      } catch (error) { toast.error("Error") }
+  const handleUpdateProduct = async () => {
+    if (!editingProduct) return; setActionLoading(true)
+    try {
+        const { data: old } = await supabase.from('productos').select('precio_venta, costo').eq('id', editingProduct.id).single()
+        await supabase.from('productos').update({ 
+            nombre: editingProduct.nombre, precio_venta: editingProduct.precio_venta, costo: editingProduct.costo, 
+            categoria: editingProduct.categoria, emoji: editingProduct.emoji, codigo_barras: editingProduct.codigo_barras || null 
+        }).eq('id', editingProduct.id)
+        
+        if (old?.precio_venta !== editingProduct.precio_venta || old?.costo !== editingProduct.costo) {
+            const { data: { user } } = await supabase.auth.getUser()
+            await supabase.from('historial_precios').insert({
+                organization_id: organizationId, producto_id: editingProduct.id, 
+                precio_venta_anterior: old?.precio_venta, precio_venta_nuevo: editingProduct.precio_venta,
+                costo_anterior: old?.costo, costo_nuevo: editingProduct.costo, empleado_id: user?.id, fecha_cambio: new Date().toISOString()
+            })
+        }
+        toast.success("Producto actualizado"); setEditingProduct(null); fetchData()
+    } catch (e: any) { toast.error(e.message) } finally { setActionLoading(false) }
   }
 
-  // --- RENDER (Sin cambios grandes, solo lógica) ---
+  const loadPriceHistory = async (pid: string) => {
+    setLoading(true)
+    const { data } = await supabase.from('historial_precios').select('*, perfiles(nombre)').eq('producto_id', pid).order('fecha_cambio', { ascending: false })
+    setHistoryData(data as any || [])
+    setShowPriceHistoryModal(true); setLoading(false)
+  }
+
+  const handlePrintTurno = (t: TurnoAudit) => {
+    const vT = ventasRecientes.filter(v => {
+        const fV = parseISO(v.fecha_venta); const fA = parseISO(t.fecha_apertura); const fC = t.fecha_cierre ? parseISO(t.fecha_cierre) : new Date()
+        return fV >= fA && fV <= fC
+    })
+    const totV = vT.reduce((acc, curr) => acc + (curr.precio_venta_historico || curr.productos?.precio_venta || 0) * (curr.cantidad || 1), 0)
+    const totE = vT.filter(v => v.metodo_pago === 'efectivo').reduce((acc, curr) => acc + (curr.precio_venta_historico || curr.productos?.precio_venta || 0) * (curr.cantidad || 1), 0)
+    const gast = t.movimientos_caja?.filter(m => m.tipo === 'egreso').reduce((a,b) => a + b.monto, 0) || 0
+    const extra = t.movimientos_caja?.filter(m => m.tipo === 'ingreso').reduce((a,b) => a + b.monto, 0) || 0
+    const esp = t.monto_inicial + totE + extra - gast
+
+    generarTicketPDF({
+        empleado: t.perfiles?.nombre || "Empleado", fechaApertura: format(parseISO(t.fecha_apertura), 'dd/MM/yyyy HH:mm'),
+        fechaCierre: t.fecha_cierre ? format(parseISO(t.fecha_cierre), 'dd/MM/yyyy HH:mm') : null,
+        montoInicial: t.monto_inicial, totalVentas: totV, totalGastos: gast, cajaEsperada: esp, cajaReal: t.monto_final,
+        diferencia: (t.monto_final || 0) - esp, gastos: t.movimientos_caja?.filter(m => m.tipo === 'egreso') || []
+    })
+    toast.success("Ticket generado")
+  }
+
+  // --- 5. RENDER PRINCIPAL ---
+
+  const inventarioFiltrado = productos.filter(p => p.nombre.toLowerCase().includes(searchQuery.toLowerCase()) || p.codigo_barras?.includes(searchQuery))
+
   return (
-    <div className="min-h-screen bg-background pb-24">
-      {/* HEADER */}
-      <div className="bg-gradient-to-br from-primary via-primary to-chart-1 text-primary-foreground p-6 rounded-b-3xl shadow-xl">
-        <div className="flex justify-between items-center mb-4">
-            <Button variant="ghost" size="icon" onClick={onBack} className="hover:bg-primary-foreground/20 text-primary-foreground"><ArrowLeft className="h-6 w-6" /></Button>
-            <div className="text-right"><h1 className="text-2xl font-bold">Torre de Control</h1><p className="text-xs text-primary-foreground/70">Responsable</p></div>
+    <div className="min-h-screen bg-slate-50 pb-24">
+      {/* 🚀 HEADER MULTI-SUCURSAL */}
+      <div className="bg-slate-900 text-white p-6 rounded-b-[3rem] shadow-2xl">
+        <div className="flex justify-between items-center mb-6">
+            <Button variant="ghost" size="icon" onClick={onBack} className="text-white hover:bg-white/10"><ArrowLeft className="h-6 w-6" /></Button>
+            
+            <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 bg-white/10 rounded-full px-4 py-1.5 border border-white/10 backdrop-blur-md">
+                    <MapPin className="h-3.5 w-3.5 text-blue-400" />
+                    <Select value={currentSucursalId} onValueChange={setCurrentSucursalId}>
+                        <SelectTrigger className="h-7 w-[150px] border-0 bg-transparent p-0 text-xs font-bold focus:ring-0">
+                            <SelectValue placeholder="Sucursal" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {sucursales.map(s => <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <Dialog>
+                    <DialogTrigger asChild><Button variant="ghost" size="icon" className="h-9 w-9 rounded-full bg-white/5 hover:bg-white/20"><Settings className="h-4 w-4" /></Button></DialogTrigger>
+                    <DialogContent className="sm:max-w-lg">
+                        <DialogHeader><DialogTitle>Configuración de Sucursales</DialogTitle></DialogHeader>
+                        <GestionSucursales onUpdate={fetchContext} />
+                    </DialogContent>
+                </Dialog>
+            </div>
         </div>
-        <div className="flex gap-2 mt-4 overflow-x-auto pb-2 scrollbar-hide">
-          <Button onClick={() => setActiveTab("sales")} variant={activeTab === "sales" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><DollarSign className="mr-2 h-4 w-4" /> Caja y Facturación</Button>
-          <Button onClick={() => setActiveTab("finance")} variant={activeTab === "finance" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><TrendingUp className="mr-2 h-4 w-4" /> Rentabilidad (BI)</Button>
-          <Button onClick={() => setActiveTab("supervision")} variant={activeTab === "supervision" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Eye className="mr-2 h-4 w-4" /> Supervisión</Button>
-          <Button onClick={() => setActiveTab("alerts")} variant={activeTab === "alerts" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><AlertTriangle className="mr-2 h-4 w-4" /> Riesgos</Button>
-          <Button onClick={() => setActiveTab("inventory")} variant={activeTab === "inventory" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Package className="mr-2 h-4 w-4" /> Stock</Button>
-          <Button onClick={() => setActiveTab("catalog")} variant={activeTab === "catalog" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Plus className="mr-2 h-4 w-4" /> Catálogo</Button>
-          <Button onClick={() => setActiveTab("suppliers")} variant={activeTab === "suppliers" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Users className="mr-2 h-4 w-4" /> Proveedores</Button>
-          <Button onClick={() => setActiveTab("team")} variant={activeTab === "team" ? "secondary" : "default"} size="sm" className="bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm whitespace-nowrap"><Briefcase className="mr-2 h-4 w-4" /> Equipo</Button>
+        
+        <div className="flex justify-between items-end">
+            <div>
+                <h1 className="text-2xl font-black tracking-tight flex items-center gap-2 uppercase">Torre de Control <Sparkles className="h-5 w-5 text-yellow-400" /></h1>
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.2em]">Panel Administrativo Global</p>
+            </div>
+            <div className="text-right">
+                <p className="text-[10px] text-slate-400 font-bold uppercase">Capital Neto en Stock</p>
+                <p className="text-xl font-black text-emerald-400">{formatMoney(productos.reduce((a,b) => a + (b.costo * (b.stock_disponible || 0)), 0))}</p>
+            </div>
+        </div>
+
+        {/* NAVEGACIÓN */}
+        <div className="flex gap-2 mt-8 overflow-x-auto pb-2 scrollbar-hide">
+          {[
+            { id: "sales", label: "Caja y Ventas", icon: DollarSign },
+            { id: "inventory", label: "Inventario Real", icon: Package },
+            { id: "finance", label: "Inteligencia BI", icon: TrendingUp },
+            { id: "supervision", label: "Auditoría Turnos", icon: Eye },
+            { id: "catalog", label: "Dato Maestro", icon: Plus },
+            { id: "suppliers", label: "Logística", icon: Users },
+            { id: "team", label: "Mi Equipo", icon: Briefcase },
+            { id: "alerts", label: "Gestión Riesgos", icon: AlertTriangle },
+          ].map(t => (
+            <Button key={t.id} onClick={() => setActiveTab(t.id as any)} variant={activeTab === t.id ? "secondary" : "ghost"} size="sm" className="rounded-full text-xs font-bold whitespace-nowrap">
+                <t.icon className="mr-1.5 h-3.5 w-3.5" /> {t.label}
+            </Button>
+          ))}
         </div>
       </div>
 
       <div className="p-4 space-y-4">
-        {/* FILTRO DE FECHA */}
-        {(activeTab === "sales" || activeTab === "supervision" || activeTab === "finance") && (
-             <div className="flex gap-2 items-center mb-4">
-                <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-                    <PopoverTrigger asChild><Button id="date" variant={"outline"} className={cn("w-full justify-start text-left font-normal h-12 text-base border-2", !dateRange && "text-muted-foreground")}><CalendarIcon className="mr-2 h-5 w-5" />{dateRangeLabel}</Button></PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="center"><Calendar initialFocus mode="range" defaultMonth={dateRange?.from} selected={dateRange} onSelect={(range) => { setDateRange(range); if(range?.to) setIsCalendarOpen(false) }} numberOfMonths={1} locale={es} /></PopoverContent>
-                </Popover>
-            </div>
+        {/* FILTRO DE FECHA GLOBAL */}
+        {["sales", "supervision", "finance"].includes(activeTab) && (
+            <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start h-14 border-2 shadow-sm bg-white font-black text-slate-700">
+                        <CalendarIcon className="mr-2 h-5 w-5 text-primary" /> {dateRangeLabel.toUpperCase()}
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="center">
+                    <Calendar mode="range" selected={dateRange} onSelect={r => { setDateRange(r); if(r?.to) setIsCalendarOpen(false) }} locale={es} />
+                </PopoverContent>
+            </Popover>
         )}
-        
-        {/* PESTAÑA FINANZAS */}
-        {activeTab === "finance" && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-                <div className="grid grid-cols-2 gap-4">
-                    <Card className="p-4 bg-emerald-50 border-emerald-200 border-l-4">
-                        <p className="text-xs font-bold uppercase text-emerald-600 mb-1 flex items-center gap-1"><DollarSign className="h-3 w-3" /> Ganancia Neta Est.</p>
-                        <h3 className="text-2xl font-black text-emerald-900">{formatMoney(metricasFinancieras.gananciaNeta)}</h3>
-                        <p className="text-[10px] text-emerald-700 font-medium mt-1">Margen Promedio: {metricasFinancieras.margenGeneral.toFixed(1)}%</p>
-                    </Card>
-                    <Card className="p-4 bg-slate-50 border-slate-200 border-l-4">
-                        <p className="text-xs font-bold uppercase text-slate-500 mb-1 flex items-center gap-1"><ShieldCheck className="h-3 w-3" /> Estado Fiscal</p>
-                        <div className="space-y-1 mt-2">
-                            <div className="flex justify-between text-xs"><span>Declarado</span><span className="font-bold">{formatMoney(metricasFinancieras.ventaBlanco)}</span></div>
-                            <Progress value={(metricasFinancieras.ventaBlanco / (metricasFinancieras.ventaBruta || 1)) * 100} className="h-1.5" />
-                            <div className="flex justify-between text-[10px] text-muted-foreground pt-1"><span>Efectivo</span><span>{formatMoney(metricasFinancieras.ventaNegro)}</span></div>
-                        </div>
-                    </Card>
-                </div>
+
+        {/* --- PESTAÑA: SALES (CAJA) --- */}
+        {activeTab === "sales" && (
+            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+                <Card className="p-8 bg-gradient-to-br from-blue-600 to-indigo-800 text-white border-0 shadow-xl relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4 opacity-10"><DollarSign className="h-32 w-32 rotate-12"/></div>
+                    <p className="text-blue-100 text-[10px] font-black uppercase tracking-widest mb-1">Facturación Sucursal Seleccionada</p>
+                    <h2 className="text-5xl font-black tracking-tighter">{formatMoney(totalVendido)}</h2>
+                    <div className="flex justify-between items-center mt-8 pt-6 border-t border-white/10">
+                        <span className="text-xs font-bold text-blue-100 flex items-center gap-1.5"><ShoppingBag className="h-4 w-4" /> {ventasRecientes.length} tickets emitidos</span>
+                        <Button variant="secondary" size="sm" className="font-black text-[10px] px-4" onClick={() => setShowSalesDetail(true)}>VER DETALLE OPERATIVO</Button>
+                    </div>
+                </Card>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Card className="p-4 border-l-4 border-l-yellow-400 bg-yellow-50/50">
-                        <h3 className="font-bold text-yellow-700 flex items-center gap-2"><Star className="h-5 w-5 fill-yellow-400" /> Productos Estrella</h3>
-                        <p className="text-xs text-muted-foreground mb-3">Se venden mucho y ganas bien. ¡Nunca rompas stock!</p>
-                        <div className="space-y-2 max-h-40 overflow-y-auto">
-                            {matrizRentabilidad.estrellas.map((p, i) => (<div key={i} className="flex justify-between text-sm bg-white p-2 rounded shadow-sm"><span>{p.emoji} {p.nombre}</span><span className="font-bold text-emerald-600">{p.margen}% Mg.</span></div>))}
-                            {matrizRentabilidad.estrellas.length === 0 && <p className="text-xs italic text-center py-2">Sin datos suficientes aún.</p>}
+                    <Card className="p-5 border-2 shadow-sm">
+                        <h3 className="text-[10px] font-black uppercase text-slate-400 mb-6 tracking-widest flex items-center gap-2"><CreditCard className="h-4 w-4" /> Composición de Ingresos</h3>
+                        <div className="space-y-5">
+                            {Object.entries(paymentBreakdown).map(([k, v]) => v > 0 && (
+                                <div key={k}>
+                                    <div className="flex justify-between text-xs font-black mb-2 uppercase">
+                                        <span className="text-slate-600">{k.replace('_', ' ')}</span>
+                                        <span className="font-mono text-slate-900">{formatMoney(v)}</span>
+                                    </div>
+                                    <Progress value={(v/totalVendido)*100} className="h-2 bg-slate-100" />
+                                </div>
+                            ))}
                         </div>
                     </Card>
-                    <Card className="p-4 border-l-4 border-l-gray-400 bg-gray-50/50">
-                        <h3 className="font-bold text-gray-700 flex items-center gap-2"><Trash2 className="h-5 w-5" /> Productos "Hueso"</h3>
-                        <p className="text-xs text-muted-foreground mb-3">No se venden y ocupan espacio. ¡Haz una oferta o liquídalos!</p>
-                        <div className="space-y-2 max-h-40 overflow-y-auto">
-                            {matrizRentabilidad.huesos.slice(0, 5).map((p, i) => (<div key={i} className="flex justify-between text-sm bg-white p-2 rounded shadow-sm opacity-70"><span>{p.emoji} {p.nombre}</span><span className="text-xs font-mono">0 Ventas recientes</span></div>))}
-                            {matrizRentabilidad.huesos.length > 5 && <p className="text-xs text-center mt-1">...y {matrizRentabilidad.huesos.length - 5} más.</p>}
+
+                    <Card className="p-5 border-2 shadow-sm">
+                        <h3 className="text-[10px] font-black uppercase text-slate-400 mb-6 tracking-widest flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Curva de Ventas</h3>
+                        <div className="h-[200px] w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={chartData}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
+                                    <XAxis dataKey="fecha" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} />
+                                    <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)'}} />
+                                    <Bar dataKey="total" fill="oklch(0.6 0.2 250)" radius={[4, 4, 0, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
                         </div>
                     </Card>
                 </div>
             </div>
         )}
 
-        {/* --- SUPERVISIÓN --- */}
-        {activeTab === "supervision" && (
-            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
-                <h3 className="text-lg font-bold text-foreground flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" /> Historial de Turnos</h3>
-                {turnosAudit.length === 0 ? <p className="text-center text-muted-foreground">Sin turnos</p> : 
-                    <div className="space-y-3">
-                        {turnosAudit.map((turno) => {
-                            const ventasTurno = ventasRecientes.filter(v => { const fechaVenta = parseISO(v.fecha_venta); const apertura = parseISO(turno.fecha_apertura); const cierre = turno.fecha_cierre ? parseISO(turno.fecha_cierre) : new Date(); return fechaVenta >= apertura && fechaVenta <= cierre });
-                            
-                            // ✅ TOTALES CORREGIDOS
-                            const facturacionTotal = ventasTurno.reduce((acc, curr) => acc + ((curr.productos?.precio_venta || 0) * (curr.cantidad || 1)), 0);
-                            const facturacionEfectivo = ventasTurno.filter(v => v.metodo_pago === 'efectivo' || !v.metodo_pago).reduce((acc, curr) => acc + ((curr.productos?.precio_venta || 0) * (curr.cantidad || 1)), 0);
-                            
-                            const facturacionDigital = facturacionTotal - facturacionEfectivo;
-                            const totalGastos = turno.movimientos_caja?.filter(m => m.tipo === 'egreso').reduce((acc, curr) => acc + curr.monto, 0) || 0;
-                            const totalIngresosExtra = turno.movimientos_caja?.filter(m => m.tipo === 'ingreso').reduce((acc, curr) => acc + curr.monto, 0) || 0;
-                            const cajaEsperada = turno.monto_inicial + facturacionEfectivo + totalIngresosExtra - totalGastos;
-                            const diferenciaReal = (turno.monto_final || 0) - cajaEsperada;
-                            const isOpen = !turno.fecha_cierre;
-                            const isExpanded = expandedTurnoId === turno.id;
-                            const colorClass = isOpen ? "border-blue-200 bg-blue-50/50" : Math.abs(diferenciaReal) > 100 ? "border-red-200 bg-red-50/30" : "border-emerald-200 bg-emerald-50/30";
+        {/* --- PESTAÑA: FINANCE (BI PROFUNDO) --- */}
+        {activeTab === "finance" && (
+            <div className="space-y-6 animate-in fade-in">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Card className="p-5 bg-emerald-50 border-2 border-emerald-200">
+                        <p className="text-[10px] font-black text-emerald-600 uppercase mb-2">Utilidad Neta Estimada</p>
+                        <h3 className="text-3xl font-black text-emerald-900">{formatMoney(biMetrics.neta)}</h3>
+                        <div className="mt-2 flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-100 w-fit px-2 py-0.5 rounded">
+                            <TrendingUp className="h-3 w-3" /> ROI PERIODO: {biMetrics.margen.toFixed(1)}%
+                        </div>
+                    </Card>
+                    <Card className="p-5 bg-blue-50 border-2 border-blue-200">
+                        <p className="text-[10px] font-black text-blue-600 uppercase mb-2">Ventas Declaradas (Bco)</p>
+                        <h3 className="text-3xl font-black text-blue-900">{formatMoney(biMetrics.blanco)}</h3>
+                        <p className="text-[10px] text-blue-500 font-bold mt-1 uppercase">Tickets Electrónicos / Digitales</p>
+                    </Card>
+                    <Card className="p-5 bg-slate-100 border-2 border-slate-300">
+                        <p className="text-[10px] font-black text-slate-500 uppercase mb-2">Ventas Efectivo (Negro)</p>
+                        <h3 className="text-3xl font-black text-slate-700">{formatMoney(biMetrics.negro)}</h3>
+                        <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">Flujo de caja manual</p>
+                    </Card>
+                </div>
 
-                            return (
-                                <div key={turno.id} className={cn("border-2 rounded-lg overflow-hidden transition-all duration-300", colorClass)}>
-                                    <div className="p-3 flex justify-between items-center cursor-pointer bg-white/50" onClick={() => setExpandedTurnoId(isExpanded ? null : turno.id)}>
-                                        <div className="flex flex-col"><div className="flex items-center gap-2"><User className="h-4 w-4 text-muted-foreground" /><span className="font-bold text-sm">{turno.perfiles?.nombre || "Empleado"}</span></div><span className="text-xs text-muted-foreground">{format(parseISO(turno.fecha_apertura), 'dd/MM HH:mm')}</span></div>
-                                        <div className="flex items-center gap-3"><Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" onClick={(e) => { e.stopPropagation(); handlePrintTurno(turno, ventasTurno); }} title="Descargar PDF Cierre"><Printer className="h-4 w-4" /></Button>{isOpen ? (<span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-1 rounded-full animate-pulse">EN CURSO</span>) : (<div className="text-right"><span className="block text-[10px] text-muted-foreground uppercase font-bold">Total Venta</span><span className="font-bold text-sm text-primary">{formatMoney(facturacionTotal)}</span></div>)}{isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground"/> : <ChevronDown className="h-4 w-4 text-muted-foreground"/>}</div>
-                                    </div>
-                                    {isExpanded && (
-                                        <div className="border-t p-3 bg-white animate-in slide-in-from-top-2 space-y-3">
-                                            <div className="grid grid-cols-2 gap-3 text-sm"><div className="p-2 bg-slate-50 rounded border border-slate-100"><span className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Apertura</span><span className="font-mono font-bold text-lg">{formatMoney(turno.monto_inicial)}</span></div><div className="p-2 bg-slate-50 rounded border border-slate-100"><span className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Cierre (Decl.)</span><span className="font-mono font-bold text-lg">{turno.monto_final ? formatMoney(turno.monto_final) : '---'}</span></div></div>
-                                            <div className="p-3 bg-blue-50/50 rounded border border-blue-100"><div className="flex items-center justify-between mb-2"><span className="text-xs font-bold text-blue-800 flex items-center gap-1"><Calculator className="h-3 w-3"/> Facturación Turno</span><span className="text-sm font-black text-blue-900">{formatMoney(facturacionTotal)}</span></div><div className="space-y-1"><div className="flex justify-between text-xs"><span className="text-muted-foreground flex items-center gap-1"><DollarSign className="h-3 w-3"/> Efectivo (Stock)</span><span className="font-mono">{formatMoney(facturacionEfectivo)}</span></div><div className="flex justify-between text-xs"><span className="text-muted-foreground flex items-center gap-1"><CreditCard className="h-3 w-3"/> Digital (MP/Transf)</span><span className="font-mono">{formatMoney(facturacionDigital)}</span></div></div></div>
-                                            {totalIngresosExtra > 0 && (<div className="pt-2 border-t border-dashed"><p className="text-xs font-bold text-emerald-600 mb-1 flex items-center gap-1"><TrendingUp className="h-3 w-3"/> Ingresos Extra / Servicios</p>{turno.movimientos_caja?.filter(m => m.tipo === 'ingreso').map(m => (<div key={m.id} className="flex justify-between text-xs py-1 border-b border-dashed border-gray-100 last:border-0"><span className="text-gray-600">{m.descripcion}</span><span className="font-mono text-emerald-500">+{formatMoney(m.monto)}</span></div>))}<div className="flex justify-between text-xs font-bold mt-1 pt-1 border-t border-gray-100"><span>Total Extra:</span><span>{formatMoney(totalIngresosExtra)}</span></div></div>)}
-                                            {!isOpen && (<div className={cn("p-2 rounded border flex justify-between items-center", Math.abs(diferenciaReal) > 100 ? "bg-red-50 border-red-200" : "bg-emerald-50 border-emerald-200")}><div><span className={cn("text-xs font-bold uppercase block", Math.abs(diferenciaReal) > 100 ? "text-red-700" : "text-emerald-700")}>Diferencia Caja</span><span className="text-[10px] text-muted-foreground">Esperado: {formatMoney(cajaEsperada)}</span></div><span className={cn("text-xl font-black font-mono", diferenciaReal < 0 ? "text-red-600" : "text-emerald-600")}>{diferenciaReal > 0 ? "+" : ""}{formatMoney(diferenciaReal)}</span></div>)}
-                                            {turno.movimientos_caja?.some(m => m.tipo === 'egreso') && (<div className="pt-2 border-t border-dashed"><p className="text-xs font-bold text-red-600 mb-1 flex items-center gap-1"><TrendingDown className="h-3 w-3"/> Gastos Registrados</p>{turno.movimientos_caja.filter(m => m.tipo === 'egreso').map(m => (<div key={m.id} className="flex justify-between text-xs py-1 border-b border-dashed border-gray-100 last:border-0"><span className="text-gray-600">{m.descripcion}</span><span className="font-mono text-red-500">-{formatMoney(m.monto)}</span></div>))}</div>)}
-                                            {isOpen && (<div className="mt-2 pt-2 border-t flex justify-end"><AsignarMision turnoId={turno.id} empleadoId={turno.empleado_id} empleadoNombre={turno.perfiles?.nombre || "Empleado"} onMisionCreated={fetchData} /></div>)}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <Card className="p-6 border-2 border-yellow-200 bg-yellow-50/20">
+                        <div className="flex items-center justify-between mb-6">
+                            <h4 className="text-sm font-black text-yellow-800 uppercase tracking-tighter flex items-center gap-2"><Star className="h-5 w-5 fill-yellow-400" /> Matriz: Productos Estrella</h4>
+                            <Badge className="bg-yellow-400 text-yellow-900 text-[10px] font-black">ALTA ROTACIÓN</Badge>
+                        </div>
+                        <div className="space-y-3">
+                            {matrizRentabilidad.stars.map((p, i) => (
+                                <div key={i} className="flex justify-between items-center bg-white p-3 rounded-xl border border-yellow-100 shadow-sm">
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-2xl">{p.emoji}</span>
+                                        <div>
+                                            <p className="text-xs font-black uppercase text-slate-700">{p.nombre}</p>
+                                            <p className="text-[9px] font-bold text-slate-400">{p.sales} ventas registradas</p>
                                         </div>
-                                    )}
+                                    </div>
+                                    <span className="font-black text-emerald-600 text-sm">{p.marg}% Mg.</span>
                                 </div>
+                            ))}
+                        </div>
+                    </Card>
+
+                    <Card className="p-6 border-2 border-slate-200">
+                        <div className="flex items-center justify-between mb-6">
+                            <h4 className="text-sm font-black text-slate-500 uppercase tracking-tighter flex items-center gap-2"><Trash2 className="h-5 w-5" /> Matriz: Productos Hueso</h4>
+                            <Badge variant="outline" className="text-[10px] font-black">SIN MOVIMIENTO</Badge>
+                        </div>
+                        <div className="space-y-3">
+                            {matrizRentabilidad.bones.map((p, i) => (
+                                <div key={i} className="flex justify-between items-center opacity-60 grayscale bg-slate-50 p-3 rounded-xl border">
+                                    <span className="text-xs font-bold uppercase text-slate-600">{p.emoji} {p.nombre}</span>
+                                    <span className="text-[10px] font-black text-red-400">LIQUIDAR?</span>
+                                </div>
+                            ))}
+                        </div>
+                    </Card>
+                </div>
+            </div>
+        )}
+
+        {/* --- PESTAÑA: INVENTORY (GESTIÓN LOCAL) --- */}
+        {activeTab === "inventory" && (
+            <div className="space-y-4 animate-in fade-in">
+                <div className="relative">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+                    <Input placeholder="FILTRAR STOCK LOCAL POR NOMBRE O CÓDIGO..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-12 h-16 text-sm font-bold shadow-inner border-2 rounded-2xl" />
+                </div>
+                
+                {loading ? <div className="flex justify-center py-20"><Loader2 className="animate-spin h-12 w-12 text-primary" /></div> : (
+                    <div className="grid gap-4">
+                        {inventarioFiltrado.map(item => {
+                            const marg = item.costo > 0 ? (((item.precio_venta - item.costo) / item.costo) * 100).toFixed(0) : "100"
+                            return (
+                                <Card key={item.id} className="p-5 border-2 shadow-sm hover:border-primary/40 transition-all rounded-2xl group">
+                                    <div className="flex justify-between items-start mb-5">
+                                        <div className="flex gap-4">
+                                            <div className="text-4xl bg-slate-100 p-3 rounded-2xl group-hover:bg-primary/5 transition-colors">{item.emoji}</div>
+                                            <div>
+                                                <h4 className="font-black text-slate-800 uppercase text-sm tracking-tight">{item.nombre}</h4>
+                                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1">{item.categoria}</p>
+                                                <div className="flex items-center gap-3 mt-3">
+                                                    <Badge className="bg-slate-900 text-white text-[11px] font-black px-3 py-1 shadow-md">${item.precio_venta}</Badge>
+                                                    <button onClick={() => loadPriceHistory(item.id)} className="text-[10px] font-black text-primary hover:underline uppercase flex items-center gap-1"><History className="h-3 w-3"/> HISTORIAL PRECIOS</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className={cn("text-3xl font-black tabular-nums", item.stock_disponible! <= UMBRAL_STOCK_BAJO ? "text-red-500" : "text-emerald-500")}>{item.stock_disponible}</p>
+                                            <button onClick={() => loadStockBatches(item.id)} className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1 justify-end hover:text-orange-500 transition-colors">VER LOTES <ChevronRight className="h-3 w-3"/></button>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <AgregarStock producto={item} sucursalId={currentSucursalId} onStockAdded={fetchData} />
+                                        <Button variant="outline" size="icon" className="h-12 w-12 rounded-xl shrink-0" onClick={() => setEditingProduct(item)} title="Editar Catálogo"><Pencil className="h-4 w-4" /></Button>
+                                    </div>
+                                </Card>
                             )
                         })}
                     </div>
-                }
+                )}
             </div>
         )}
 
-        {/* --- SALES --- */}
-        {activeTab === "sales" && (
-            <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4">
-                <Card className="p-6 bg-emerald-600 text-white shadow-lg border-0 relative overflow-hidden"><div className="relative z-10"><p className="text-emerald-100 font-medium text-sm mb-1">Facturación Total (Filtrada)</p><h2 className="text-4xl font-black tracking-tight">{formatMoney(totalVendido)}</h2></div><div className="mt-4 pt-4 border-t border-white/20 text-sm text-emerald-50 relative z-10 flex justify-between items-center"><span className="flex items-center gap-1"><Package className="h-4 w-4" /> {ventasRecientes.length} operaciones</span><Button variant="secondary" size="sm" className="text-emerald-800 bg-white hover:bg-emerald-50 h-7 text-xs font-bold" onClick={() => setShowSalesDetail(true)}>Ver Detalle 🔎</Button></div></Card>
-                <Card className="p-5 border-2 shadow-sm"><h3 className="text-sm font-bold text-muted-foreground mb-4 flex items-center gap-2"><Wallet className="h-4 w-4" /> Desglose por Método</h3><div className="space-y-3">{Object.entries(paymentBreakdown).map(([key, amount]) => { if (amount === 0) return null; const Icon = PAYMENT_ICONS[key as keyof typeof PAYMENT_ICONS] || Wallet; const percentage = totalVendido > 0 ? (amount / totalVendido) * 100 : 0; return (<div key={key}><div className="flex justify-between text-sm mb-1"><div className="flex items-center gap-2"><Icon className="h-3 w-3 text-muted-foreground" /><span className="capitalize font-medium text-gray-700">{key.replace('_', ' ')}</span></div><span className="font-mono font-semibold">{formatMoney(amount)}</span></div><Progress value={percentage} className="h-2" /></div>) })}</div></Card>
-                {chartData.length > 0 && (<Card className="p-5 border-2 border-muted/40 shadow-sm"><h3 className="text-sm font-bold text-muted-foreground mb-4 flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Evolución Diaria</h3><div className="h-[200px] w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={chartData}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" /><XAxis dataKey="fecha" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#6B7280'}} dy={10} /><Tooltip cursor={{fill: '#F3F4F6'}} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}/><Bar dataKey="total" fill="oklch(0.5 0.2 250)" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></div></Card>)}
-                <Card className="p-5 border-2 shadow-sm mt-4"><h3 className="text-sm font-bold text-muted-foreground mb-4 flex items-center gap-2"><Star className="h-4 w-4 text-yellow-500" /> Top Vendidos</h3><div className="space-y-3">{topProductos.map((prod, idx) => (<div key={idx} className="flex items-center justify-between"><div className="flex items-center gap-3"><div className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-bold">#{idx + 1}</div><span className="font-medium text-sm text-foreground">{prod.name}</span></div><span className="text-sm font-bold text-muted-foreground">{prod.count} u.</span></div>))}</div></Card>
-            </div>
-        )}
-
-        {/* --- CATÁLOGO --- */}
-        {activeTab === "catalog" && (<div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500"><CrearProducto onProductCreated={() => { setActiveTab("inventory"); fetchData(); }} /></div>)}
-
-        {/* --- PROVEEDORES (AHORA CON GESTIÓN DE SALDOS) --- */}
-        {activeTab === "suppliers" && (
-            <div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
-                {/* 1. Control de Saldos (Nuevo) */}
-                <ControlSaldoProveedor />
-                
-                {/* 2. Gestión General */}
-                <GestionProveedores />
-            </div>
-        )}
-        
-        {/* ✅ PESTAÑA EQUIPO */}
-        {activeTab === "team" && (
-            <div className="p-1 animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
-                 
-                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50 p-4 rounded-lg border">
+        {/* --- PESTAÑA: SUPERVISIÓN (AUDITORÍA DE TURNOS) --- */}
+        {activeTab === "supervision" && (
+            <div className="space-y-4 animate-in fade-in">
+                <div className="bg-white p-4 rounded-xl border-2 mb-6 flex items-center justify-between">
                     <div>
-                        <h3 className="font-bold text-gray-800">Ranking y Objetivos</h3>
-                        <p className="text-sm text-gray-500">Motiva a tu equipo asignando tareas.</p>
+                        <h3 className="font-black uppercase text-xs text-slate-400">Estado de Supervisión</h3>
+                        <p className="text-sm font-bold text-slate-700">Auditando turnos en {sucursales.find(s => s.id === currentSucursalId)?.nombre}</p>
                     </div>
-                    <AsignarMision onMisionCreated={fetchData} />
-                 </div>
+                    <Badge className="bg-slate-100 text-slate-600 border-slate-200">{turnosAudit.length} Registros</Badge>
+                </div>
 
-                 <TeamRanking />
-
-                 <div className="border-t pt-6">
-                    <h3 className="font-bold text-gray-700 mb-4 flex items-center gap-2">
-                        <Users className="h-5 w-5" /> Gestión de Accesos
-                    </h3>
-                    <InvitarEmpleado />
-                 </div>
-            </div>
-        )}
-
-        {/* --- INVENTARIO --- */}
-        {activeTab === "inventory" && (
-          <>
-            <div className="relative mb-4"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" /><Input type="text" placeholder="Buscar productos..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="h-12 pl-12 text-base" /></div>
-            {loading ? <div className="flex justify-center py-10"><Loader2 className="animate-spin h-8 w-8 text-primary"/></div> : (
-              <div className="space-y-3">
-                {inventarioFiltrado.map((item) => {
-                    const margenInfo = getMargenInfo(item.precio_venta, item.costo)
+                {turnosAudit.map(t => {
+                    const isOpen = !t.fecha_cierre
+                    const isExpanded = expandedTurnoId === t.id
                     return (
-                        <Card key={item.id} className="p-4 flex flex-col gap-4 shadow-sm relative">
-                            <div className="absolute top-2 right-2 flex gap-1">
-                                <Button size="icon" variant="ghost" className="h-8 w-8 hover:text-blue-600" onClick={() => setEditingProduct(item)}><Pencil className="h-4 w-4" /></Button>
-                                <Button size="icon" variant="ghost" className="h-8 w-8 hover:text-red-600" onClick={() => handleDeleteProduct(item.id)}><Trash2 className="h-4 w-4" /></Button>
-                            </div>
-                            <div className="flex items-center justify-between pr-16">
-                                <div className="flex items-center gap-3">
-                                    <span className="text-2xl">{item.emoji || '📦'}</span>
+                        <Card key={t.id} className={cn("border-2 overflow-hidden transition-all rounded-2xl mb-4 shadow-sm", isOpen ? "border-blue-400" : "border-slate-200")}>
+                            <div className="p-5 flex justify-between items-center bg-white cursor-pointer" onClick={() => setExpandedTurnoId(isExpanded ? null : t.id)}>
+                                <div className="flex items-center gap-4">
+                                    <div className="h-12 w-12 bg-slate-900 rounded-2xl flex items-center justify-center font-black text-white text-lg">{t.perfiles?.nombre?.charAt(0)}</div>
                                     <div>
-                                        <h3 className="font-bold text-foreground text-pretty leading-tight">{item.nombre}</h3>
+                                        <p className="font-black text-sm text-slate-800 uppercase tracking-tight">{t.perfiles?.nombre || 'Empleado S/N'}</p>
                                         <div className="flex items-center gap-2 mt-1">
-                                            <p className="text-xs text-muted-foreground">{item.categoria}</p>
-                                            {item.costo > 0 && <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100", margenInfo.color)}>{margenInfo.margen}% Mg.</span>}
+                                            <p className="text-[11px] font-bold text-slate-400">{format(parseISO(t.fecha_apertura), 'dd MMM • HH:mm')} hs</p>
+                                            {isOpen && <Badge className="bg-blue-600 animate-pulse text-[9px] h-4">EN CURSO</Badge>}
                                         </div>
                                     </div>
                                 </div>
-                                <div className="text-right">
-                                    <span className="text-lg font-bold text-primary block">{formatMoney(item.precio_venta)}</span>
-                                    <button onClick={() => loadStockBatches(item.id)} className="text-xs text-muted-foreground font-semibold mt-0.5 flex items-center gap-1 hover:text-orange-600 transition-colors">
-                                        Stock: <span className={(item.stock_disponible || 0) > 0 ? "text-emerald-600" : "text-destructive"}>{item.stock_disponible || 0} u.</span>
-                                        <History className="h-3 w-3 ml-1" />
-                                    </button>
+                                <div className="flex items-center gap-3">
+                                    <Button variant="ghost" size="icon" className="h-10 w-10 text-slate-400 hover:text-primary" onClick={(e) => { e.stopPropagation(); handlePrintTurno(t); }}><Printer className="h-5 w-5" /></Button>
+                                    <ChevronDown className={cn("h-5 w-5 text-slate-300 transition-transform duration-300", isExpanded && "rotate-180")} />
                                 </div>
                             </div>
-                            <AgregarStock producto={item} onStockAdded={fetchData} />
+                            
+                            {isExpanded && (
+                                <div className="p-6 bg-slate-50 border-t-2 border-dashed space-y-6 animate-in slide-in-from-top-2">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="p-4 bg-white rounded-2xl border shadow-sm text-center">
+                                            <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Efectivo Final</p>
+                                            <p className="text-2xl font-black text-slate-900">{t.monto_final ? formatMoney(t.monto_final) : '---'}</p>
+                                        </div>
+                                        <div className="p-4 bg-white rounded-2xl border shadow-sm text-center">
+                                            <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Diferencia</p>
+                                            {/* Aquí vendría el cálculo de diferencia que ya tenemos en handlePrintTurno */}
+                                            <p className="text-2xl font-black text-slate-900">AUDITAR</p> 
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="space-y-2">
+                                        <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Log de Misiones</h5>
+                                        {t.misiones?.map((m, i) => (
+                                            <div key={i} className="flex items-center justify-between p-3 bg-white rounded-xl border text-xs">
+                                                <span className="font-bold text-slate-700">{m.descripcion}</span>
+                                                {m.es_completada ? <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">EXITO</Badge> : <Badge variant="outline" className="text-slate-400">PENDIENTE</Badge>}
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {isOpen && (
+                                        <div className="pt-4 border-t border-slate-200">
+                                            <AsignarMision turnoId={t.id} empleadoId={t.empleado_id} sucursalId={currentSucursalId} onMisionCreated={fetchData} />
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </Card>
                     )
                 })}
-              </div>
-            )}
-          </>
+            </div>
         )}
 
-        {/* --- ALERTAS (RIESGOS) --- */}
+        {/* --- PESTAÑA: RIESGOS & ALERTS --- */}
         {activeTab === "alerts" && (
-          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
-              <HappyHour criticos={capitalEnRiesgo.criticos} onDiscountApplied={fetchData} />
+            <div className="space-y-6 animate-in fade-in">
+                <HappyHour criticos={capitalEnRiesgo.criticos} onDiscountApplied={fetchData} />
+                
+                <div className="grid grid-cols-2 gap-4">
+                    <Card className="p-5 border-2 border-orange-200 bg-orange-50/50 shadow-sm">
+                        <p className="text-[11px] font-black text-orange-600 uppercase mb-2">Pérdida Potencial (Venc.)</p>
+                        <h3 className="text-3xl font-black text-slate-800">{formatMoney(capitalEnRiesgo.capital)}</h3>
+                        <p className="text-[10px] font-bold text-orange-400 uppercase mt-2">{capitalEnRiesgo.unidades} UNIDADES CRÍTICAS</p>
+                    </Card>
+                    <Card className="p-5 border-2 border-red-200 bg-red-50/50 shadow-sm">
+                        <p className="text-[11px] font-black text-red-600 uppercase mb-2">Quiebres de Stock</p>
+                        <h3 className="text-3xl font-black text-slate-800">{productos.filter(p => p.stock_disponible! <= 0).length}</h3>
+                        <p className="text-[10px] font-bold text-red-400 uppercase mt-2">PRODUCTOS AGOTADOS</p>
+                    </Card>
+                </div>
 
-              {/* ✅ TARJETA SUGERENCIAS DE COMPRA MEJORADA */}
-              {sugerencias.length > 0 && (
-                  <Card className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-0 shadow-lg p-4">
-                     <h3 className="flex items-center gap-2 font-bold mb-3">
-                         <Sparkles className="h-5 w-5 text-yellow-300 animate-pulse" /> Sugerencias de Compra 🧠
-                     </h3>
-                     <div className="space-y-2">
-                         {sugerencias.map(sug => (
-                             <div key={sug.id} className="bg-white/10 backdrop-blur-sm p-2 rounded-lg flex items-center justify-between text-sm">
-                                 <div className="flex items-center gap-2">
-                                     <span>{sug.emoji}</span>
-                                     <div>
-                                         <p className="font-bold">{sug.producto}</p>
-                                         <p className="text-[10px] text-violet-200">
-                                             {/* ✅ MOSTRAR SALDO O UNIDADES */}
-                                             {sug.es_saldo ? "Saldo actual:" : "Quedan:"} 
-                                             <span className="font-bold ml-1 text-white">
-                                                {sug.es_saldo ? formatMoney(sug.stock_actual) : `${sug.stock_actual} u.`}
-                                             </span>
-                                         </p>
-                                         {sug.es_saldo && <span className="text-[9px] bg-red-500/80 px-1 rounded text-white font-bold ml-1">SALDO BAJO</span>}
-                                     </div>
-                                 </div>
-                                 <div className="text-right">
-                                     {sug.mejor_proveedor ? (
-                                         <>
-                                             <p className="text-[10px] font-bold text-yellow-300 uppercase">Mejor Precio</p>
-                                             {sug.mejor_precio_historico && <p className="font-bold">{formatMoney(sug.mejor_precio_historico)}</p>}
-                                             <p className="text-[10px] truncate max-w-[80px]">{sug.mejor_proveedor}</p>
-                                         </>
-                                     ) : (
-                                         <span className="text-[10px] text-white/50 italic">Sin historial</span>
-                                     )}
-                                 </div>
-                             </div>
-                         ))}
-                     </div>
-                  </Card>
-              )}
-
-              {/* ... (Resto de alertas igual) ... */}
-              <div className="grid grid-cols-2 gap-4">
-                 <Card className="p-4 bg-orange-50 border-l-4 border-l-orange-500 shadow-sm"><div className="flex flex-col"><div className="flex items-center gap-2 text-orange-600 mb-1"><AlertTriangle className="h-4 w-4" /><span className="text-xs font-bold uppercase">En Riesgo (Venc.)</span></div><span className="text-2xl font-black text-gray-800">{formatMoney(capitalEnRiesgo.capital)}</span><span className="text-[10px] text-gray-500">{capitalEnRiesgo.unidades} u. &lt; 10 días</span></div></Card>
-                 <Card className="p-4 bg-red-50 border-l-4 border-l-red-500 shadow-sm"><div className="flex flex-col"><div className="flex items-center gap-2 text-red-600 mb-1"><ShoppingBag className="h-4 w-4" /><span className="text-xs font-bold uppercase">Reponer Stock</span></div><span className="text-2xl font-black text-gray-800">{alertasStockBajo.length}</span><span className="text--[10px] text-gray-500">Prods &le; {UMBRAL_STOCK_BAJO} u.</span></div></Card>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div><h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-orange-500" /> Vencimientos Próximos</h3>{capitalEnRiesgo.criticos.length === 0 ? (<Card className="p-4 text-center text-muted-foreground bg-muted/20 border-dashed"><p className="text-xs">Sin riesgo de vencimiento.</p></Card>) : (<div className="space-y-2">{capitalEnRiesgo.criticos.map((item, idx) => (<Card key={idx} className="p-2 border-l-4 border-l-orange-400 flex items-center justify-between"><div className="flex items-center gap-2"><span className="text-xl">{item.emoji}</span><div><p className="font-bold text-xs">{item.nombre}</p><p className="text-[10px] text-orange-600 font-bold">Vence: {new Date(item.fechaVenc).toLocaleDateString()}</p></div></div><span className="text-xs font-bold bg-white px-2 py-1 rounded border shadow-sm">{item.unidades} u.</span></Card>))}</div>)}</div>
-                  <div><h3 className="text-lg font-bold text-foreground mb-3 flex items-center gap-2"><ShoppingBag className="h-5 w-5 text-red-600" /> Stock Crítico</h3>{alertasStockBajo.length === 0 ? (<Card className="p-4 text-center text-muted-foreground bg-muted/20 border-dashed"><p className="text-xs">Stock saludable.</p></Card>) : (<div className="space-y-2">{alertasStockBajo.map((item) => (<Card key={item.id} className="p-2 border-l-4 border-l-red-500 flex items-center justify-between"><div className="flex items-center gap-2"><span className="text-xl">{item.emoji}</span><div><p className="font-bold text-xs">{item.nombre}</p><p className="text-[10px] text-muted-foreground">{item.categoria}</p></div></div><div className="text-right"><span className={cn("text-xs font-bold px-2 py-1 rounded border shadow-sm", (item.stock_disponible || 0) === 0 ? "bg-red-100 text-red-700" : "bg-white text-gray-800")}>{(item.stock_disponible || 0) === 0 ? "AGOTADO" : `${item.stock_disponible} u.`}</span></div></Card>))}</div>)}</div>
-              </div>
-          </div>
+                {sugerencias.length > 0 && (
+                    <Card className="p-6 bg-slate-900 text-white border-0 shadow-2xl rounded-3xl relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-4 opacity-10"><Sparkles className="h-24 w-24"/></div>
+                        <h3 className="font-black text-sm uppercase mb-6 flex items-center gap-2 tracking-widest"><Package className="h-4 w-4 text-primary" /> Sugerencias de Reposición</h3>
+                        <div className="grid gap-3">
+                            {sugerencias.slice(0, 5).map(s => (
+                                <div key={s.id} className="bg-white/5 backdrop-blur-md p-4 rounded-2xl flex justify-between items-center border border-white/10">
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-2xl">{s.emoji}</span>
+                                        <div>
+                                            <p className="text-xs font-black uppercase">{s.producto}</p>
+                                            <p className="text-[9px] text-slate-400 font-bold uppercase mt-0.5">Stock actual: {s.stock_actual} u.</p>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-[9px] text-primary font-black uppercase">Mejor Proveedor</p>
+                                        <p className="text-xs font-black text-white">{s.mejor_proveedor || 'S/N'}</p>
+                                        <p className="text-[10px] font-mono text-emerald-400">{formatMoney(s.mejor_precio)}</p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </Card>
+                )}
+            </div>
         )}
+
+        {/* --- OTRAS PESTAÑAS (MODULARES) --- */}
+        {activeTab === "catalog" && <CrearProducto sucursalId={currentSucursalId} onProductCreated={() => { setActiveTab("inventory"); fetchData(); }} />}
+        {activeTab === "suppliers" && <div className="space-y-6 animate-in fade-in"><ControlSaldoProveedor /><GestionProveedores sucursalId={currentSucursalId} organizationId={organizationId} /></div>}
+        {activeTab === "team" && <div className="space-y-6 animate-in fade-in"><TeamRanking /><InvitarEmpleado /></div>}
+
       </div>
 
-      {/* --- MODALES --- */}
-      <Dialog open={!!editingProduct} onOpenChange={(open) => !open && setEditingProduct(null)}>
-        <DialogContent>
-            <DialogHeader><DialogTitle>Editar Producto</DialogTitle></DialogHeader>
+      {/* --- BLOQUE DE DIALOGOS Y AUDITORÍA PROFUNDA --- */}
+
+      {/* 1. Modal: Editar Producto y Registrar Historial de Precios */}
+      <Dialog open={!!editingProduct} onOpenChange={o => !o && setEditingProduct(null)}>
+        <DialogContent className="max-w-md rounded-3xl">
+            <DialogHeader><DialogTitle className="font-black uppercase flex items-center gap-2 text-slate-800"><Pencil className="h-5 w-5 text-primary"/> Editar Catálogo Global</DialogTitle></DialogHeader>
             {editingProduct && (
-                <div className="space-y-4 py-2">
-                    <div className="grid grid-cols-4 gap-4">
-                        <div className="col-span-1"><Label>Icono</Label><Input value={editingProduct.emoji} onChange={(e) => setEditingProduct({...editingProduct, emoji: e.target.value})} className="text-center text-2xl" /></div>
-                        <div className="col-span-3"><Label>Nombre</Label><Input value={editingProduct.nombre} onChange={(e) => setEditingProduct({...editingProduct, nombre: e.target.value})} /></div>
+                <div className="space-y-6 py-4">
+                    <div className="grid grid-cols-4 gap-3">
+                        <div className="col-span-1"><Label className="text-[10px] font-black uppercase mb-1 block">Icono</Label><Input value={editingProduct.emoji} onChange={e => setEditingProduct({...editingProduct, emoji: e.target.value})} className="text-center text-3xl h-16 rounded-2xl bg-slate-50" /></div>
+                        <div className="col-span-3"><Label className="text-[10px] font-black uppercase mb-1 block">Nombre Comercial</Label><Input value={editingProduct.nombre} onChange={e => setEditingProduct({...editingProduct, nombre: e.target.value})} className="h-16 font-bold rounded-2xl" /></div>
                     </div>
-                    <div><Label className="flex items-center gap-2 mb-1"><ScanBarcode className="h-4 w-4" /> Código de Barras</Label><Input value={editingProduct.codigo_barras || ''} placeholder="Escanear o escribir..." onChange={(e) => setEditingProduct({...editingProduct, codigo_barras: e.target.value})} /><p className="text-[10px] text-muted-foreground mt-1">Si tienes el lector USB conectado, haz clic y escanea.</p></div>
-                    <div className="grid grid-cols-2 gap-4"><div className="col-span-2"><Label>Categoría</Label><Input value={editingProduct.categoria} onChange={(e) => setEditingProduct({...editingProduct, categoria: e.target.value})} /></div></div>
-                    <div className="p-3 bg-blue-50 rounded-lg border border-blue-100 space-y-3"><div className="grid grid-cols-2 gap-4"><div><Label className="text-xs font-bold text-muted-foreground">Costo Compra</Label><Input type="number" className="bg-white" value={editingProduct.costo} onChange={(e) => setEditingProduct({...editingProduct, costo: parseFloat(e.target.value)})} /></div><div><Label className="text-xs font-bold text-primary">Precio Venta</Label><Input type="number" className="bg-white font-bold" value={editingProduct.precio_venta} onChange={(e) => setEditingProduct({...editingProduct, precio_venta: parseFloat(e.target.value)})} /></div></div>{editingProduct.precio_venta > 0 && (<div className={cn("text-xs flex justify-between px-2 font-medium", getMargenInfo(editingProduct.precio_venta, editingProduct.costo).color)}><span>Margen: {getMargenInfo(editingProduct.precio_venta, editingProduct.costo).margen}%</span><span>Ganancia: ${getMargenInfo(editingProduct.precio_venta, editingProduct.costo).ganancia}</span></div>)}</div>
-                    <div className="flex justify-start"><Button variant="ghost" size="sm" onClick={() => loadPriceHistory(editingProduct.id)} className="text-xs text-primary/80 hover:bg-primary/10"><Clock className="h-4 w-4 mr-1.5" /> Ver Historial de Precios</Button></div>
-                    <DialogFooter><Button onClick={handleSaveProduct} disabled={actionLoading} className="w-full">{actionLoading ? <Loader2 className="animate-spin" /> : <><Save className="mr-2 h-4 w-4" /> Guardar Cambios</>}</Button></DialogFooter>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div><Label className="text-[10px] font-black uppercase text-slate-400 mb-1 block">Costo de Reposición ($)</Label><Input type="number" value={editingProduct.costo} onChange={e => setEditingProduct({...editingProduct, costo: parseFloat(e.target.value)})} className="rounded-xl h-12" /></div>
+                        <div><Label className="text-[10px] font-black uppercase text-primary mb-1 block">Precio de Venta ($)</Label><Input type="number" value={editingProduct.precio_venta} onChange={e => setEditingProduct({...editingProduct, precio_venta: parseFloat(e.target.value)})} className="border-primary/40 font-black h-12 rounded-xl text-lg" /></div>
+                    </div>
+                    <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 text-center">
+                        <p className="text-[10px] font-black text-blue-600 uppercase mb-1">Margen de Ganancia Bruta</p>
+                        <p className="text-2xl font-black text-blue-900">
+                            {editingProduct.costo > 0 ? (((editingProduct.precio_venta - editingProduct.costo) / editingProduct.costo) * 100).toFixed(1) : '100'}%
+                        </p>
+                    </div>
+                    <Button onClick={handleUpdateProduct} disabled={actionLoading} className="w-full h-14 font-black text-lg rounded-2xl shadow-lg">{actionLoading ? <Loader2 className="animate-spin"/> : "CONFIRMAR Y GUARDAR"}</Button>
+                    <Button variant="ghost" className="w-full text-red-500 text-[10px] font-black hover:bg-red-50" onClick={async () => { if(confirm("¿Eliminar del catálogo?")){ await supabase.from('productos').delete().eq('id', editingProduct.id); fetchData(); setEditingProduct(null); } }}>ELIMINAR PRODUCTO PERMANENTEMENTE</Button>
                 </div>
             )}
         </DialogContent>
       </Dialog>
-      <Dialog open={showSalesDetail} onOpenChange={setShowSalesDetail}>
-        <DialogContent className="max-h-[85vh] flex flex-col sm:max-w-lg"><DialogHeader><DialogTitle className="flex items-center gap-2 text-emerald-800"><Receipt className="h-5 w-5" /> Detalle de Operaciones</DialogTitle><DialogDescription>Listado de todas las ventas en el rango seleccionado.</DialogDescription></DialogHeader><div className="flex-1 overflow-y-auto pr-1">{ventasRecientes.length === 0 ? (<div className="py-10 text-center text-muted-foreground"><Search className="h-10 w-10 mx-auto opacity-20 mb-2" /><p>No hay ventas registradas en este periodo.</p></div>) : (<div className="space-y-2">{ventasRecientes.map((venta) => { const Icon = PAYMENT_ICONS[venta.metodo_pago as keyof typeof PAYMENT_ICONS] || Wallet; return (<div key={venta.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-100 text-sm"><div className="flex items-center gap-3"><span className="text-lg">{venta.productos?.emoji || '📦'}</span><div><p className="font-bold text-gray-800 line-clamp-1">{venta.productos?.nombre || 'Producto eliminado'}</p>{venta.notas && (<p className="text-xs font-bold text-indigo-600 mb-0.5 animate-in fade-in">{venta.notas}</p>)}<p className="text-[10px] text-muted-foreground flex items-center gap-1">{format(parseISO(venta.fecha_venta), 'dd/MM HH:mm')} <span className="text-slate-300">•</span><Icon className="h-3 w-3" /> <span className="capitalize">{venta.metodo_pago?.replace('_', ' ')}</span></p></div></div><div className="text-right"><p className="font-bold text-emerald-600">{formatMoney((venta.productos?.precio_venta || 0) * (venta.cantidad || 1))}</p><span className="text-[10px] text-muted-foreground">{venta.cantidad || 1} unid.</span></div></div>) })}</div>)}</div><DialogFooter><Button variant="outline" onClick={() => setShowSalesDetail(false)}>Cerrar</Button></DialogFooter></DialogContent>
+
+      {/* 2. Modal: Historial de Cambios de Precio (Audit) */}
+      <Dialog open={showPriceHistoryModal} onOpenChange={setShowPriceHistoryModal}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto rounded-3xl">
+            <DialogHeader><DialogTitle className="font-black uppercase tracking-tighter flex items-center gap-2"><Clock className="h-5 w-5 text-primary"/> Historial de Precios</DialogTitle></DialogHeader>
+            <div className="space-y-3 mt-4">
+                {historyData.length === 0 ? <p className="text-center text-slate-400 py-10 font-bold italic text-sm">Sin registros previos de cambios.</p> : historyData.map((h, i) => (
+                    <div key={i} className="p-4 border-l-4 border-primary bg-slate-50 rounded-xl relative">
+                        <div className="flex justify-between items-start mb-3">
+                            <p className="font-black text-slate-900 text-xs uppercase">{format(parseISO(h.fecha_cambio), 'dd MMMM yyyy')}</p>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{format(parseISO(h.fecha_cambio), 'HH:mm')} HS</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-6">
+                            <div><p className="text-[9px] font-black text-slate-400 uppercase mb-1">Venta</p><p className="text-sm font-bold text-slate-600 line-through decoration-red-400">{formatMoney(h.precio_venta_anterior)}</p><p className="text-lg font-black text-primary">{formatMoney(h.precio_venta_nuevo)}</p></div>
+                            <div><p className="text-[9px] font-black text-slate-400 uppercase mb-1">Costo</p><p className="text-sm font-bold text-slate-600 line-through decoration-red-400">{formatMoney(h.costo_anterior)}</p><p className="text-lg font-black text-slate-900">{formatMoney(h.costo_nuevo)}</p></div>
+                        </div>
+                        <div className="mt-3 pt-3 border-t border-slate-200 flex items-center gap-1.5"><User className="h-3 w-3 text-slate-400"/><span className="text-[9px] font-black text-slate-400 uppercase">Autorizado por: {h.perfiles?.nombre || 'Admin'}</span></div>
+                    </div>
+                ))}
+            </div>
+        </DialogContent>
       </Dialog>
-      <Dialog open={showPriceHistoryModal} onOpenChange={setShowPriceHistoryModal}><DialogContent className="max-h-[80vh] flex flex-col"><DialogHeader><DialogTitle className="flex items-center gap-2"><Clock className="h-5 w-5 text-primary"/> Historial de Precios</DialogTitle></DialogHeader><div className="flex-1 overflow-y-auto pr-2 space-y-2">{historyData.length === 0 ? (<p className="text-center text-muted-foreground py-4">No hay registros de cambios de precio para este producto.</p>) : (<div className="space-y-3">{historyData.map((h, index) => (<Card key={index} className="p-3 border-l-4 border-l-primary/50 text-sm"><p className="text-xs text-muted-foreground mb-1">{format(parseISO(h.fecha_cambio), 'dd/MM/yy HH:mm')}</p><div className="grid grid-cols-2 gap-4"><div><p className="font-bold">Venta</p><p className="text-xs">De: {formatMoney(h.precio_venta_anterior)}</p><p className="text-primary font-bold">A: {formatMoney(h.precio_venta_nuevo)}</p></div><div><p className="font-bold">Costo</p><p className="text-xs">De: {formatMoney(h.costo_anterior)}</p><p className="text-red-600 font-bold">A: {formatMoney(h.costo_nuevo)}</p></div></div></Card>))}</div>)}</div><DialogFooter><Button onClick={() => setShowPriceHistoryModal(false)}>Cerrar</Button></DialogFooter></DialogContent></Dialog>
-      <Dialog open={!!managingStockId} onOpenChange={(open) => !open && setManagingStockId(null)}><DialogContent className="max-h-[80vh] flex flex-col"><DialogHeader><DialogTitle>Auditoría de Stock</DialogTitle><DialogDescription>Borra líneas específicas si hubo error de carga.</DialogDescription></DialogHeader><div className="flex-1 overflow-y-auto pr-2 space-y-2">{stockBatchList.length === 0 ? <p className="text-center text-muted-foreground py-4">No hay stock activo para este producto.</p> : stockBatchList.map(batch => (<div key={batch.id} className="flex items-center justify-between p-2 border rounded bg-slate-50 text-sm"><div><p className="font-bold">Ingreso: {format(parseISO(batch.created_at), 'dd/MM HH:mm')}</p>{batch.fecha_vencimiento && <p className="text-xs text-orange-600">Vence: {batch.fecha_vencimiento}</p>}<p className="text-xs font-bold text-emerald-600">Cant: {batch.cantidad}</p></div><Button size="sm" variant="destructive" onClick={() => handleDeleteStockItem(batch.id)}><Trash2 className="h-4 w-4" /></Button></div>))}</div></DialogContent></Dialog>
+
+      {/* 3. Modal: Auditoría de Lotes de Stock (Local) */}
+      <Dialog open={!!managingStockId} onOpenChange={o => !o && setManagingStockId(null)}>
+        <DialogContent className="rounded-3xl">
+            <DialogHeader><DialogTitle className="font-black uppercase flex items-center gap-2"><History className="h-5 w-5 text-orange-500"/> Auditoría de Lotes</DialogTitle><DialogDescription className="font-bold text-xs uppercase text-slate-400">Ingresos físicos en esta sucursal.</DialogDescription></DialogHeader>
+            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 mt-4">
+                {stockBatchList.length === 0 ? <p className="text-center text-slate-400 py-10 font-black italic">Sin stock activo en este local.</p> : stockBatchList.map(b => (
+                    <div key={b.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 hover:border-orange-200 transition-colors">
+                        <div>
+                            <div className="flex items-center gap-2 mb-1">
+                                <p className="font-black text-xs uppercase text-slate-800">CANT: {b.cantidad} u.</p>
+                                <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-[9px] h-4">FISICO</Badge>
+                            </div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">Ingreso: {format(parseISO(b.created_at), 'dd/MM/yy HH:mm')} hs</p>
+                            {b.fecha_vencimiento && <p className="text-[10px] font-black text-orange-600 uppercase mt-0.5">VENCE: {format(parseISO(b.fecha_vencimiento), 'dd/MM/yy')}</p>}
+                        </div>
+                        <Button variant="ghost" size="icon" className="text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full" onClick={async () => { if(confirm("¿Eliminar este lote del stock local?")){ await supabase.from('stock').delete().eq('id', b.id); fetchData(); setManagingStockId(null); } }}><Trash2 className="h-5 w-5"/></Button>
+                    </div>
+                ))}
+            </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 4. Modal: Detalle de Operaciones (Sales Audit) */}
+      <Dialog open={showSalesDetail} onOpenChange={setShowSalesDetail}>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col rounded-3xl">
+            <DialogHeader className="border-b pb-4"><DialogTitle className="font-black uppercase tracking-widest text-slate-800 flex items-center gap-2"><Receipt className="h-6 w-6 text-primary"/> Libro Diario de Ventas</DialogTitle></DialogHeader>
+            <div className="flex-1 overflow-y-auto pr-3 space-y-3 mt-6">
+                {ventasRecientes.length === 0 ? <div className="text-center py-20 opacity-30 font-black uppercase text-sm tracking-[0.3em]">Sin operaciones</div> : ventasRecientes.map(v => (
+                    <div key={v.id} className="flex justify-between items-center p-4 bg-white border-2 rounded-2xl shadow-sm hover:bg-slate-50 transition-colors">
+                        <div className="flex items-center gap-4">
+                            <span className="text-3xl bg-slate-100 w-12 h-12 flex items-center justify-center rounded-xl">{v.productos?.emoji}</span>
+                            <div>
+                                <p className="font-black uppercase text-slate-800 text-sm leading-none mb-1">{v.productos?.nombre}</p>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase">{format(parseISO(v.fecha_venta), 'HH:mm')} hs • {v.metodo_pago?.replace('_',' ')}</p>
+                                {v.notas && <p className="text-[10px] font-black text-indigo-600 mt-1 uppercase italic tracking-tighter">💬 {v.notas}</p>}
+                            </div>
+                        </div>
+                        <div className="text-right">
+                            <p className="font-black text-emerald-600 text-lg leading-none mb-0.5">{formatMoney((v.precio_venta_historico || v.productos?.precio_venta || 0) * (v.cantidad || 1))}</p>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">{v.cantidad || 1} UNIDADES</p>
+                        </div>
+                    </div>
+                ))}
+            </div>
+            <DialogFooter className="border-t pt-4 mt-2"><Button variant="outline" className="w-full font-black text-[11px] h-12 rounded-2xl uppercase tracking-widest" onClick={() => setShowSalesDetail(false)}>Cerrar Auditoría</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

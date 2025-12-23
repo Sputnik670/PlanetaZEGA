@@ -2,15 +2,15 @@
 
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
-import { Loader2, Package, Save, Plus, DollarSign, TrendingUp, Smile, ScanBarcode, X, Calendar as CalendarIcon } from "lucide-react"
+import { Loader2, Package, Save, Plus, DollarSign, TrendingUp, ScanBarcode, X, Calendar as CalendarIcon } from "lucide-react"
 import { toast } from "sonner"
-import { addDays, format } from "date-fns"
+import { format } from "date-fns"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useZxing } from "react-zxing"
 
@@ -53,7 +53,12 @@ async function fetchProductFromApi(barcode: string) {
 
 const QUICK_EMOJIS = ["🍫", "🍬", "🍭", "🍪", "🥤", "🧃", "🍺", "🧊", "🚬", "🔋", "🧼", "🧴", "🥖", "🥐", "🥪", "📦", "🍦", "🍎", "🍌", "⚡"]
 
-export default function CrearProducto({ onProductCreated }: { onProductCreated?: () => void }) {
+interface CrearProductoProps {
+  onProductCreated?: () => void
+  sucursalId?: string // ✅ Recibimos la sucursal activa desde el Dashboard
+}
+
+export default function CrearProducto({ onProductCreated, sucursalId }: CrearProductoProps) {
   const [loading, setLoading] = useState(false)
   const [showScanner, setShowScanner] = useState(false)
 
@@ -81,33 +86,60 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
     setShowScanner(false)
     if (code === formData.codigo_barras) return;
 
-    toast.info("Código detectado", { description: "Verificando producto..." })
+    toast.info("Verificando código...")
 
     try {
-        const { data: existente } = await supabase.from('productos').select('nombre, precio_venta').eq('codigo_barras', code).maybeSingle() 
-        if (existente) { toast.warning("¡Este producto ya existe!", { description: `Ya tienes "${existente.nombre}" registrado.` }); return; }
+        const { data: { user } } = await supabase.auth.getUser()
+        const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user?.id).single()
+
+        // 🛡️ Buscamos solo en nuestra organización
+        const { data: existente } = await supabase
+            .from('productos')
+            .select('nombre')
+            .eq('codigo_barras', code)
+            .eq('organization_id', perfil?.organization_id)
+            .maybeSingle() 
+
+        if (existente) { 
+            toast.warning("Producto existente", { description: `Ya tienes "${existente.nombre}" en tu catálogo.` }); 
+            return; 
+        }
 
         const apiData = await fetchProductFromApi(code)
-        setFormData(prev => ({ ...prev, codigo_barras: code, nombre: apiData.found ? `${apiData.marca ? apiData.marca + ' ' : ''}${apiData.nombre}` : prev.nombre, emoji: apiData.found ? "🥫" : "📦" }))
-        if (apiData.found) toast.success("Información encontrada")
-        else toast("Código nuevo", { description: "No se encontraron datos online." })
-
+        setFormData(prev => ({ 
+            ...prev, 
+            codigo_barras: code, 
+            nombre: apiData.found ? `${apiData.marca ? apiData.marca + ' ' : ''}${apiData.nombre}` : prev.nombre, 
+            emoji: apiData.found ? "🥫" : "📦" 
+        }))
+        
+        if (apiData.found) toast.success("Datos encontrados online")
     } catch (error) { toast.error("Error al verificar código") }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!sucursalId) {
+        toast.error("Error de Sucursal", { description: "Selecciona una sucursal en el panel superior antes de crear productos con stock." });
+        return;
+    }
     setLoading(true)
 
     try {
-      // 1. Insertamos el PRODUCTO
+      const { data: { user } } = await supabase.auth.getUser()
+      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user?.id).single()
+      
+      if (!perfil?.organization_id) throw new Error("No se encontró organización activa.")
+
+      // 1. Crear el DATO MAESTRO (Catálogo Global)
       const { data: nuevoProducto, error: errorProd } = await supabase
         .from('productos')
         .insert([{
+            organization_id: perfil.organization_id, // ✅ VINCULACIÓN EMPRESA
             nombre: formData.nombre,
             categoria: formData.categoria,
-            precio_venta: parseFloat(formData.precio_venta),
-            costo: parseFloat(formData.costo) || 0,
+            precio_venta: precioNum,
+            costo: costoNum,
             vida_util_dias: 0, 
             emoji: formData.emoji,
             codigo_barras: formData.codigo_barras || null 
@@ -117,17 +149,20 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
 
       if (errorProd) throw errorProd
 
-      // 2. Stock Inicial (MODO LEDGER: 1 SOLA FILA)
+      // 2. Crear el MOVIMIENTO INICIAL (Stock Local)
       const cantidad = parseInt(formData.cantidad_inicial) || 0
       
       if (cantidad > 0 && nuevoProducto) {
         const { error: errorStock } = await supabase
           .from('stock')
           .insert({
+              organization_id: perfil.organization_id, // Empresa
+              sucursal_id: sucursalId,                 // ✅ SUCURSAL SELECCIONADA EN EL DASHBOARD
               producto_id: nuevoProducto.id,
-              cantidad: cantidad,            // Cantidad total
-              tipo_movimiento: 'entrada',    // Para que sume
+              cantidad: cantidad,
+              tipo_movimiento: 'entrada',
               estado: 'disponible',
+              costo_unitario_historico: costoNum,     // Guardamos el costo de este lote
               fecha_vencimiento: formData.fecha_vencimiento || null,
               fecha_ingreso: new Date().toISOString()
           })
@@ -135,13 +170,13 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
         if (errorStock) throw errorStock
       }
 
-      toast.success("¡Producto creado!")
+      toast.success("Producto creado", { description: "Se agregó al catálogo y se cargó el stock inicial." })
       
       setFormData({ codigo_barras: "", nombre: "", categoria: "", precio_venta: "", costo: "", fecha_vencimiento: "", cantidad_inicial: "0", emoji: "📦" })
       if (onProductCreated) onProductCreated()
 
     } catch (error: any) {
-      console.error("Error al crear:", error)
+      console.error(error)
       toast.error("Error al guardar", { description: error.message })
     } finally {
       setLoading(false)
@@ -155,31 +190,31 @@ export default function CrearProducto({ onProductCreated }: { onProductCreated?:
 
         <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-                 <div className="flex justify-between items-end"><label className="text-xs font-semibold text-muted-foreground uppercase">Nombre del Producto</label><Button type="button" size="sm" variant={formData.codigo_barras ? "secondary" : "default"} onClick={() => setShowScanner(true)} className={`h-7 text-xs gap-1.5 ${!formData.codigo_barras ? "bg-blue-600 hover:bg-blue-700 text-white" : ""}`}><ScanBarcode className="h-3.5 w-3.5" />{formData.codigo_barras ? "Código Cargado" : "Escanear Código"}</Button></div>
-                 {formData.codigo_barras && (<p className="text-[10px] text-blue-600 font-mono text-right">Código: {formData.codigo_barras}</p>)}
+                 <div className="flex justify-between items-end"><label htmlFor="nombre" className="text-xs font-semibold text-muted-foreground uppercase">Nombre del Producto</label><Button type="button" size="sm" variant={formData.codigo_barras ? "secondary" : "default"} onClick={() => setShowScanner(true)} className={`h-7 text-xs gap-1.5 ${!formData.codigo_barras ? "bg-blue-600 hover:bg-blue-700 text-white" : ""}`}><ScanBarcode className="h-3.5 w-3.5" />{formData.codigo_barras ? "Cambiar Código" : "Escanear"}</Button></div>
                  <div className="flex gap-2">
-                    <Input name="nombre" placeholder="Ej: Alfajor Jorgito" value={formData.nombre} onChange={handleChange} className="font-medium flex-1" required />
-                    <div className="w-16 shrink-0"><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full text-xl px-0 shadow-none border-dashed" type="button">{formData.emoji}</Button></PopoverTrigger><PopoverContent className="w-64 p-3" align="end"><p className="text-xs font-bold text-muted-foreground mb-2">Icono Rápido</p><div className="grid grid-cols-5 gap-2">{QUICK_EMOJIS.map(em => (<button key={em} type="button" onClick={() => setFormData({...formData, emoji: em})} className="text-2xl hover:bg-slate-100 p-1 rounded transition-colors">{em}</button>))}</div><div className="mt-3 border-t pt-2"><Input placeholder="Emoji manual..." className="h-8 text-sm" value={formData.emoji} onChange={(e) => setFormData({...formData, emoji: e.target.value})}/></div></PopoverContent></Popover></div>
+                    <Input id="nombre" name="nombre" placeholder="Ej: Alfajor Jorgito" value={formData.nombre} onChange={handleChange} className="font-medium flex-1" required />
+                    <div className="w-16 shrink-0"><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full text-xl px-0 shadow-none border-dashed" type="button" title="Elegir Icono">{formData.emoji}</Button></PopoverTrigger><PopoverContent className="w-64 p-3" align="end"><p className="text-xs font-bold text-muted-foreground mb-2">Icono Rápido</p><div className="grid grid-cols-5 gap-2">{QUICK_EMOJIS.map(em => (<button key={em} type="button" onClick={() => setFormData({...formData, emoji: em})} className="text-2xl hover:bg-slate-100 p-1 rounded transition-colors">{em}</button>))}</div></PopoverContent></Popover></div>
                  </div>
+                 {formData.codigo_barras && (<p className="text-[10px] text-blue-600 font-mono">Código Barras: {formData.codigo_barras}</p>)}
             </div>
 
-            <div className="space-y-1.5"><label className="text-xs font-semibold text-muted-foreground uppercase">Categoría</label><Input name="categoria" placeholder="Ej: Golosinas / Bebidas" value={formData.categoria} onChange={handleChange} required /></div>
+            <div className="space-y-1.5"><label htmlFor="categoria" className="text-xs font-semibold text-muted-foreground uppercase">Categoría</label><Input id="categoria" name="categoria" placeholder="Golosinas / Bebidas" value={formData.categoria} onChange={handleChange} required /></div>
 
             <div className="grid grid-cols-2 gap-3 p-3 bg-blue-50/50 rounded-lg border border-blue-100">
-                <div className="space-y-1.5"><label className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-1">Costo <span className="text-[10px] font-normal">(Compra)</span></label><div className="relative"><DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" /><Input name="costo" type="number" placeholder="0.00" className="pl-6 bg-white h-9" value={formData.costo} onChange={handleChange} /></div></div>
-                <div className="space-y-1.5"><label className="text-xs font-bold text-primary uppercase">Precio Venta</label><div className="relative"><DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-primary" /><Input name="precio_venta" type="number" placeholder="0.00" className="pl-6 border-primary/30 bg-white h-9 font-bold" value={formData.precio_venta} onChange={handleChange} required /></div></div>
+                <div className="space-y-1.5"><label htmlFor="costo" className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-1">Costo Unit.</label><div className="relative"><DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" /><Input id="costo" name="costo" type="number" placeholder="0" className="pl-6 bg-white h-9" value={formData.costo} onChange={handleChange} /></div></div>
+                <div className="space-y-1.5"><label htmlFor="precio_venta" className="text-xs font-bold text-primary uppercase">Precio Venta</label><div className="relative"><DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-primary" /><Input id="precio_venta" name="precio_venta" type="number" placeholder="0" className="pl-6 border-primary/30 bg-white h-9 font-bold" value={formData.precio_venta} onChange={handleChange} required /></div></div>
                 {(precioNum > 0 && costoNum > 0) && (<div className={`col-span-2 text-xs flex justify-between items-center px-3 py-1.5 rounded border bg-white ${parseFloat(margen) < 30 ? "text-red-600 border-red-200" : "text-emerald-700 border-emerald-200"}`}><span className="font-bold flex items-center gap-1"><TrendingUp className="h-3 w-3" /> Margen: {margen}%</span><span>Ganancia: <strong>${ganancia.toFixed(0)}</strong></span></div>)}
             </div>
 
             <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 mt-2 space-y-3">
                 <div className="flex items-center justify-between"><label className="text-sm font-bold text-slate-700 flex items-center gap-2"><Plus className="h-4 w-4 text-emerald-600" /> Stock Inicial</label></div>
                 <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1"><label className="text-[10px] font-bold text-muted-foreground uppercase">Cantidad</label><Input name="cantidad_inicial" type="number" min="0" placeholder="0" value={formData.cantidad_inicial} onChange={handleChange} className="bg-white text-lg font-bold text-center"/></div>
-                    <div className="space-y-1"><label className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1"><CalendarIcon className="h-3 w-3" /> Vencimiento</label><Input type="date" name="fecha_vencimiento" value={formData.fecha_vencimiento} onChange={handleChange} className="bg-white text-sm"/></div>
+                    <div className="space-y-1"><label htmlFor="cantidad_inicial" className="text-[10px] font-bold text-muted-foreground uppercase">Unidades</label><Input id="cantidad_inicial" name="cantidad_inicial" type="number" min="0" value={formData.cantidad_inicial} onChange={handleChange} className="bg-white text-lg font-bold text-center"/></div>
+                    <div className="space-y-1"><label htmlFor="fecha_vencimiento" className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1"><CalendarIcon className="h-3 w-3" /> Vencimiento</label><Input id="fecha_vencimiento" type="date" name="fecha_vencimiento" value={formData.fecha_vencimiento} onChange={handleChange} className="bg-white text-xs px-1"/></div>
                 </div>
             </div>
 
-            <Button type="submit" className="w-full h-12 text-md font-bold shadow-sm" disabled={loading}>{loading ? <Loader2 className="animate-spin mr-2" /> : <Save className="mr-2 h-5 w-5" />} Guardar Todo</Button>
+            <Button type="submit" className="w-full h-12 text-md font-bold shadow-sm" disabled={loading}>{loading ? <Loader2 className="animate-spin mr-2" /> : <Save className="mr-2 h-5 w-5" />} Crear y Guardar</Button>
         </form>
         </Card>
 

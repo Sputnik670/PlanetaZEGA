@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Loader2, TrendingDown, Receipt } from "lucide-react"
 import { toast } from "sonner"
 
-export default function RegistrarGasto({ turnoId, empleadoId }: { turnoId: string, empleadoId: string }) {
+export default function RegistrarGasto({ turnoId }: { turnoId: string }) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [monto, setMonto] = useState("")
@@ -24,11 +24,21 @@ export default function RegistrarGasto({ turnoId, empleadoId }: { turnoId: strin
 
     setLoading(true)
     try {
+        const { data: { user } } = await supabase.auth.getUser()
+        // 🔍 Buscamos la organización para cumplir con el esquema "Chain-First"
+        const { data: perfil } = await supabase
+            .from('perfiles')
+            .select('organization_id')
+            .eq('id', user?.id)
+            .single()
+
+        if (!perfil?.organization_id) throw new Error("No se encontró organización activa.")
+
         const { error } = await supabase
             .from('movimientos_caja')
             .insert({
-                caja_diaria_id: turnoId,
-                empleado_id: empleadoId,
+                organization_id: perfil.organization_id, // ✅ VINCULACIÓN EMPRESA
+                caja_diaria_id: turnoId,                // ✅ VINCULACIÓN TURNO (El turno ya sabe la sucursal)
                 monto: parseFloat(monto),
                 descripcion: descripcion,
                 tipo: 'egreso'
@@ -65,8 +75,9 @@ export default function RegistrarGasto({ turnoId, empleadoId }: { turnoId: strin
         
         <div className="space-y-4 py-4">
             <div className="space-y-2">
-                <Label>Monto ($)</Label>
+                <Label htmlFor="monto_gasto">Monto a retirar ($)</Label>
                 <Input 
+                    id="monto_gasto"
                     type="number" 
                     placeholder="0.00" 
                     className="text-lg font-bold"
@@ -75,9 +86,10 @@ export default function RegistrarGasto({ turnoId, empleadoId }: { turnoId: strin
                 />
             </div>
             <div className="space-y-2">
-                <Label>Motivo / Descripción</Label>
+                <Label htmlFor="motivo_gasto">Motivo / Descripción</Label>
                 <Input 
-                    placeholder="Ej: Pago proveedor Coca-Cola, Hielo, Delivery..." 
+                    id="motivo_gasto"
+                    placeholder="Ej: Pago proveedor Coca-Cola, Hielo..." 
                     value={descripcion}
                     onChange={(e) => setDescripcion(e.target.value)}
                 />
@@ -85,8 +97,8 @@ export default function RegistrarGasto({ turnoId, empleadoId }: { turnoId: strin
         </div>
 
         <DialogFooter>
-            <Button onClick={handleGuardar} disabled={loading} variant="destructive" className="w-full">
-                {loading ? <Loader2 className="animate-spin mr-2" /> : "Confirmar Retiro"}
+            <Button onClick={handleGuardar} disabled={loading} variant="destructive" className="w-full h-12 font-bold">
+                {loading ? <Loader2 className="animate-spin mr-2" /> : "CONFIRMAR RETIRO DE CAJA"}
             </Button>
         </DialogFooter>
       </DialogContent>

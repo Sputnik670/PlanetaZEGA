@@ -13,20 +13,20 @@ export interface Database {
         Row: {
           id: string
           nombre: string
-          created_at: string
           plan: string | null
+          created_at: string
         }
         Insert: {
           id?: string
           nombre: string
-          created_at?: string
           plan?: string | null
+          created_at?: string
         }
         Update: {
           id?: string
           nombre?: string
-          created_at?: string
           plan?: string | null
+          created_at?: string
         }
       }
       perfiles: {
@@ -35,16 +35,16 @@ export interface Database {
           organization_id: string | null
           rol: 'dueño' | 'empleado'
           nombre: string | null
-          email: string | null // ✅ CORREGIDO: Campo agregado
+          email: string | null
           xp: number
           created_at: string
         }
         Insert: {
           id: string
           organization_id?: string | null
-          rol?: 'dueño' | 'empleado'
+          rol: 'dueño' | 'empleado'
           nombre?: string | null
-          email?: string | null // ✅ CORREGIDO
+          email?: string | null
           xp?: number
           created_at?: string
         }
@@ -53,49 +53,31 @@ export interface Database {
           organization_id?: string | null
           rol?: 'dueño' | 'empleado'
           nombre?: string | null
-          email?: string | null // ✅ CORREGIDO
+          email?: string | null
           xp?: number
           created_at?: string
         }
       }
-      proveedores: {
+      sucursales: {
         Row: {
           id: string
           organization_id: string
           nombre: string
-          rubro: string | null
-          contacto_nombre: string | null
-          telefono: string | null
-          email: string | null
-          condicion_pago: string | null
-          saldo_actual: number          // ✅ NUEVO
-          saldo_minimo_alerta: number   // ✅ NUEVO
+          direccion: string | null
           created_at: string
         }
         Insert: {
           id?: string
-          organization_id?: string
+          organization_id: string
           nombre: string
-          rubro?: string | null
-          contacto_nombre?: string | null
-          telefono?: string | null
-          email?: string | null
-          condicion_pago?: string | null
-          saldo_actual?: number         // ✅ NUEVO
-          saldo_minimo_alerta?: number  // ✅ NUEVO
+          direccion?: string | null
           created_at?: string
         }
         Update: {
           id?: string
           organization_id?: string
           nombre?: string
-          rubro?: string | null
-          contacto_nombre?: string | null
-          telefono?: string | null
-          email?: string | null
-          condicion_pago?: string | null
-          saldo_actual?: number         // ✅ NUEVO
-          saldo_minimo_alerta?: number  // ✅ NUEVO
+          direccion?: string | null
           created_at?: string
         }
       }
@@ -115,7 +97,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          organization_id?: string
+          organization_id: string
           nombre: string
           emoji?: string | null
           categoria?: string | null
@@ -144,6 +126,7 @@ export interface Database {
         Row: {
           id: string
           organization_id: string
+          sucursal_id: string
           empleado_id: string | null
           fecha_apertura: string
           fecha_cierre: string | null
@@ -154,22 +137,26 @@ export interface Database {
         }
         Insert: {
           id?: string
-          organization_id?: string
+          organization_id: string
+          sucursal_id: string
           empleado_id?: string | null
           fecha_apertura?: string
           fecha_cierre?: string | null
           monto_inicial?: number
           monto_final?: number | null
+          diferencia?: number | null
           created_at?: string
         }
         Update: {
           id?: string
           organization_id?: string
+          sucursal_id?: string
           empleado_id?: string | null
           fecha_apertura?: string
           fecha_cierre?: string | null
           monto_inicial?: number
           monto_final?: number | null
+          diferencia?: number | null
           created_at?: string
         }
       }
@@ -186,7 +173,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          organization_id?: string
+          organization_id: string
           proveedor_id?: string | null
           monto_total: number
           estado_pago?: string | null
@@ -209,50 +196,56 @@ export interface Database {
         Row: {
           id: string
           organization_id: string
-          producto_id: string | null
-          proveedor_id: string | null
-          compra_id: string | null
+          sucursal_id: string
+          producto_id: string
           caja_diaria_id: string | null
-          fecha_ingreso: string | null
+          cantidad: number
+          tipo_movimiento: 'entrada' | 'salida'
+          metodo_pago: string | null
+          precio_venta_historico: number | null
+          costo_unitario_historico: number | null
           fecha_vencimiento: string | null
           estado: string | null
           fecha_venta: string | null
-          metodo_pago: 'efectivo' | 'tarjeta' | 'transferencia' | 'billetera_virtual' | 'otro' | null
-          fecha_mermado: string | null
-          costo_unitario_historico: number | null
+          fecha_ingreso: string
           notas: string | null
+          created_at: string
         }
         Insert: {
           id?: string
-          organization_id?: string
-          producto_id?: string | null
-          proveedor_id?: string | null
-          compra_id?: string | null
+          organization_id: string
+          sucursal_id: string
+          producto_id: string
           caja_diaria_id?: string | null
-          fecha_ingreso?: string | null
+          cantidad: number
+          tipo_movimiento: 'entrada' | 'salida'
+          metodo_pago?: string | null
+          precio_venta_historico?: number | null
+          costo_unitario_historico?: number | null
           fecha_vencimiento?: string | null
           estado?: string | null
           fecha_venta?: string | null
-          metodo_pago?: 'efectivo' | 'tarjeta' | 'transferencia' | 'billetera_virtual' | 'otro' | null
-          fecha_mermado?: string | null
-          costo_unitario_historico?: number | null
+          fecha_ingreso?: string
           notas?: string | null
+          created_at?: string
         }
         Update: {
           id?: string
           organization_id?: string
-          producto_id?: string | null
-          proveedor_id?: string | null
-          compra_id?: string | null
+          sucursal_id?: string
+          producto_id?: string
           caja_diaria_id?: string | null
-          fecha_ingreso?: string | null
+          cantidad?: number
+          tipo_movimiento?: 'entrada' | 'salida'
+          metodo_pago?: string | null
+          precio_venta_historico?: number | null
+          costo_unitario_historico?: number | null
           fecha_vencimiento?: string | null
           estado?: string | null
           fecha_venta?: string | null
-          metodo_pago?: 'efectivo' | 'tarjeta' | 'transferencia' | 'billetera_virtual' | 'otro' | null
-          fecha_mermado?: string | null
-          costo_unitario_historico?: number | null
+          fecha_ingreso?: string
           notas?: string | null
+          created_at?: string
         }
       }
       movimientos_caja: {
@@ -260,30 +253,62 @@ export interface Database {
           id: string
           organization_id: string
           caja_diaria_id: string
-          empleado_id: string | null
           monto: number
-          descripcion: string
           tipo: 'ingreso' | 'egreso'
+          descripcion: string
           created_at: string
         }
         Insert: {
           id?: string
-          organization_id?: string
+          organization_id: string
           caja_diaria_id: string
-          empleado_id?: string | null
           monto: number
+          tipo: 'ingreso' | 'egreso'
           descripcion: string
-          tipo?: 'ingreso' | 'egreso'
           created_at?: string
         }
         Update: {
           id?: string
           organization_id?: string
           caja_diaria_id?: string
-          empleado_id?: string | null
           monto?: number
-          descripcion?: string
           tipo?: 'ingreso' | 'egreso'
+          descripcion?: string
+          created_at?: string
+        }
+      }
+      proveedores: {
+        Row: {
+          id: string
+          organization_id: string
+          sucursal_id: string | null // ✅ NUEVO: Permite global (null) o local
+          nombre: string
+          rubro: string | null
+          contacto_nombre: string | null
+          telefono: string | null
+          saldo_actual: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          sucursal_id?: string | null // ✅ NUEVO
+          nombre: string
+          rubro?: string | null
+          contacto_nombre?: string | null
+          telefono?: string | null
+          saldo_actual?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          sucursal_id?: string | null // ✅ NUEVO
+          nombre?: string
+          rubro?: string | null
+          contacto_nombre?: string | null
+          telefono?: string | null
+          saldo_actual?: number
           created_at?: string
         }
       }
@@ -303,7 +328,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          organization_id?: string
+          organization_id: string
           empleado_id: string
           caja_diaria_id?: string | null
           tipo: 'vencimiento' | 'arqueo_cierre' | 'manual'
@@ -328,6 +353,35 @@ export interface Database {
           created_at?: string
         }
       }
+      plantillas_misiones: {
+        Row: {
+          id: string
+          organization_id: string
+          sucursal_id: string | null // ✅ NUEVO: Para rutinas por local
+          descripcion: string
+          puntos: number
+          activa: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          sucursal_id?: string | null
+          descripcion: string
+          puntos?: number
+          activa?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          sucursal_id?: string | null
+          descripcion?: string
+          puntos?: number
+          activa?: boolean
+          created_at?: string
+        }
+      }
       historial_precios: {
         Row: {
           id: string
@@ -342,7 +396,7 @@ export interface Database {
         }
         Insert: {
           id?: string
-          organization_id?: string
+          organization_id: string
           producto_id?: string | null
           empleado_id?: string | null
           precio_venta_anterior?: number | null
@@ -376,6 +430,7 @@ export interface Database {
           precio_venta: number
           costo: number
           stock_minimo: number
+          sucursal_id: string | null
           stock_disponible: number
         }
       }

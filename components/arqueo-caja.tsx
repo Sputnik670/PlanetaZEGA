@@ -1,4 +1,3 @@
-// components/arqueo-caja.tsx
 "use client"
 
 import { useState, useEffect } from "react"
@@ -12,9 +11,7 @@ import { Loader2, DollarSign, Lock, Unlock, Calculator, AlertCircle } from "luci
 import { toast } from "sonner"
 import { format, addDays, parseISO } from "date-fns"
 import { triggerConfetti } from "@/components/confetti-trigger"
-import { cn } from "@/lib/utils"
 
-// ✅ Interfaces robustas para eliminar @ts-ignore
 export interface CajaDiaria {
     id: string
     organization_id: string
@@ -38,7 +35,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
   const [loading, setLoading] = useState(false)
   const [caja, setCaja] = useState<CajaDiaria | null>(turnoActivo)
 
-  // Sincronizar el estado interno si el prop cambia
   useEffect(() => {
     setCaja(turnoActivo)
   }, [turnoActivo])
@@ -48,7 +44,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
       const hoy = new Date()
       const fechaLimite = format(addDays(hoy, 10), 'yyyy-MM-dd')
 
-      // 1. Auditamos stock SOLO de esta sucursal para misiones inteligentes
       const { data: stockCritico } = await supabase
         .from('stock')
         .select('cantidad')
@@ -60,7 +55,7 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
       const totalUnidadesRiesgo = stockCritico?.reduce((acc, curr) => acc + (curr.cantidad || 0), 0) || 0
       const misionesABulkInsert = []
       
-      // ✅ CAMBIO REALIZADO: Descripción operativa orientada a la gestión física (FIFO)
+      // ✅ MISIÓN EDUCATIVA FIFO
       if (totalUnidadesRiesgo > 0) {
         misionesABulkInsert.push({
           organization_id: orgId,
@@ -75,7 +70,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
         })
       }
       
-      // Misión B: Arqueo Limpio
       misionesABulkInsert.push({
         organization_id: orgId,
         empleado_id: empleadoId,
@@ -88,7 +82,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
         puntos: 20, 
       })
 
-      // 2. Cargar Plantillas (Rutinas) específicas de la sucursal o globales
       const { data: plantillas } = await supabase
           .from('plantillas_misiones')
           .select('*')
@@ -161,14 +154,12 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
 
     setLoading(true)
     try {
-      // 1. Cálculo de ventas efectivo
       const { data: vData } = await supabase.from('stock')
         .select('cantidad, precio_venta_historico')
         .eq('caja_diaria_id', caja.id).eq('metodo_pago', 'efectivo').eq('tipo_movimiento', 'salida') 
 
       const totalVentasEfectivo = vData?.reduce((sum, i) => sum + ((i.precio_venta_historico || 0) * (i.cantidad || 1)), 0) || 0
 
-      // 2. Cálculo de gastos
       const { data: gData } = await supabase.from('movimientos_caja').select('monto').eq('caja_diaria_id', caja.id).eq('tipo', 'egreso')
       const totalGastos = gData?.reduce((sum, i) => sum + i.monto, 0) || 0
 

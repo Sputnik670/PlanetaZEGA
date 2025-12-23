@@ -1,4 +1,3 @@
-// components/profile-setup.tsx
 "use client"
 
 import { useState } from "react"
@@ -7,6 +6,7 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, User, Store, Check } from "lucide-react"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
 
 interface ProfileSetupProps {
   user: any
@@ -27,16 +27,16 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
     setLoading(true)
 
     try {
-      // 🔍 PASO 0: VERIFICACIÓN QUIRÚRGICA
-      // Verificamos si por algún error de un intento previo el perfil ya existe
-      const { data: perfilExistente, error: checkError } = await supabase
+      // 🔍 PASO 0: VERIFICACIÓN QUIRÚRGICA (IDEMPOTENCIA)
+      // Evita duplicados si el usuario refresca o da doble clic
+      const { data: perfilExistente } = await supabase
         .from('perfiles')
         .select('id, rol')
         .eq('id', user.id)
         .maybeSingle()
 
       if (perfilExistente) {
-        console.log("Perfil ya detectado. Evitando duplicado y redirigiendo...");
+        console.log("Perfil recuperado. Redirigiendo...")
         toast.success("Perfil recuperado", { description: "Ya tienes una configuración activa." })
         onProfileCreated(perfilExistente.rol as "dueño" | "empleado")
         return 
@@ -56,7 +56,7 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
         orgId = orgData.id
       } 
       
-      // 2. Insertamos el perfil (Vínculo atómico)
+      // 2. Insertamos el perfil
       const { error: insertError } = await supabase
         .from('perfiles')
         .insert({ 
@@ -68,7 +68,7 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
         })
 
       if (insertError) {
-        // Manejo específico para el error de clave duplicada (23505)
+        // Si falló por duplicado justo en este milisegundo (race condition)
         if (insertError.code === '23505') {
           onProfileCreated(selectedRole)
           return
@@ -78,13 +78,13 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
 
       toast.success("¡Bienvenido!", { description: "Tu local está listo para operar." })
       
-      // Notificamos al Dashboard con un pequeño delay para asegurar la persistencia
+      // Delay para asegurar propagación
       setTimeout(() => onProfileCreated(selectedRole), 800)
 
     } catch (error: any) {
-      console.error("Error en el setup del perfil:", error)
+      console.error("Error setup:", error)
       toast.error("No se pudo completar el registro", { 
-        description: error.message || "Por favor, intenta de nuevo o revisa tu conexión." 
+        description: error.message || "Intenta nuevamente." 
       })
     } finally {
       setLoading(false)
@@ -165,9 +165,4 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
       </div>
     </div>
   )
-}
-
-// Helper para clases condicionales
-function cn(...classes: any[]) {
-  return classes.filter(Boolean).join(" ")
 }

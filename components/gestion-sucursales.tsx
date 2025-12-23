@@ -190,7 +190,7 @@ export default function GestionSucursales({ onUpdate }: GestionSucursalesProps) 
         {sucursales.length > 0 && (
              <div className="flex items-start gap-2 text-[10px] text-muted-foreground bg-blue-50 p-2 rounded border border-blue-100">
                 <AlertTriangle className="h-3 w-3 mt-0.5 text-blue-500" />
-                <p>Las sucursales creadas aquí aparecerán como opciones para tus empleados al momento de fichar entrada.</p>
+                <p>Las sucursales creadas aquí aparecerán como opciones para tus empleados al momento de fichar la entrada.</p>
              </div>
         )}
     </div>

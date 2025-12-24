@@ -1,5 +1,3 @@
-// components/misiones-empleado.tsx
-
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
@@ -13,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils" 
 import { triggerConfetti } from "@/components/confetti-trigger"
+import { Badge } from "@/components/ui/badge";
 
 interface Mision {
     id: string
@@ -22,22 +21,8 @@ interface Mision {
     unidades_completadas: number
     es_completada: boolean
     puntos: number
-    // ✅ CAMBIO 1: Necesitamos este campo para saber si es global (null) o del turno
     caja_diaria_id: string | null 
     created_at: string
-}
-
-interface ProductoJoin {
-    nombre: string
-    emoji: string
-    precio_venta: number 
-}
-
-interface StockJoin {
-    id: string
-    producto_id: string
-    fecha_vencimiento: string
-    productos: ProductoJoin | null 
 }
 
 interface StockCritico {
@@ -52,88 +37,55 @@ interface StockCritico {
 interface MisionesEmpleadoProps {
     turnoId: string
     empleadoId: string 
+    sucursalId: string // ✅ AGREGADO: Necesario para filtrar stock local
     onMisionesUpdated: () => void
 }
 
-export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdated }: MisionesEmpleadoProps) {
+export default function MisionesEmpleado({ turnoId, empleadoId, sucursalId, onMisionesUpdated }: MisionesEmpleadoProps) {
     const [misiones, setMisiones] = useState<Mision[]>([])
     const [loading, setLoading] = useState(true)
     const [procesando, setProcesando] = useState(false)
-    
-    // Estados para el modal de Mermar Stock
     const [showMermarModal, setShowMermarModal] = useState(false)
     const [stockParaMermar, setStockParaMermar] = useState<StockCritico[]>([])
     const [misionVencimiento, setMisionVencimiento] = useState<Mision | null>(null)
 
-    // Helper para sumar XP real a la base de datos
+    // Sincronización de XP (Mantenemos lógica pero aseguramos consistencia)
     const sumarPuntosAlPerfil = async (puntos: number) => {
-        console.log(`Intentando sumar ${puntos} XP al empleado ${empleadoId}...`);
-
         try {
-            const { data: perfil, error: fetchError } = await supabase
-                .from('perfiles')
-                .select('xp')
-                .eq('id', empleadoId)
-                .single()
-            
-            if (fetchError) throw new Error(`No se pudo leer el perfil: ${fetchError.message}`);
-
+            const { data: perfil } = await supabase.from('perfiles').select('xp').eq('id', empleadoId).single()
             const nuevoXP = (perfil?.xp || 0) + puntos
-
-            const { error: updateError } = await supabase
-                .from('perfiles')
-                .update({ xp: nuevoXP })
-                .eq('id', empleadoId)
-            
-            if (updateError) throw new Error(`No se pudo actualizar XP: ${updateError.message}`);
-            
+            await supabase.from('perfiles').update({ xp: nuevoXP }).eq('id', empleadoId)
             onMisionesUpdated() 
-
-        } catch (err: any) {
-            console.error("❌ Error CRÍTICO sumando XP:", JSON.stringify(err, null, 2))
-            const msg = err.message || "Error desconocido";
-            if (msg.includes("row-level security") || msg.includes("permission")) {
-                toast.error("Error de Permisos", { description: "Tu usuario no tiene permiso para actualizar su puntaje. Contacta al dueño." })
-            } else {
-                toast.error("Error de conexión", { description: "No se pudieron guardar los puntos." })
-            }
+        } catch (err) {
+            console.error("Error sumando XP:", err)
         }
     }
 
     const fetchMisiones = useCallback(async () => {
         setLoading(true)
         try {
-            // ✅ CAMBIO 2: Lógica OR para traer misiones del turno actual O misiones huerfanas (globales)
             const { data, error } = await supabase
                 .from('misiones')
                 .select('*')
-                .eq('empleado_id', empleadoId) // Filtro base: Solo mis misiones
-                .or(`caja_diaria_id.eq.${turnoId},caja_diaria_id.is.null`) // Del turno O huérfanas
+                .eq('empleado_id', empleadoId)
+                .or(`caja_diaria_id.eq.${turnoId},caja_diaria_id.is.null`)
                 .order('created_at', { ascending: true })
 
             if (error) throw error
             
-            // Filtramos en memoria para limpiar globales viejas que ya estén completadas pero no vinculadas
-            const misionesFiltradas = (data as Mision[]).filter(m => {
-                // 1. Si es del turno actual, la mostramos siempre
-                if (m.caja_diaria_id === turnoId) return true;
-                // 2. Si es global (null) y NO está completada, la mostramos (tarea pendiente)
-                if (!m.caja_diaria_id && !m.es_completada) return true;
-                return false; 
-            });
+            const misionesFiltradas = (data as Mision[]).filter(m => 
+                m.caja_diaria_id === turnoId || (!m.caja_diaria_id && !m.es_completada)
+            )
 
             setMisiones(misionesFiltradas)
-            
-            const vencimientoMision = misionesFiltradas.find(m => m.tipo === 'vencimiento')
-            setMisionVencimiento((vencimientoMision as Mision) || null)
+            setMisionVencimiento(misionesFiltradas.find(m => m.tipo === 'vencimiento') || null)
 
         } catch (error) {
-            console.error("Error fetching misiones:", error)
-            toast.error("Error de Misiones", { description: "No se pudieron cargar las tareas." })
+            toast.error("Error cargando tareas")
         } finally {
             setLoading(false)
         }
-    }, [turnoId, empleadoId]) // Agregamos empleadoId a dependencias
+    }, [turnoId, empleadoId])
 
     const handleOpenMermarModal = async () => {
         if (!misionVencimiento) return
@@ -142,20 +94,20 @@ export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdate
             const hoy = new Date()
             const fechaLimite = format(addDays(hoy, 7), 'yyyy-MM-dd') 
             
+            // ✅ CORRECCIÓN QUIRÚRGICA: Filtramos el stock estrictamente por sucursalId
             const { data, error } = await supabase.from('stock')
                 .select(`id, producto_id, fecha_vencimiento, productos(nombre, emoji, precio_venta)`)
-                .eq('estado', 'pendiente')
+                .eq('sucursal_id', sucursalId) // Seguridad multi-local
+                .eq('estado', 'disponible')
                 .lt('fecha_vencimiento', fechaLimite)
                 .order('fecha_vencimiento', { ascending: true })
-                .returns<StockJoin[]>()
             
             if (error) throw error
             
-            const stockItems = data || []
-            const stockCriticoFormateado: StockCritico[] = stockItems.map(item => ({
+            const stockCriticoFormateado: StockCritico[] = (data || []).map((item: any) => ({
                 id: item.id,
                 producto_id: item.producto_id,
-                nombre_producto: item.productos?.nombre || 'Producto Desconocido', 
+                nombre_producto: item.productos?.nombre || 'Producto', 
                 emoji_producto: item.productos?.emoji || '📦',
                 fecha_vencimiento: item.fecha_vencimiento,
                 precio_venta: item.productos?.precio_venta || 0
@@ -164,7 +116,7 @@ export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdate
             setStockParaMermar(stockCriticoFormateado)
             setShowMermarModal(true)
         } catch (error: any) {
-            toast.error("Error", { description: error.message })
+            toast.error("Error al buscar stock")
         } finally {
             setProcesando(false)
         }
@@ -173,204 +125,167 @@ export default function MisionesEmpleado({ turnoId, empleadoId, onMisionesUpdate
     const handleCompletarManual = async (mision: Mision) => {
         setProcesando(true)
         try {
-            // ✅ CAMBIO 3: Si la misión era global, la vinculamos al turno actual al completarla
-            const updateData: any = { 
-                es_completada: true, 
-                unidades_completadas: 1 
-            }
-            if (!mision.caja_diaria_id) {
-                updateData.caja_diaria_id = turnoId // Vinculación
-            }
+            const updateData: any = { es_completada: true, unidades_completadas: 1 }
+            if (!mision.caja_diaria_id) updateData.caja_diaria_id = turnoId
 
-            const { error } = await supabase
-                .from('misiones')
-                .update(updateData)
-                .eq('id', mision.id)
-
+            const { error } = await supabase.from('misiones').update(updateData).eq('id', mision.id)
             if (error) throw error
 
             await sumarPuntosAlPerfil(mision.puntos)
-
             triggerConfetti()
-            toast.success("¡Excelente!", { description: `Completaste: ${mision.descripcion} (+${mision.puntos} XP)` })
-            
+            toast.success(`Misión Cumplida (+${mision.puntos} XP)`)
             fetchMisiones()     
         } catch (error: any) {
-            toast.error("Error", { description: error.message })
+            toast.error("Error al completar")
         } finally {
             setProcesando(false)
         }
     }
 
     const handleMermarStock = async () => {
-        if (stockParaMermar.length === 0 || !misionVencimiento) {
-            toast.warning("Sin Tareas", { description: "No hay stock crítico para mermar." })
-            return
-        }
+        if (stockParaMermar.length === 0 || !misionVencimiento) return
         setProcesando(true)
         setShowMermarModal(false)
         try {
             const stockIdsToUpdate = stockParaMermar.map(item => item.id)
             const unidadesMermadas = stockIdsToUpdate.length
             
-            const { error: stockUpdateError } = await supabase
-                .from('stock')
-                .update({ estado: 'mermado', fecha_mermado: new Date().toISOString() })
+            // 1. Actualizar estado del stock a 'mermado'
+            await supabase.from('stock')
+                .update({ estado: 'mermado', fecha_venta: new Date().toISOString() }) // Usamos fecha_venta para loggear el movimiento
                 .in('id', stockIdsToUpdate)
             
-            if (stockUpdateError) throw stockUpdateError
-
+            // 2. Actualizar progreso de la misión
             const nuevoProgreso = misionVencimiento.unidades_completadas + unidadesMermadas
             const misionCompletada = nuevoProgreso >= misionVencimiento.objetivo_unidades
 
-            // ✅ CAMBIO 4: Vinculamos al turno también si se completa por mermas
             const updateMisionData: any = { 
                 unidades_completadas: nuevoProgreso, 
                 es_completada: misionCompletada 
             }
-            if (misionCompletada && !misionVencimiento.caja_diaria_id) {
-                updateMisionData.caja_diaria_id = turnoId
-            }
+            if (misionCompletada && !misionVencimiento.caja_diaria_id) updateMisionData.caja_diaria_id = turnoId
 
-            const { error: misionUpdateError } = await supabase
-                .from('misiones')
-                .update(updateMisionData)
-                .eq('id', misionVencimiento.id)
-            
-            if (misionUpdateError) throw misionUpdateError
-
-            toast.success("Mermado Registrado ✅", { description: `Se procesaron ${unidadesMermadas} unidades.` })
+            await supabase.from('misiones').update(updateMisionData).eq('id', misionVencimiento.id)
             
             if (misionCompletada) {
                 await sumarPuntosAlPerfil(misionVencimiento.puntos)
                 triggerConfetti() 
-                toast.success(`✨ ¡MISIÓN COMPLETADA!`, { description: `Ganaste +${misionVencimiento.puntos} puntos.` })
-            } else {
-                fetchMisiones() 
             }
-
-            setStockParaMermar([])
-        } catch (error: any) {
-            console.error(error)
-            toast.error("Error al procesar")
+            toast.success("Mermas registradas")
+            fetchMisiones() 
+        } catch (error) {
+            toast.error("Error al procesar mermas")
         } finally {
             setProcesando(false)
         }
     }
 
     useEffect(() => {
-        if (turnoId && empleadoId) {
-            fetchMisiones()
-        }
-    }, [turnoId, empleadoId, onMisionesUpdated, fetchMisiones])
+        if (turnoId && empleadoId) fetchMisiones()
+    }, [turnoId, empleadoId, fetchMisiones])
 
-    if (loading) return <div className="p-8 text-center"><Loader2 className="animate-spin h-8 w-8 text-primary mx-auto" /></div>
-    
     const getMissionStatus = (m: Mision) => {
         if (m.es_completada) return { label: "Completada", color: "text-emerald-600", icon: CheckCheck, bg: "bg-emerald-50 border-emerald-200" }
         if (m.tipo === 'vencimiento' && m.unidades_completadas > 0) return { label: "En Progreso", color: "text-orange-600", icon: Target, bg: "bg-orange-50 border-orange-200" }
-        if (m.tipo === 'arqueo_cierre') return { label: "Pendiente de Cierre", color: "text-blue-600", icon: Zap, bg: "bg-white" }
-        if (m.tipo === 'manual') return { label: "Tarea Pendiente", color: "text-indigo-600", icon: ClipboardCheck, bg: "bg-indigo-50 border-indigo-200" }
-        return { label: "Activa", color: "text-primary", icon: Target, bg: "bg-white" }
+        if (m.tipo === 'arqueo_cierre') return { label: "Meta de Cierre", color: "text-blue-600", icon: Zap, bg: "bg-white" }
+        return { label: "Tarea Activa", color: "text-indigo-600", icon: ClipboardCheck, bg: "bg-white" }
     }
 
     return (
-        <div className="space-y-4">
-            <h2 className="text-2xl font-bold flex items-center gap-2 text-primary"><Target className="h-6 w-6" /> Misiones del Día</h2>
+        <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <h2 className="text-xl font-black uppercase tracking-tighter flex items-center gap-2 text-slate-800">
+                    <Target className="h-6 w-6 text-blue-500" /> Hoja de Ruta
+                </h2>
+                <Badge variant="outline" className="font-bold text-[10px] border-2 uppercase">{misiones.length} Tareas</Badge>
+            </div>
             
-            {misiones.length === 0 ? (
-                <Card className="p-6 text-center text-muted-foreground bg-muted/20 border-dashed"><p>No hay misiones activas.</p></Card>
-            ) : (
-                misiones.map((m) => {
-                    const status = getMissionStatus(m)
-                    const Icon = status.icon
-                    const isVencimiento = m.tipo === 'vencimiento'
-                    const isManual = m.tipo === 'manual'
-                    let ButtonAction = null
+            <div className="grid gap-4">
+                {misiones.length === 0 ? (
+                    <Card className="p-10 text-center border-dashed border-2 bg-slate-50">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Sin misiones para este turno</p>
+                    </Card>
+                ) : (
+                    misiones.map((m) => {
+                        const status = getMissionStatus(m)
+                        const Icon = status.icon
+                        const porcentaje = Math.min((m.unidades_completadas / m.objetivo_unidades) * 100, 100)
 
-                    if (!m.es_completada) {
-                        if (isVencimiento) {
-                            ButtonAction = (
-                                <Button onClick={handleOpenMermarModal} disabled={procesando} size="sm" className="bg-orange-500 hover:bg-orange-600 text-white w-full mt-2">
-                                    {procesando ? <Loader2 className="animate-spin h-4 w-4" /> : "Gestionar Stock en Riesgo"}
-                                </Button>
-                            )
-                        } else if (isManual) {
-                            ButtonAction = (
-                                <Button onClick={() => handleCompletarManual(m)} disabled={procesando} size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white w-full mt-2 shadow-sm">
-                                    {procesando ? <Loader2 className="animate-spin h-4 w-4" /> : "Marcar como Hecho ✅"}
-                                </Button>
-                            )
-                        }
-                    }
-
-                    const porcentaje = m.objetivo_unidades > 0 ? Math.min((m.unidades_completadas / m.objetivo_unidades) * 100, 100) : 0
-
-                    return (
-                        <Card key={m.id} className={cn("p-4 shadow-sm border-2 transition-all", status.bg)}>
-                            <div className="flex items-start justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className={cn("p-2 rounded-full bg-white/50", status.color)}><Icon className="h-5 w-5" /></div>
-                                    <div>
-                                        <p className="font-bold text-sm text-foreground">{m.descripcion}</p>
-                                        <p className={cn("text-xs font-bold uppercase mt-0.5", status.color)}>{status.label}</p>
-                                        {/* Indicador de que es una misión global */}
-                                        {!m.caja_diaria_id && !m.es_completada && (
-                                            <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1 rounded ml-1 font-bold">GLOBAL</span>
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="text-right flex-shrink-0">
-                                    <div className="text-xl font-black text-yellow-500 flex items-center justify-end gap-1">+{m.puntos} <span className="text-xs text-muted-foreground">XP</span></div>
-                                </div>
-                            </div>
-                            {(isVencimiento || isManual) && (
-                                <div className="pt-3 mt-2 border-t border-black/5">
-                                    {isVencimiento && (
-                                        <>
-                                            <div className="flex justify-between items-center text-xs font-semibold mb-2"><span>Progreso</span><span>{m.unidades_completadas} / {m.objetivo_unidades} u.</span></div>
-                                            <Progress value={porcentaje} className="h-2 bg-gray-200 [&>div]:bg-orange-500" />
-                                        </>
-                                    )}
-                                    {ButtonAction}
-                                </div>
-                            )}
-                        </Card>
-                    )
-                })
-            )}
-            
-            {/* Modal de Mermas (Se mantiene igual) */}
-            <Dialog open={showMermarModal} onOpenChange={setShowMermarModal}>
-                <DialogContent className="sm:max-w-[425px]">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2 text-orange-600"><AlertTriangle className="h-5 w-5" /> Gestionar Stock Crítico</DialogTitle>
-                    </DialogHeader>
-                    {stockParaMermar.length > 0 ? (
-                        <div className="max-h-64 overflow-y-auto space-y-2 py-4 border-y">
-                            <div className="p-3 bg-orange-50 border border-orange-100 rounded-lg text-sm text-orange-800 mb-2">
-                                <strong>Acción:</strong> Retirar <span className="font-bold">{stockParaMermar.length} unidades</span> próximas a vencer.
-                            </div>
-                            {stockParaMermar.map((item) => (
-                                <div key={item.id} className="flex items-center justify-between p-2 bg-white border rounded-lg shadow-sm">
-                                    <div className="flex items-center gap-3">
-                                        <span className="text-xl bg-slate-100 p-1 rounded">{item.emoji_producto}</span>
-                                        <div className="flex flex-col">
-                                            <span className="font-bold text-sm">{item.nombre_producto}</span>
-                                            <span className="text-[10px] text-muted-foreground">ID: ...{String(item.id).slice(-4)}</span>
+                        return (
+                            <Card key={m.id} className={cn("p-5 border-2 rounded-[1.5rem] transition-all shadow-sm", status.bg)}>
+                                <div className="flex items-start justify-between gap-4">
+                                    <div className="flex items-start gap-4">
+                                        <div className={cn("p-3 rounded-2xl bg-white shadow-sm", status.color)}>
+                                            <Icon className="h-5 w-5" />
+                                        </div>
+                                        <div>
+                                            <p className="font-black text-sm text-slate-800 uppercase leading-tight">{m.descripcion}</p>
+                                            <p className={cn("text-[10px] font-black uppercase mt-1 tracking-widest", status.color)}>
+                                                {status.label} {!m.caja_diaria_id && "• Global"}
+                                            </p>
                                         </div>
                                     </div>
-                                    <div className="text-right"><p className="text-xs font-bold text-destructive">Vence: {format(parseISO(item.fecha_vencimiento), 'dd/MM')}</p></div>
+                                    <div className="text-right">
+                                        <div className="text-lg font-black text-blue-600">+{m.puntos} <span className="text-[10px] text-slate-400">XP</span></div>
+                                    </div>
+                                </div>
+
+                                {!m.es_completada && (
+                                    <div className="mt-5 pt-4 border-t border-slate-100">
+                                        {m.tipo === 'vencimiento' ? (
+                                            <div className="space-y-3">
+                                                <div className="flex justify-between text-[10px] font-black uppercase text-slate-400">
+                                                    <span>Progreso</span>
+                                                    <span>{m.unidades_completadas} / {m.objetivo_unidades} U.</span>
+                                                </div>
+                                                <Progress value={porcentaje} className="h-2 bg-slate-100" />
+                                                <Button onClick={handleOpenMermarModal} disabled={procesando} className="w-full bg-orange-500 hover:bg-orange-600 font-black text-[10px] uppercase h-10 rounded-xl shadow-lg shadow-orange-100">
+                                                    {procesando ? <Loader2 className="animate-spin h-4 w-4" /> : "Ejecutar Retiro de Stock"}
+                                                </Button>
+                                            </div>
+                                        ) : m.tipo === 'manual' ? (
+                                            <Button onClick={() => handleCompletarManual(m)} disabled={procesando} className="w-full bg-blue-600 hover:bg-blue-700 font-black text-[10px] uppercase h-10 rounded-xl shadow-lg shadow-blue-100">
+                                                Confirmar Acción Realizada
+                                            </Button>
+                                        ) : null}
+                                    </div>
+                                )}
+                            </Card>
+                        )
+                    })
+                )}
+            </div>
+
+            {/* Modal de Mermas (Filtrado por sucursalId) */}
+            <Dialog open={showMermarModal} onOpenChange={setShowMermarModal}>
+                <DialogContent className="sm:max-w-md rounded-[2.5rem] p-8 border-0 shadow-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-orange-600 font-black uppercase tracking-tighter">
+                            <AlertTriangle className="h-6 w-6" /> Retiro de Mercadería
+                        </DialogTitle>
+                    </DialogHeader>
+                    
+                    <div className="py-4 space-y-4">
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest bg-orange-50 p-4 rounded-2xl border-2 border-orange-100 leading-relaxed">
+                            Confirma que vas a retirar estas unidades del mostrador para evitar ventas de productos vencidos en <span className="text-orange-700 underline">este local</span>.
+                        </p>
+                        
+                        <div className="max-h-60 overflow-y-auto space-y-2 pr-2 scrollbar-hide">
+                            {stockParaMermar.map((item) => (
+                                <div key={item.id} className="flex items-center justify-between p-3 bg-white border-2 rounded-xl">
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-2xl">{item.emoji_producto}</span>
+                                        <span className="font-black text-xs uppercase text-slate-700">{item.nombre_producto}</span>
+                                    </div>
+                                    <Badge className="bg-red-100 text-red-600 border-0 font-black text-[9px]">VENCE: {format(parseISO(item.fecha_vencimiento), 'dd/MM')}</Badge>
                                 </div>
                             ))}
                         </div>
-                    ) : (
-                        <div className="text-center py-8"><Package className="h-10 w-10 mx-auto text-muted-foreground/50 mb-3" /><p className="text-muted-foreground">Buscando stock...</p></div>
-                    )}
-                    <DialogFooter className="gap-2 sm:gap-0">
-                        <Button variant="outline" onClick={() => setShowMermarModal(false)}>Cancelar</Button>
-                        <Button onClick={handleMermarStock} disabled={procesando || stockParaMermar.length === 0} className="bg-destructive hover:bg-destructive/90 text-white font-bold">
-                            {procesando ? <Loader2 className="animate-spin h-5 w-5" /> : `CONFIRMAR RETIRO`}
+                    </div>
+
+                    <DialogFooter>
+                        <Button onClick={handleMermarStock} disabled={procesando} className="w-full h-14 bg-red-600 hover:bg-red-700 text-white font-black rounded-2xl shadow-xl">
+                            {procesando ? <Loader2 className="animate-spin h-5 w-5" /> : `CONFIRMAR RETIRO DE ${stockParaMermar.length} UNIDADES`}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

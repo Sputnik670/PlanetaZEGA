@@ -1,20 +1,19 @@
-// components/vista-empleado.tsx
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"     // ✅ Agregado
-import { Badge } from "@/components/ui/badge"   // ✅ Agregado
+import { Card } from "@/components/ui/card" 
+import { Badge } from "@/components/ui/badge" 
 import { 
   LogOut, Loader2, ShoppingCart, Target, 
-  Trophy, AlertTriangle, Star, Lock 
+  Trophy, AlertTriangle, Lock, MapPin 
 } from "lucide-react" 
 import { toast } from "sonner"
 import CajaVentas from "@/components/caja-ventas" 
 import ArqueoCaja, { CajaDiaria } from "@/components/arqueo-caja" 
 import MisionesEmpleado from "@/components/misiones-empleado"
-import RegistrarGasto from "@/components/registrar-gasto"
+import RegistrarMovimiento from "@/components/registrar-movimientos"
 import GestionVencimientos from "@/components/gestion-vencimientos" 
 import WidgetServicios from "@/components/widget-servicios" 
 import WidgetSube from "@/components/widget-sube"
@@ -39,8 +38,8 @@ export default function VistaEmpleado({ onBack, sucursalId }: VistaEmpleadoProps
     const [activeTab, setActiveTab] = useState<"caja" | "misiones" | "vencimientos">("caja")
     const [turnoActivo, setTurnoActivo] = useState<CajaDiaria | null>(null)
     const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
-    const [sucursalNombre, setSucursalNombre] = useState("") // ✅ Para el reloj
-    const [isClockedIn, setIsClockedIn] = useState(false) // ✅ Control de acceso
+    const [sucursalNombre, setSucursalNombre] = useState("") 
+    const [isClockedIn, setIsClockedIn] = useState(false) 
     const [refreshKey, setRefreshKey] = useState(0) 
 
     const fetchContexto = useCallback(async () => {
@@ -48,15 +47,15 @@ export default function VistaEmpleado({ onBack, sucursalId }: VistaEmpleadoProps
             const { data: { user } } = await supabase.auth.getUser()
             if (!user) return
 
-            // 1. Perfil y XP
+            // 1. Perfil y Progreso (XP)
             const { data: perfil } = await supabase.from('perfiles').select('id, nombre, rol, xp').eq('id', user.id).single()
             setUserProfile(perfil as UserProfile)
 
-            // 2. Nombre de Sucursal
+            // 2. Datos de la Sucursal Seleccionada
             const { data: sucursal } = await supabase.from('sucursales').select('nombre').eq('id', sucursalId).single()
             setSucursalNombre(sucursal?.nombre || "Sucursal")
 
-            // 3. Verificar Asistencia (Fichaje)
+            // 3. Verificación de Asistencia
             const { data: asistencia } = await supabase
                 .from('asistencia')
                 .select('id')
@@ -67,7 +66,7 @@ export default function VistaEmpleado({ onBack, sucursalId }: VistaEmpleadoProps
             
             setIsClockedIn(!!asistencia)
 
-            // 4. Verificar Caja Activa
+            // 4. Verificación de Caja
             const { data: caja } = await supabase
                 .from('caja_diaria')
                 .select('*')
@@ -79,7 +78,8 @@ export default function VistaEmpleado({ onBack, sucursalId }: VistaEmpleadoProps
             setTurnoActivo(caja as CajaDiaria || null)
 
         } catch (error) {
-            console.error("Error de contexto:", error)
+            console.error("Error de contexto operativo:", error)
+            toast.error("Error de conexión con la sucursal")
         } finally {
             setLoading(false)
         }
@@ -91,7 +91,7 @@ export default function VistaEmpleado({ onBack, sucursalId }: VistaEmpleadoProps
 
     const handleDataUpdated = () => setRefreshKey(prev => prev + 1)
 
-    // --- Lógica de Nivel ---
+    // --- Lógica de Gamificación ---
     const XP_PER_LEVEL = 3000
     const currentXP = userProfile?.xp || 0
     const level = Math.floor(currentXP / XP_PER_LEVEL) + 1
@@ -101,69 +101,65 @@ export default function VistaEmpleado({ onBack, sucursalId }: VistaEmpleadoProps
         return (
             <div className="min-h-screen flex items-center justify-center bg-slate-50">
                 <div className="text-center">
-                    <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto mb-4" />
-                    <p className="text-xs font-black uppercase text-slate-400 tracking-widest">Sincronizando con la central...</p>
+                    <Loader2 className="h-10 w-10 animate-spin text-blue-600 mx-auto mb-4" />
+                    <p className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em]">Conectando al Kiosco...</p>
                 </div>
             </div>
         )
     }
 
     return (
-        <div className="min-h-screen bg-background pb-24">
-            
-            {/* Header Gamificado */}
-            <div className="bg-slate-900 text-white p-6 rounded-b-[2.5rem] shadow-xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
-                    <Trophy className="h-32 w-32 rotate-12" />
+        <div className="min-h-screen bg-slate-50 pb-24">
+            <div className="bg-slate-900 text-white p-6 rounded-b-[3rem] shadow-2xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
+                    <Trophy className="h-24 w-24 rotate-12 text-yellow-400" />
                 </div>
 
                 <div className="flex justify-between items-start relative z-10">
                     <div>
-                        <h1 className="text-2xl font-black mb-1 uppercase tracking-tighter">{userProfile?.nombre || "Empleado"}</h1>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em]">Operador de Kiosco</p>
+                        <h1 className="text-2xl font-black mb-1 uppercase tracking-tighter">{userProfile?.nombre || "Operador"}</h1>
+                        <div className="flex items-center gap-1.5">
+                            <MapPin className="h-3 w-3 text-blue-400" />
+                            <p className="text-[10px] text-blue-300 font-bold uppercase tracking-widest">{sucursalNombre}</p>
+                        </div>
                     </div>
                     <Button variant="ghost" size="icon" onClick={onBack} className="text-slate-400 hover:text-white hover:bg-white/10 rounded-full">
                         <LogOut className="h-5 w-5" />
                     </Button>
                 </div>
                 
-                <div className="mt-6 relative z-10">
-                    <div className="flex justify-between items-end mb-2">
-                        <div className="flex items-center gap-2">
-                            <Badge className="bg-yellow-400 text-yellow-950 font-black text-[10px] px-2 py-0.5 border-0">NIVEL {level}</Badge>
-                            <span className="text-[11px] font-black text-white/60 uppercase">{currentXP} XP ACUMULADOS</span>
-                        </div>
+                <div className="mt-8 relative z-10">
+                    <div className="flex justify-between items-center mb-2">
+                        <Badge className="bg-blue-600 text-white font-black text-[9px] px-2 py-0.5 border-0">LVL {level}</Badge>
+                        <span className="text-[9px] font-black text-white/40 uppercase tracking-widest">{currentXP} XP</span>
                     </div>
-                    <Progress value={progressPercent} className="h-2 bg-white/5 border border-white/10" />
+                    <Progress value={progressPercent} className="h-1.5 bg-white/10" />
                 </div>
             </div>
 
-            <div className="p-4 space-y-4 -mt-4">
-                
-                {/* ⏱️ PASO 1: RELOJ DE CONTROL (Siempre visible) */}
+            <div className="p-4 space-y-4 -mt-6">
                 <div className="relative z-20">
                     <RelojControl 
                         sucursalId={sucursalId} 
                         sucursalNombre={sucursalNombre} 
-                        // El refreshKey hará que se re-verifique el estado al fichar
+                        onActionComplete={handleDataUpdated}
                     />
                 </div>
 
-                {/* 🔒 BLOQUEO POR ASISTENCIA */}
                 {!isClockedIn ? (
-                    <Card className="p-10 border-2 border-dashed border-slate-200 bg-slate-50/50 flex flex-col items-center text-center space-y-4">
-                        <div className="h-16 w-16 bg-white rounded-full flex items-center justify-center shadow-sm border">
-                            <Lock className="h-8 w-8 text-slate-300" />
+                    <Card className="p-12 border-2 border-dashed border-slate-200 bg-white/80 backdrop-blur-sm flex flex-col items-center text-center space-y-4 rounded-[2.5rem]">
+                        <div className="h-20 w-20 bg-slate-50 rounded-full flex items-center justify-center shadow-inner border-2">
+                            <Lock className="h-10 w-10 text-slate-300" />
                         </div>
-                        <div>
-                            <h3 className="font-black text-slate-400 uppercase text-sm">Acceso Restringido</h3>
-                            <p className="text-xs text-slate-400 font-medium px-4">Debes fichar tu entrada en el reloj superior para habilitar las funciones del local.</p>
+                        <div className="space-y-2">
+                            <h3 className="font-black text-slate-400 uppercase text-sm tracking-tight">Interfaz Bloqueada</h3>
+                            <p className="text-xs text-slate-400 font-bold px-6 leading-relaxed">
+                                DEBES FICHAR TU ENTRADA PARA DESBLOQUEAR EL PANEL DE VENTAS Y EL CONTROL DE STOCK.
+                            </p>
                         </div>
                     </Card>
                 ) : (
-                    <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 space-y-4">
-                        
-                        {/* 💰 PASO 2: APERTURA DE CAJA (Solo si no hay turno activo) */}
+                    <div className="animate-in fade-in slide-in-from-bottom-6 duration-700 space-y-4">
                         {!turnoActivo && (
                             <ArqueoCaja 
                                 onCajaAbierta={handleDataUpdated}
@@ -173,44 +169,49 @@ export default function VistaEmpleado({ onBack, sucursalId }: VistaEmpleadoProps
                             />
                         )}
 
-                        {/* 🛒 PASO 3: PANEL OPERATIVO (Solo si hay caja abierta) */}
                         {turnoActivo && (
                             <>
                                 <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
                                     {[
-                                        {id: "caja", label: "Venta Directa", icon: ShoppingCart},
-                                        {id: "misiones", label: "Mis Misiones", icon: Target},
-                                        {id: "vencimientos", label: "Control Stock", icon: AlertTriangle}
+                                        {id: "caja", label: "Ventas", icon: ShoppingCart},
+                                        {id: "misiones", label: "Misiones", icon: Target},
+                                        {id: "vencimientos", label: "Alertas", icon: AlertTriangle}
                                     ].map(tab => (
                                         <Button 
                                             key={tab.id}
                                             onClick={() => setActiveTab(tab.id as any)} 
                                             variant={activeTab === tab.id ? "default" : "outline"}
                                             size="sm"
-                                            className="whitespace-nowrap rounded-full font-bold text-[11px] uppercase tracking-tighter"
+                                            className={cn(
+                                                "whitespace-nowrap rounded-full font-black text-[10px] uppercase tracking-widest h-10 px-5 border-2 transition-all",
+                                                activeTab === tab.id ? "bg-slate-900 border-slate-900 shadow-lg" : "bg-white border-slate-100 text-slate-400"
+                                            )}
                                         >
-                                            <tab.icon className="mr-1.5 h-3.5 w-3.5" /> {tab.label}
+                                            <tab.icon className="mr-2 h-3.5 w-3.5" /> {tab.label}
                                         </Button>
                                     ))}
                                 </div>
                                 
-                                <div className="space-y-4 pb-12">
+                                <div className="space-y-6 pb-20">
                                     {activeTab === "caja" && (
-                                        <div className="flex flex-col gap-4 animate-in fade-in">
+                                        <div className="flex flex-col gap-6 animate-in fade-in duration-300">
                                             <CajaVentas 
                                                 turnoId={turnoActivo.id} 
                                                 empleadoNombre={userProfile?.nombre || "Operador"}
                                                 sucursalId={sucursalId}
                                             />
+                                            
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 <WidgetSube onVentaRegistrada={handleDataUpdated} />
                                                 <WidgetServicios onVentaRegistrada={handleDataUpdated} />
                                             </div>
-                                            <RegistrarGasto turnoId={turnoActivo.id} />
+
+                                            <RegistrarMovimiento 
+                                                cajaId={turnoActivo.id} 
+                                                onMovimientoRegistrado={handleDataUpdated} 
+                                            />
                                             
-                                            {/* CIERRE DE CAJA */}
-                                            <div className="pt-8 border-t-2 border-dashed border-slate-200 mt-6">
-                                                <p className="text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-4">Procedimiento de Cierre</p>
+                                            <div className="pt-10 border-t-2 border-dashed border-slate-200 mt-6">
                                                 <ArqueoCaja 
                                                     onCajaAbierta={handleDataUpdated}
                                                     onCajaCerrada={handleDataUpdated}
@@ -225,8 +226,9 @@ export default function VistaEmpleado({ onBack, sucursalId }: VistaEmpleadoProps
                                         <MisionesEmpleado 
                                             turnoId={turnoActivo.id}
                                             empleadoId={userProfile?.id || ""} 
+                                            sucursalId={sucursalId} // ✅ PROPIEDAD AGREGADA
                                             onMisionesUpdated={handleDataUpdated}
-                                            key={refreshKey}
+                                            key={`misiones-${refreshKey}`}
                                         />
                                     )}
                                     

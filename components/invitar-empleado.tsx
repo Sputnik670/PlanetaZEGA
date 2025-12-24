@@ -1,4 +1,3 @@
-// components/invitar-empleado.tsx
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
@@ -7,15 +6,16 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loader2, Mail, Plus, Trash2, UserCheck, Users, UserMinus, Send, X } from "lucide-react"
+import { Loader2, Mail, Plus, Trash2, UserCheck, Users, UserMinus, Send, X, MapPin } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
-import { format } from "date-fns"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface Invite {
   id: string
   email: string
   created_at: string
+  sucursales: { nombre: string } | null
 }
 
 interface Empleado {
@@ -23,40 +23,47 @@ interface Empleado {
   nombre: string
   email: string | null
   rol: string
-  created_at: string
+  sucursal_id: string
+  sucursales: { nombre: string } | null
 }
 
 export function InvitarEmpleado() {
   const [email, setEmail] = useState("")
+  const [selectedSucursal, setSelectedSucursal] = useState<string>("")
+  const [sucursales, setSucursales] = useState<{id: string, nombre: string}[]>([])
   const [loading, setLoading] = useState(false)
   const [invites, setInvites] = useState<Invite[]>([])
   const [empleados, setEmpleados] = useState<Empleado[]>([])
   const [orgId, setOrgId] = useState<string | null>(null)
 
   const cargarDatos = useCallback(async () => {
-    // 1. Obtener organización del dueño
     const { data: { user } } = await supabase.auth.getUser()
     const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user?.id).single()
     
     if (perfil?.organization_id) {
         setOrgId(perfil.organization_id)
 
-        // 2. Invitaciones Pendientes de MI empresa
+        // 1. Cargar Sucursales para el Selector
+        const { data: dataSuc } = await supabase
+            .from('sucursales')
+            .select('id, nombre')
+            .eq('organization_id', perfil.organization_id)
+        setSucursales(dataSuc || [])
+
+        // 2. Invitaciones Pendientes (con Join a sucursales)
         const { data: dataInvites } = await supabase
             .from('pending_invites')
-            .select('*')
+            .select('*, sucursales(nombre)')
             .eq('organization_id', perfil.organization_id)
-            .order('created_at', { ascending: false })
-        setInvites((dataInvites as Invite[]) || [])
+        setInvites((dataInvites as any[]) || [])
 
-        // 3. Empleados Activos de MI empresa
+        // 3. Empleados Activos (con Join a sucursales)
         const { data: dataEmpleados } = await supabase
             .from('perfiles')
-            .select('*')
+            .select('*, sucursales(nombre)')
             .eq('organization_id', perfil.organization_id)
             .eq('rol', 'empleado')
-            .order('created_at', { ascending: false })
-        setEmpleados(dataEmpleados as unknown as Empleado[] || [])
+        setEmpleados(dataEmpleados as any[] || [])
     }
   }, [])
 
@@ -66,7 +73,7 @@ export function InvitarEmpleado() {
       const { error } = await supabase.auth.signInWithOtp({
           email: emailDestino,
           options: {
-              emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}` : undefined,
+              emailRedirectTo: `${window.location.origin}/login/confirm`, 
               shouldCreateUser: true 
           }
       })
@@ -76,6 +83,7 @@ export function InvitarEmpleado() {
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email.includes("@")) return toast.error("Email inválido")
+    if (!selectedSucursal) return toast.error("Debes asignar una sucursal de trabajo")
     if (!orgId) return toast.error("Error de sesión")
     
     setLoading(true)
@@ -84,7 +92,8 @@ export function InvitarEmpleado() {
         .from('pending_invites')
         .insert([{ 
             email: email.trim().toLowerCase(),
-            organization_id: orgId 
+            organization_id: orgId,
+            sucursal_id: selectedSucursal // ✅ Vínculo previo a la sucursal
         }])
       
       if (dbError) {
@@ -93,7 +102,7 @@ export function InvitarEmpleado() {
       }
 
       await enviarMagicLink(email.trim().toLowerCase())
-      toast.success("Invitación enviada", { description: "El sistema vinculará al empleado automáticamente al registrarse." })
+      toast.success("Invitación enviada", { description: "Se vinculará automáticamente al kiosco asignado." })
       
       setEmail("")
       cargarDatos()
@@ -113,64 +122,118 @@ export function InvitarEmpleado() {
   }
 
   const desvincularEmpleado = async (id: string, nombre: string) => {
-      if (!confirm(`⚠️ ¿Desvincular a ${nombre}?`)) return
+      if (!confirm(`⚠️ ¿Quitar acceso a ${nombre}? El usuario no podrá operar más.`)) return
       const { error } = await supabase.from('perfiles').delete().eq('id', id)
       if (error) toast.error("Error al desvincular")
       else {
-          toast.success("Empleado desvinculado")
+          toast.success("Empleado dado de baja")
           cargarDatos()
       }
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* INVITAR */}
-        <Card className="p-6 border-2 shadow-sm h-fit">
-            <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 bg-primary/10 rounded-lg text-primary"><UserCheck className="h-6 w-6" /></div>
-                <div><h2 className="text-lg font-black uppercase">Invitar al Equipo</h2><p className="text-xs text-muted-foreground">Vínculo automático a tu empresa.</p></div>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in duration-500">
+        {/* PANEL IZQUIERDO: INVITACIÓN */}
+        <Card className="p-8 border-2 shadow-xl rounded-[2rem] bg-white h-fit">
+            <div className="flex items-center gap-4 mb-8">
+                <div className="h-14 w-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
+                    <UserCheck className="h-7 w-7" />
+                </div>
+                <div>
+                    <h2 className="text-xl font-black uppercase tracking-tight">Alta de Equipo</h2>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Contratación Directa</p>
+                </div>
             </div>
 
-            <form onSubmit={handleInvite} className="space-y-4">
+            <form onSubmit={handleInvite} className="space-y-6">
                 <div className="space-y-2">
-                    <Label className="text-[10px] font-black uppercase text-slate-400">Email Corporativo o Personal</Label>
-                    <div className="flex gap-2">
-                        <Input placeholder="empleado@correo.com" value={email} onChange={(e) => setEmail(e.target.value)} className="h-12 font-bold" />
-                        <Button type="submit" disabled={loading} className="h-12 px-6 font-black uppercase text-xs tracking-widest">
-                            {loading ? <Loader2 className="animate-spin" /> : "Enviar"}
-                        </Button>
-                    </div>
+                    <Label className="text-[10px] font-black uppercase text-slate-500 ml-1">Email del Colaborador</Label>
+                    <Input 
+                        placeholder="ejemplo@correo.com" 
+                        value={email} 
+                        onChange={(e) => setEmail(e.target.value)} 
+                        className="h-14 font-bold rounded-2xl border-2 focus:ring-blue-500" 
+                    />
                 </div>
+
+                <div className="space-y-2">
+                    <Label className="text-[10px] font-black uppercase text-slate-500 ml-1">Sucursal de Trabajo (Base)</Label>
+                    <Select value={selectedSucursal} onValueChange={setSelectedSucursal}>
+                        <SelectTrigger className="h-14 rounded-2xl border-2 font-bold">
+                            <SelectValue placeholder="-- SELECCIONAR KIOSCO --" />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-2xl font-bold">
+                            {sucursales.map(s => (
+                                <SelectItem key={s.id} value={s.id}>{s.nombre.toUpperCase()}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+
+                <Button type="submit" disabled={loading} className="w-full h-14 rounded-2xl font-black uppercase text-xs tracking-[0.2em] shadow-lg shadow-blue-100 transition-all active:scale-95">
+                    {loading ? <Loader2 className="animate-spin" /> : "ENVIAR INVITACIÓN MAGIC LINK"}
+                </Button>
             </form>
 
             {invites.length > 0 && (
-                <div className="mt-8 space-y-3">
-                    <h3 className="text-[10px] font-black uppercase text-slate-400 border-b pb-2 tracking-widest">Esperando Registro ({invites.length})</h3>
+                <div className="mt-10 space-y-4">
+                    <h3 className="text-[10px] font-black uppercase text-slate-400 border-b-2 border-dashed pb-3 tracking-widest">Pendientes de Registro ({invites.length})</h3>
                     {invites.map((inv) => (
-                        <div key={inv.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-dashed">
-                            <span className="text-xs font-bold text-slate-600">{inv.email}</span>
-                            <Button size="icon" variant="ghost" className="h-8 w-8 text-red-400" onClick={() => borrarInvite(inv.id)}><X className="h-4 w-4" /></Button>
+                        <div key={inv.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border-2 border-white shadow-sm">
+                            <div>
+                                <span className="text-xs font-black text-slate-700 block">{inv.email}</span>
+                                <span className="text-[9px] font-bold text-blue-500 uppercase flex items-center gap-1">
+                                    <MapPin className="h-2 w-2"/> {inv.sucursales?.nombre || 'General'}
+                                </span>
+                            </div>
+                            <Button size="icon" variant="ghost" className="h-10 w-10 text-red-400 hover:bg-red-50 rounded-full" onClick={() => borrarInvite(inv.id)}>
+                                <X className="h-5 w-5" />
+                            </Button>
                         </div>
                     ))}
                 </div>
             )}
         </Card>
 
-        {/* EQUIPO ACTIVO */}
-        <Card className="p-6 border-2 shadow-sm h-fit">
-            <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600"><Users className="h-6 w-6" /></div>
-                <div><h2 className="text-lg font-black uppercase">Staff Activo</h2><p className="text-xs text-muted-foreground">Gestión de accesos de la marca.</p></div>
+        {/* PANEL DERECHO: EQUIPO ACTIVO */}
+        <Card className="p-8 border-2 shadow-xl rounded-[2rem] bg-white h-fit">
+            <div className="flex items-center gap-4 mb-8">
+                <div className="h-14 w-14 bg-emerald-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-100">
+                    <Users className="h-7 w-7" />
+                </div>
+                <div>
+                    <h2 className="text-xl font-black uppercase tracking-tight">Staff Operativo</h2>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Gestión de RRHH</p>
+                </div>
             </div>
 
-            <div className="space-y-3">
-                {empleados.length === 0 ? <p className="text-center py-10 text-xs italic text-slate-400">No hay empleados registrados.</p> : empleados.map((emp) => (
-                    <div key={emp.id} className="flex items-center justify-between p-4 bg-white border-2 rounded-2xl">
-                        <div>
-                            <p className="font-black text-xs uppercase text-slate-800">{emp.nombre || 'Sin nombre'}</p>
-                            <p className="text-[10px] font-bold text-slate-400">{emp.email}</p>
+            <div className="space-y-4">
+                {empleados.length === 0 ? (
+                    <div className="text-center py-16 bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200">
+                        <p className="text-xs font-black text-slate-400 uppercase tracking-tighter">No hay empleados registrados</p>
+                    </div>
+                ) : empleados.map((emp) => (
+                    <div key={emp.id} className="group flex items-center justify-between p-5 bg-white border-2 hover:border-emerald-500 transition-all rounded-[1.5rem] shadow-sm">
+                        <div className="flex items-center gap-4">
+                            <div className="h-10 w-10 bg-slate-900 rounded-xl flex items-center justify-center text-white font-black text-sm uppercase">
+                                {emp.nombre?.charAt(0) || 'E'}
+                            </div>
+                            <div>
+                                <p className="font-black text-sm uppercase text-slate-800 leading-tight">{emp.nombre || 'Sin nombre'}</p>
+                                <div className="flex items-center gap-2 mt-1">
+                                    <Badge variant="secondary" className="text-[9px] font-black bg-blue-50 text-blue-600 border-0">{emp.sucursales?.nombre?.toUpperCase()}</Badge>
+                                    <span className="text-[10px] font-bold text-slate-300">{emp.email}</span>
+                                </div>
+                            </div>
                         </div>
-                        <Button variant="ghost" size="sm" className="text-red-500 font-black text-[10px] uppercase hover:bg-red-50" onClick={() => desvincularEmpleado(emp.id, emp.nombre)}>Baja</Button>
+                        <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="opacity-0 group-hover:opacity-100 text-red-500 font-black text-[10px] uppercase hover:bg-red-50 rounded-xl transition-all" 
+                            onClick={() => desvincularEmpleado(emp.id, emp.nombre)}
+                        >
+                            Dar de Baja
+                        </Button>
                     </div>
                 ))}
             </div>

@@ -1,4 +1,3 @@
-// components/dashboard-dueno.tsx
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
@@ -14,7 +13,8 @@ import {
   Repeat2, Wallet, Calendar as CalendarIcon, 
   Eye, TrendingDown, Star, User, ShoppingBag, Clock, 
   Pencil, Trash2, History, Save, ChevronDown, ChevronUp, Calculator, ScanBarcode,
-  Users, Sparkles, Printer, Briefcase, Receipt, X, MapPin, Settings, ChevronRight
+  Users, Sparkles, Printer, Briefcase, Receipt, X, MapPin, Settings, ChevronRight,
+  ArrowDownRight 
 } from "lucide-react" 
 import { BarChart, Bar, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts" 
 import CrearProducto from "@/components/crear-producto"
@@ -37,12 +37,11 @@ import HappyHour from "@/components/happy-hour"
 import TeamRanking from "@/components/team-ranking"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import GestionSucursales from "@/components/gestion-sucursales"
+import RegistrarMovimiento from "@/components/registrar-movimientos"
 
-// --- Configuración ---
 const UMBRAL_STOCK_BAJO = 5 
 const UMBRAL_SALDO_BAJO = 10000 
 
-// --- Interfaces ---
 interface DashboardDuenoProps {
   onBack: () => void
   sucursalId: string 
@@ -106,7 +105,6 @@ interface TurnoAudit {
   movimientos_caja: any[]
 }
 
-// ✅ NUEVA INTERFAZ: Asistencia
 interface AsistenciaRecord {
     id: string
     entrada: string
@@ -116,23 +114,13 @@ interface AsistenciaRecord {
     sucursal_id: string
 }
 
-const PAYMENT_ICONS: any = {
-    efectivo: DollarSign,
-    tarjeta: CreditCard,
-    transferencia: Repeat2,
-    otro: Wallet,
-    billetera_virtual: Wallet, 
-}
-
 export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoProps) {
-  // --- ESTADOS DE CONTEXTO ---
   const [currentSucursalId, setCurrentSucursalId] = useState(sucursalId)
   const [organizationId, setOrganizationId] = useState<string>("")
   const [sucursales, setSucursales] = useState<{id: string, nombre: string}[]>([])
 
-  // --- ESTADOS DE UI ---
   const [activeTab, setActiveTab] = useState<"alerts" | "inventory" | "catalog" | "sales" | "finance" | "supervision" | "suppliers" | "team">("sales")
-  const [supervisionTab, setSupervisionTab] = useState<"cajas" | "asistencia">("cajas") // ✅ Control interno de Supervisión
+  const [supervisionTab, setSupervisionTab] = useState<"cajas" | "asistencia">("cajas")
   const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
@@ -141,7 +129,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
   })
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
 
-  // --- ESTADOS DE DATOS ---
   const [productos, setProductos] = useState<Producto[]>([])
   const [capitalEnRiesgo, setCapitalEnRiesgo] = useState<MetricaStock>({ capital: 0, unidades: 0, criticos: [] })
   const [ventasRecientes, setVentasRecientes] = useState<VentaJoin[]>([])
@@ -151,11 +138,10 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
   })
   const [topProductos, setTopProductos] = useState<{name: string, count: number}[]>([])
   const [turnosAudit, setTurnosAudit] = useState<TurnoAudit[]>([])
-  const [asistencias, setAsistencias] = useState<AsistenciaRecord[]>([]) // ✅ Estado para fichajes
+  const [asistencias, setAsistencias] = useState<AsistenciaRecord[]>([])
   const [expandedTurnoId, setExpandedTurnoId] = useState<string | null>(null)
   const [sugerencias, setSugerencias] = useState<any[]>([])
 
-  // --- MODALES ---
   const [editingProduct, setEditingProduct] = useState<Producto | null>(null)
   const [managingStockId, setManagingStockId] = useState<string | null>(null)
   const [stockBatchList, setStockBatchList] = useState<any[]>([])
@@ -166,7 +152,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
 
   const formatMoney = (amount: number | null) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(amount || 0)
 
-  // --- 1. CARGA DE CONTEXTO ---
   const fetchContext = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if(!user) return
@@ -180,11 +165,9 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
 
   useEffect(() => { fetchContext() }, [fetchContext])
 
-  // --- 2. CARGA DE DATOS FILTRADOS ---
   const fetchData = useCallback(async () => {
     if (!currentSucursalId || !organizationId) return
 
-    // A. Inventario
     const { data: cat } = await supabase.from('productos').select('*').eq('organization_id', organizationId).order('nombre')
     const { data: stk } = await supabase.from('view_productos_con_stock').select('id, stock_disponible').eq('sucursal_id', currentSucursalId)
 
@@ -200,7 +183,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
         setSugerencias(sugs)
     }
 
-    // B. Ventas
     let vQ = supabase.from('stock').select('*, productos(nombre, precio_venta, emoji)').eq('sucursal_id', currentSucursalId).eq('tipo_movimiento', 'salida')
     if (dateRange?.from) vQ = vQ.gte('fecha_venta', dateRange.from.toISOString())
     if (dateRange?.to) vQ = vQ.lte('fecha_venta', dateRange.to.toISOString())
@@ -223,21 +205,18 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
         setTopProductos(Object.entries(counts).map(([name, count]) => ({ name, count })).sort((a,b) => b.count - a.count).slice(0, 5))
     }
 
-    // C. Turnos
     let cQ = supabase.from('caja_diaria').select(`*, perfiles(nombre), misiones(*), movimientos_caja(*)`).eq('sucursal_id', currentSucursalId)
     if (dateRange?.from) cQ = cQ.gte('fecha_apertura', dateRange.from.toISOString())
     if (dateRange?.to) cQ = cQ.lte('fecha_apertura', dateRange.to.toISOString())
     const { data: cData } = await cQ.order('fecha_apertura', { ascending: false }).returns<TurnoAudit[]>()
     setTurnosAudit(cData || [])
 
-    // ✅ D. Asistencia (Fichajes)
     let aQ = supabase.from('asistencia').select('*, perfiles(nombre)').eq('sucursal_id', currentSucursalId)
     if (dateRange?.from) aQ = aQ.gte('entrada', dateRange.from.toISOString())
     if (dateRange?.to) aQ = aQ.lte('entrada', dateRange.to.toISOString())
     const { data: aData } = await aQ.order('entrada', { ascending: false }).limit(50)
     if (aData) setAsistencias(aData as unknown as AsistenciaRecord[])
 
-    // E. Vencimientos
     const { data: stkRiesgo } = await supabase.from('stock').select('*, productos(nombre, precio_venta, emoji)').eq('sucursal_id', currentSucursalId).eq('tipo_movimiento', 'entrada').eq('estado', 'disponible')
     if (stkRiesgo) {
         const hoy = new Date(); const limite = new Date(); limite.setDate(hoy.getDate() + 10)
@@ -255,8 +234,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
   }, [currentSucursalId, organizationId, dateRange])
 
   useEffect(() => { setLoading(true); fetchData().finally(() => setLoading(false)) }, [fetchData])
-
-  // --- 3. BUSINESS INTELLIGENCE ---
 
   const biMetrics = useMemo(() => {
     let bruto = 0, costo = 0, blanco = 0
@@ -297,8 +274,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
     return `${from} - ${to}`
   }, [dateRange])
 
-  // --- 4. HANDLERS ---
-
   const handleUpdateProduct = async () => {
     if (!editingProduct) return; setActionLoading(true)
     try {
@@ -333,32 +308,40 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
     setStockBatchList(data || [])
   }
 
+  // ✅ CORRECCIÓN QUIRÚRGICA: Mapeo de campos para generarTicketPDF
   const handlePrintTurno = (t: TurnoAudit) => {
     const vT = ventasRecientes.filter(v => {
-        const fV = parseISO(v.fecha_venta); const fA = parseISO(t.fecha_apertura); const fC = t.fecha_cierre ? parseISO(t.fecha_cierre) : new Date()
+        const fV = parseISO(v.fecha_venta); 
+        const fA = parseISO(t.fecha_apertura); 
+        const fC = t.fecha_cierre ? parseISO(t.fecha_cierre) : new Date()
         return fV >= fA && fV <= fC
     })
-    const totV = vT.reduce((acc, curr) => acc + (curr.precio_venta_historico || curr.productos?.precio_venta || 0) * (curr.cantidad || 1), 0)
+    
     const totE = vT.filter(v => v.metodo_pago === 'efectivo').reduce((acc, curr) => acc + (curr.precio_venta_historico || curr.productos?.precio_venta || 0) * (curr.cantidad || 1), 0)
     const gast = t.movimientos_caja?.filter(m => m.tipo === 'egreso').reduce((a,b) => a + b.monto, 0) || 0
     const extra = t.movimientos_caja?.filter(m => m.tipo === 'ingreso').reduce((a,b) => a + b.monto, 0) || 0
     const esp = t.monto_inicial + totE + extra - gast
 
     generarTicketPDF({
-        empleado: t.perfiles?.nombre || "Empleado", fechaApertura: format(parseISO(t.fecha_apertura), 'dd/MM/yyyy HH:mm'),
+        empleado: t.perfiles?.nombre || "Empleado", 
+        fechaApertura: format(parseISO(t.fecha_apertura), 'dd/MM/yyyy HH:mm'),
         fechaCierre: t.fecha_cierre ? format(parseISO(t.fecha_cierre), 'dd/MM/yyyy HH:mm') : null,
-        montoInicial: t.monto_inicial, totalVentas: totV, totalGastos: gast, cajaEsperada: esp, cajaReal: t.monto_final,
-        diferencia: (t.monto_final || 0) - esp, gastos: t.movimientos_caja?.filter(m => m.tipo === 'egreso') || []
+        montoInicial: t.monto_inicial,
+        totalVentasEfectivo: totE, // Campo corregido
+        totalIngresos: extra,      // Campo añadido
+        totalGastos: gast,
+        cajaEsperada: esp,
+        cajaReal: t.monto_final,
+        diferencia: t.monto_final !== null ? t.monto_final - esp : null,
+        gastos: t.movimientos_caja || [] // Pasamos todos los movimientos para el desglose
     })
     toast.success("Ticket generado")
   }
 
-  // --- 5. RENDER PRINCIPAL ---
   const inventarioFiltrado = productos.filter(p => p.nombre.toLowerCase().includes(searchQuery.toLowerCase()) || p.codigo_barras?.includes(searchQuery))
 
   return (
     <div className="min-h-screen bg-slate-50 pb-24">
-      {/* 🚀 HEADER MULTI-SUCURSAL */}
       <div className="bg-slate-900 text-white p-6 rounded-b-[3rem] shadow-2xl">
         <div className="flex justify-between items-center mb-6">
             <Button variant="ghost" size="icon" onClick={onBack} className="text-white hover:bg-white/10"><ArrowLeft className="h-6 w-6" /></Button>
@@ -389,7 +372,7 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
             { id: "sales", label: "Caja y Ventas", icon: DollarSign },
             { id: "inventory", label: "Inventario Real", icon: Package },
             { id: "finance", label: "Inteligencia BI", icon: TrendingUp },
-            { id: "supervision", label: "Supervisión 360°", icon: Eye }, // ✅ Renombrado para Auditoría Total
+            { id: "supervision", label: "Supervisión 360°", icon: Eye },
             { id: "catalog", label: "Dato Maestro", icon: Plus },
             { id: "suppliers", label: "Logística", icon: Users },
             { id: "team", label: "Mi Equipo", icon: Briefcase },
@@ -401,7 +384,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
       </div>
 
       <div className="p-4 space-y-4">
-        {/* FILTRO FECHA */}
         {["sales", "supervision", "finance"].includes(activeTab) && (
             <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                 <PopoverTrigger asChild><Button variant="outline" className="w-full justify-start h-14 border-2 shadow-sm bg-white font-black text-slate-700"><CalendarIcon className="mr-2 h-5 w-5 text-primary" /> {dateRangeLabel.toUpperCase()}</Button></PopoverTrigger>
@@ -409,7 +391,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
             </Popover>
         )}
 
-        {/* --- PESTAÑA: SALES --- */}
         {activeTab === "sales" && (
             <div className="space-y-4">
                 <Card className="p-8 bg-gradient-to-br from-blue-600 to-indigo-800 text-white border-0 shadow-xl relative overflow-hidden"><p className="text-blue-100 text-[10px] font-black uppercase tracking-widest mb-1">Facturación Sucursal</p><h2 className="text-5xl font-black">{formatMoney(totalVendido)}</h2><div className="flex justify-between items-center mt-8 pt-6 border-t border-white/10"><span className="text-xs font-bold text-blue-100 flex items-center gap-1.5"><ShoppingBag className="h-4 w-4" /> {ventasRecientes.length} tickets emitidos</span><Button variant="secondary" size="sm" className="font-black text-[10px]" onClick={() => setShowSalesDetail(true)}>AUDITAR OPERACIONES</Button></div></Card>
@@ -420,10 +401,8 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
             </div>
         )}
 
-        {/* --- PESTAÑA: SUPERVISIÓN 360° (INTEGRADA) --- */}
         {activeTab === "supervision" && (
             <div className="space-y-6 animate-in fade-in">
-                {/* 🛡️ SELECTOR DE AUDITORÍA */}
                 <div className="flex bg-white p-1.5 rounded-2xl w-full max-w-sm mx-auto shadow-md border-2">
                     <button 
                         onClick={() => setSupervisionTab("cajas")}
@@ -445,6 +424,8 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
                     <div className="space-y-4">
                         {turnosAudit.map(t => {
                             const isOpen = !t.fecha_cierre; const isExpanded = expandedTurnoId === t.id
+                            const totalGastosTurno = t.movimientos_caja?.filter(m => m.tipo === 'egreso').reduce((acc, m) => acc + m.monto, 0) || 0
+
                             return (
                                 <Card key={t.id} className={cn("border-2 overflow-hidden transition-all rounded-2xl", isOpen ? "border-blue-400" : "border-slate-200")}>
                                     <div className="p-5 flex justify-between items-center bg-white cursor-pointer" onClick={() => setExpandedTurnoId(isExpanded ? null : t.id)}>
@@ -453,6 +434,7 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
                                             <div><p className="font-black text-sm text-slate-800 uppercase tracking-tight">{t.perfiles?.nombre || 'Empleado'}</p><p className="text-[11px] font-bold text-slate-400">{format(parseISO(t.fecha_apertura), 'dd MMM • HH:mm')} hs</p></div>
                                         </div>
                                         <div className="flex items-center gap-3">
+                                            {totalGastosTurno > 0 && <Badge variant="outline" className="text-red-600 border-red-200 bg-red-50 text-[9px] font-black">-{formatMoney(totalGastosTurno)}</Badge>}
                                             <Button variant="ghost" size="icon" className="h-10 w-10 text-slate-400 hover:text-primary" onClick={(e) => { e.stopPropagation(); handlePrintTurno(t); }}><Printer className="h-5 w-5" /></Button>
                                             {isOpen ? <Badge className="bg-blue-600 animate-pulse text-[9px] h-4">EN CURSO</Badge> : <ChevronDown className={cn("h-5 w-5 text-slate-300 transition-transform", isExpanded && "rotate-180")} />}
                                         </div>
@@ -463,7 +445,36 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
                                                 <div className="p-4 bg-white rounded-2xl border shadow-sm text-center"><p className="text-[10px] font-black text-slate-400 uppercase mb-1">Efectivo Final</p><p className="text-2xl font-black text-slate-900">{t.monto_final ? formatMoney(t.monto_final) : '---'}</p></div>
                                                 <div className="p-4 bg-white rounded-2xl border shadow-sm text-center"><p className="text-[10px] font-black text-slate-400 uppercase mb-1">Misiones</p><p className="text-2xl font-black text-slate-900">{t.misiones?.filter(m => m.es_completada).length} / {t.misiones?.length}</p></div>
                                             </div>
-                                            {isOpen && <div className="pt-4 border-t border-slate-200"><AsignarMision turnoId={t.id} empleadoId={t.empleado_id} sucursalId={currentSucursalId} onMisionCreated={fetchData} /></div>}
+
+                                            <div className="space-y-3">
+                                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><ArrowDownRight className="h-3 w-3" /> Movimientos Manuales</h4>
+                                                {t.movimientos_caja?.length > 0 ? (
+                                                    <div className="space-y-2">
+                                                        {t.movimientos_caja.map((m) => (
+                                                            <div key={m.id} className="flex justify-between items-center bg-white p-3 rounded-xl border border-slate-200">
+                                                                <div>
+                                                                    <p className="text-[11px] font-black text-slate-800 uppercase">{m.descripcion}</p>
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase">{m.categoria} • {format(parseISO(m.created_at), 'HH:mm')} hs</p>
+                                                                </div>
+                                                                <span className={cn("font-black text-sm", m.tipo === 'egreso' ? "text-red-600" : "text-emerald-600")}>
+                                                                    {m.tipo === 'egreso' ? '-' : '+'}{formatMoney(m.monto)}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-[10px] italic text-slate-400 text-center py-2">Sin movimientos manuales en este turno</p>
+                                                )}
+                                            </div>
+
+                                            <div className="pt-4 border-t border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                {isOpen && <AsignarMision turnoId={t.id} empleadoId={t.empleado_id} sucursalId={currentSucursalId} onMisionCreated={fetchData} />}
+                                                
+                                                <div className="bg-white p-4 rounded-2xl border shadow-sm">
+                                                    <h4 className="text-[10px] font-black text-slate-900 uppercase mb-4">Ajuste de Caja (Dueño)</h4>
+                                                    <RegistrarMovimiento cajaId={t.id} onMovimientoRegistrado={fetchData} />
+                                                </div>
+                                            </div>
                                         </div>
                                     )}
                                 </Card>
@@ -471,7 +482,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
                         })}
                     </div>
                 ) : (
-                    /* 🕒 REPORTE DE ASISTENCIA PREMIUM */
                     <div className="space-y-4">
                         {asistencias.length === 0 ? (
                             <p className="text-center py-20 text-xs font-black text-slate-400 uppercase tracking-widest italic">Sin registros de asistencia</p>
@@ -524,7 +534,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
             </div>
         )}
 
-        {/* --- PESTAÑA: FINANCE (BI) --- */}
         {activeTab === "finance" && (
             <div className="space-y-6 animate-in fade-in">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -543,7 +552,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
             </div>
         )}
 
-        {/* --- PESTAÑA: STOCK --- */}
         {activeTab === "inventory" && (
             <div className="space-y-4 animate-in fade-in">
                 <div className="relative"><Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" /><Input placeholder="FILTRAR STOCK LOCAL..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-12 h-16 text-sm font-bold shadow-inner border-2 rounded-2xl" /></div>
@@ -553,7 +561,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
             </div>
         )}
 
-        {/* --- OTRAS PESTAÑAS (MODULARES) --- */}
         {activeTab === "catalog" && <CrearProducto sucursalId={currentSucursalId} onProductCreated={() => { setActiveTab("inventory"); fetchData(); }} />}
         {activeTab === "suppliers" && <div className="space-y-6 animate-in fade-in"><ControlSaldoProveedor /><GestionProveedores sucursalId={currentSucursalId} organizationId={organizationId} /></div>}
         {activeTab === "team" && <div className="space-y-6 animate-in fade-in"><TeamRanking /><InvitarEmpleado /></div>}
@@ -568,7 +575,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
         )}
       </div>
 
-      {/* --- MODALES DE EDICIÓN Y AUDITORÍA --- */}
       <Dialog open={!!editingProduct} onOpenChange={o => !o && setEditingProduct(null)}>
         <DialogContent className="max-w-md rounded-3xl">
             <DialogHeader><DialogTitle className="font-black uppercase flex items-center gap-2"><Pencil className="h-5 w-5 text-primary"/> Editar Catálogo</DialogTitle></DialogHeader>

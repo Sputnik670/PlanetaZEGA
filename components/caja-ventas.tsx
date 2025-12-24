@@ -1,17 +1,16 @@
-// components/caja-ventas.tsx
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Search, Trash2, ShoppingCart, Plus, Minus, Loader2, ScanBarcode } from "lucide-react"
+import { Search, Trash2, ShoppingCart, Plus, Minus, Loader2, ScanBarcode, ReceiptText } from "lucide-react"
 import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { generarTicketVenta } from "@/lib/generar-ticket"
 
-// Tipos locales
 interface Producto {
   id: string
   nombre: string
@@ -28,9 +27,10 @@ interface CajaVentasProps {
   turnoId: string
   empleadoNombre: string
   sucursalId: string 
+  onVentaCompletada?: () => void 
 }
 
-export default function CajaVentas({ turnoId, empleadoNombre, sucursalId }: CajaVentasProps) {
+export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVentaCompletada }: CajaVentasProps) {
   const [busqueda, setBusqueda] = useState("")
   const [productos, setProductos] = useState<Producto[]>([])
   const [carrito, setCarrito] = useState<ItemVenta[]>([])
@@ -48,7 +48,6 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId }: Caja
 
     setLoading(true)
     try {
-      // 🎯 Consulta a la vista filtrando por sucursal actual
       const { data, error } = await supabase
         .from('view_productos_con_stock') 
         .select('*')
@@ -67,7 +66,6 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId }: Caja
         codigo_barras: p.codigo_barras
       }))
 
-      // Lógica de "Stock 0" para productos que no están en la vista de esa sucursal
       if (resultados.length === 0) {
           const { data: catalogo } = await supabase
             .from('productos')
@@ -119,7 +117,7 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId }: Caja
     })
     setBusqueda("") 
     setProductos([])
-    toast.success(`Agregado: ${producto.nombre}`, { position: 'bottom-center', duration: 1000 })
+    toast.success(`+1 ${producto.nombre}`, { position: 'bottom-center', duration: 800 })
     setTimeout(() => inputRef.current?.focus(), 100)
   }
 
@@ -130,16 +128,16 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId }: Caja
     }
   }
 
-  const removerDelCarrito = (id: string) => { setCarrito(prev => prev.filter(p => p.id !== id)) }
-
   const cambiarCantidad = (id: string, delta: number) => {
-    setCarrito(prev => prev.map(p => {
-      if (p.id === id) {
-        const nuevaCant = Math.max(1, p.cantidad + delta)
-        return { ...p, cantidad: nuevaCant }
-      }
-      return p
-    }))
+    setCarrito(prev => prev.map(p => 
+      p.id === id ? { ...p, cantidad: Math.max(1, p.cantidad + delta) } : p
+    ))
+  }
+
+  // ✅ CORREGIDO: Función reintegrada
+  const removerDelCarrito = (id: string) => {
+    setCarrito(prev => prev.filter(item => item.id !== id))
+    toast.info("Producto eliminado del carrito")
   }
 
   const calcularTotal = () => carrito.reduce((total, item) => total + (item.precio * item.cantidad), 0)
@@ -149,97 +147,95 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId }: Caja
     setProcesandoVenta(true)
 
     try {
-      const total = calcularTotal()
-      const { data: { user } } = await supabase.auth.getUser()
-      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user?.id).single()
-      
-      if (!perfil?.organization_id) throw new Error("No se encontró organización")
-
-      // ✅ REGISTRAR SALIDA (Sincronizado con SQL Maestro)
-      const movimientosStock = carrito.map(item => ({
-        organization_id: perfil.organization_id,
-        sucursal_id: sucursalId, 
-        caja_diaria_id: turnoId,
+      const itemsSimplificados = carrito.map(item => ({
         producto_id: item.id,
-        cantidad: item.cantidad,
-        tipo_movimiento: 'salida',
-        fecha_venta: new Date().toISOString(),
-        metodo_pago: metodoPago,
-        precio_venta_historico: item.precio, // 👈 CORREGIDO: Nombre de campo histórico
-        estado: 'vendido'
+        cantidad: item.cantidad
       }))
 
-      const { error: errorStock } = await supabase.from('stock').insert(movimientosStock)
-      if (errorStock) throw errorStock
+      const { data, error } = await supabase.rpc('procesar_venta', {
+        p_sucursal_id: sucursalId,
+        p_items: itemsSimplificados,
+        p_metodo_pago_global: metodoPago,
+        p_monto_total_cliente: calcularTotal()
+      })
 
-      if (metodoPago === 'efectivo') {
-        // ✅ REGISTRAR EN CAJA (Sincronizado con SQL Maestro)
-        const { error: errorCaja } = await supabase.from('movimientos_caja').insert({
-          organization_id: perfil.organization_id,
-          caja_diaria_id: turnoId,
-          // empleado_id removido porque no está en el nuevo esquema minimalista de movimientos_caja
-          tipo: 'ingreso',
-          monto: total,
-          descripcion: `Venta: ${carrito.length} items`
-        })
-        if (errorCaja) throw errorCaja
-      }
+      if (error) throw error
+      if (!data.success) throw new Error(data.message)
 
-      toast.success("Venta Exitosa", { description: `Total: $${total}` })
+      generarTicketVenta({
+        organizacion: "Planeta ZEGA",
+        fecha: new Date().toLocaleString('es-AR'),
+        items: carrito.map(i => ({
+            cantidad: i.cantidad,
+            producto: i.nombre,
+            precioUnitario: i.precio,
+            subtotal: i.precio * i.cantidad
+        })),
+        total: calcularTotal(),
+        metodoPago: metodoPago,
+        vendedor: empleadoNombre
+      })
+
+      toast.success("Venta Exitosa")
       setCarrito([])
       setBusqueda("")
+      if (onVentaCompletada) onVentaCompletada()
       setTimeout(() => inputRef.current?.focus(), 100) 
       
     } catch (error: any) {
-      console.error(error)
-      toast.error("Error al procesar venta", { description: error.message })
+      toast.error("Error en venta", { description: error.message })
     } finally {
       setProcesandoVenta(false)
     }
   }
 
   return (
-    <Card className="flex flex-col h-full shadow-md border-0 bg-slate-50/50">
-      <div className="p-4 border-b bg-white rounded-t-lg">
-        <h3 className="font-bold flex items-center gap-2 text-lg">
-          <ShoppingCart className="h-5 w-5 text-primary" />
-          Carrito de Ventas
-        </h3>
-        <p className="text-[10px] text-muted-foreground mt-1 uppercase font-bold tracking-wider">
-          Sucursal ID: {sucursalId.slice(0,8)}...
-        </p>
+    <Card className="flex flex-col h-full shadow-2xl border-0 bg-white rounded-[2rem] overflow-hidden">
+      <div className="p-6 border-b bg-slate-900 text-white">
+        <div className="flex justify-between items-center">
+            <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-500 rounded-xl">
+                    <ShoppingCart className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                    <h3 className="font-black uppercase text-sm tracking-tighter">Punto de Venta</h3>
+                    <p className="text-[9px] text-blue-300 font-bold uppercase tracking-widest">ID: {sucursalId.slice(0,5)}</p>
+                </div>
+            </div>
+            <Badge className="bg-blue-500/20 text-blue-400 border-0 font-black text-[10px]">OPERATIVO</Badge>
+        </div>
       </div>
 
-      <div className="p-4 space-y-4 flex-1">
+      <div className="p-6 space-y-6 flex-1 bg-slate-50/50">
         <div className="relative">
-          <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-2 text-muted-foreground">
-             <ScanBarcode className="h-4 w-4" />
+          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+             <ScanBarcode className="h-6 w-6" />
           </div>
           <Input 
             ref={inputRef}
             autoFocus
-            placeholder="Escanear producto o buscar..." 
-            className="pl-10 bg-white font-medium border-primary/30 focus-visible:ring-primary h-12"
+            placeholder="ESCANEAR O BUSCAR PRODUCTO..." 
+            className="pl-12 bg-white font-black border-2 border-slate-100 focus-visible:ring-blue-500 h-16 rounded-2xl shadow-sm text-lg"
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
             onKeyDown={handleKeyDown} 
           />
           
           {productos.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-md shadow-xl border z-50 overflow-hidden">
+            <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-2xl border-2 border-slate-100 z-50 overflow-hidden">
               {productos.map(p => (
                 <button
                   key={p.id}
                   onClick={() => agregarAlCarrito(p)}
-                  className="w-full text-left px-4 py-3 hover:bg-slate-50 flex justify-between items-center border-b last:border-0"
+                  className="w-full text-left px-5 py-4 hover:bg-blue-50 flex justify-between items-center border-b last:border-0"
                 >
-                  <span className="font-medium text-sm">{p.nombre}</span>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="text-xs">${p.precio}</Badge>
-                    <span className={cn("text-[10px] font-bold", p.stock <= 0 ? "text-red-500" : "text-emerald-600")}>
-                        STK: {p.stock}
-                    </span>
-                    <Plus className="h-4 w-4 text-green-600" />
+                  <div>
+                    <span className="font-black text-slate-700 text-sm uppercase">{p.nombre}</span>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">Stock Local: {p.stock}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-black text-blue-600">$ {p.precio}</span>
+                    <Plus className="h-4 w-4 text-blue-600" />
                   </div>
                 </button>
               ))}
@@ -247,36 +243,33 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId }: Caja
           )}
         </div>
 
-        <div className="space-y-2 min-h-[200px]">
+        <div className="space-y-3 min-h-[300px] max-h-[400px] overflow-y-auto pr-2 scrollbar-hide">
           {carrito.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-40 text-muted-foreground border-2 border-dashed rounded-lg bg-slate-100/50">
-              <ScanBarcode className="h-10 w-10 mb-2 opacity-50" />
-              <p className="text-sm font-medium">Carrito Vacío</p>
-              <p className="text-xs">Escanea o busca productos</p>
+            <div className="flex flex-col items-center justify-center h-64 text-slate-300 border-4 border-dashed rounded-[2.5rem] bg-white">
+              <ShoppingCart className="h-12 w-12 opacity-20 mb-4" />
+              <p className="text-xs font-black uppercase tracking-widest">Esperando Productos</p>
             </div>
           ) : (
             carrito.map(item => (
-              <div key={item.id} className="flex items-center justify-between bg-white p-3 rounded-lg shadow-sm border animate-in fade-in slide-in-from-left-2 duration-300">
+              <div key={item.id} className="flex items-center justify-between bg-white p-4 rounded-2xl shadow-sm border-2 border-transparent hover:border-blue-100 transition-all">
                 <div className="flex-1">
-                  <p className="font-bold text-sm line-clamp-1">{item.nombre}</p>
-                  <p className="text-xs text-muted-foreground">${item.precio} u.</p>
+                  <p className="font-black text-slate-800 text-sm uppercase leading-tight">{item.nombre}</p>
+                  <p className="text-[10px] font-bold text-slate-400 mt-1">$ {item.precio} u.</p>
                 </div>
                 
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1 bg-slate-100 rounded-md p-0.5">
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => cambiarCantidad(item.id, -1)}>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2 bg-slate-100 rounded-xl p-1">
+                    <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-white rounded-lg" onClick={() => cambiarCantidad(item.id, -1)}>
                       <Minus className="h-3 w-3" />
                     </Button>
-                    <span className="w-6 text-center text-sm font-bold">{item.cantidad}</span>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => cambiarCantidad(item.id, 1)}>
+                    <span className="w-6 text-center text-sm font-black text-slate-700">{item.cantidad}</span>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-white rounded-lg" onClick={() => cambiarCantidad(item.id, 1)}>
                       <Plus className="h-3 w-3" />
                     </Button>
                   </div>
-                  <div className="text-right min-w-[60px]">
-                    <p className="font-bold text-sm">${item.precio * item.cantidad}</p>
-                  </div>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => removerDelCarrito(item.id)}>
-                    <Trash2 className="h-4 w-4" />
+                  <p className="font-black text-slate-900 text-base min-w-[80px] text-right">$ {item.precio * item.cantidad}</p>
+                  <Button variant="ghost" size="icon" className="h-10 w-10 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl" onClick={() => removerDelCarrito(item.id)}>
+                    <Trash2 className="h-5 w-5" />
                   </Button>
                 </div>
               </div>
@@ -285,32 +278,42 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId }: Caja
         </div>
       </div>
 
-      <div className="p-4 bg-white border-t mt-auto rounded-b-lg space-y-4 shadow-inner">
-        <div className="flex justify-between items-end">
-          <span className="text-muted-foreground font-medium text-sm">Total</span>
-          <span className="text-3xl font-black text-primary">${calcularTotal().toLocaleString()}</span>
+      <div className="p-6 bg-white border-t space-y-6">
+        <div className="flex justify-between items-center px-2">
+          <span className="text-slate-400 font-black text-xs uppercase tracking-widest">Total a Cobrar</span>
+          <span className="text-4xl font-black text-slate-900 tracking-tighter">
+            $ {calcularTotal().toLocaleString('es-AR')}
+          </span>
         </div>
 
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 gap-3">
             {(['efectivo', 'billetera_virtual', 'tarjeta'] as const).map((m) => (
                 <button 
                     key={m}
                     onClick={() => setMetodoPago(m)}
-                    className={cn("text-[10px] py-2 rounded border font-bold uppercase transition-all", 
-                        metodoPago === m ? "bg-primary text-white border-primary" : "bg-white text-gray-500")}
+                    className={cn(
+                        "flex flex-col items-center gap-2 py-4 rounded-2xl border-2 font-black text-[10px] uppercase transition-all", 
+                        metodoPago === m ? "bg-slate-900 border-slate-900 text-white shadow-lg scale-105" : "bg-white border-slate-100 text-slate-400"
+                    )}
                 >
-                    {m.replace('_', ' ')}
+                    {m === 'efectivo' && 'Efectivo 💵'}
+                    {m === 'billetera_virtual' && 'Virtual 📱'}
+                    {m === 'tarjeta' && 'Tarjeta 💳'}
                 </button>
             ))}
         </div>
 
         <Button 
-          className="w-full h-14 text-lg font-black shadow-lg"
+          className="w-full h-20 text-xl font-black rounded-[1.5rem] shadow-xl bg-blue-600 hover:bg-blue-700"
           onClick={procesarVenta}
           disabled={carrito.length === 0 || procesandoVenta}
         >
-          {procesandoVenta ? <Loader2 className="animate-spin mr-2" /> : <ShoppingCart className="mr-2 h-5 w-5" />}
-          CONFIRMAR VENTA
+          {procesandoVenta ? <Loader2 className="animate-spin h-8 w-8" /> : (
+            <div className="flex items-center gap-3">
+                <ReceiptText className="h-7 w-7" />
+                <span>CONFIRMAR Y EMITIR TICKET</span>
+            </div>
+          )}
         </Button>
       </div>
     </Card>

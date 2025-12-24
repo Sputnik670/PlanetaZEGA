@@ -1,11 +1,9 @@
-// components/agregar-stock.tsx
 "use client"
 
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase" 
-
-import { CalendarIcon, PlusIcon, MinusIcon, PackagePlus, DollarSign, Users, CreditCard, Loader2 } from "lucide-react" 
-import { format } from "date-fns"
+import { CalendarIcon, PlusIcon, MinusIcon, PackagePlus, DollarSign, Users, CreditCard, Loader2, AlertCircle } from "lucide-react" 
+import { format, addDays } from "date-fns"
 import { es } from "date-fns/locale"
 import { toast } from "sonner" 
 
@@ -33,13 +31,14 @@ export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStoc
   const [loading, setLoading] = useState(false)
   
   const [cantidad, setCantidad] = useState(1)
-  const [fechaVencimiento, setFechaVencimiento] = useState<Date | undefined>(undefined)
+  const [fechaVencimientoProd, setFechaVencimientoProd] = useState<Date | undefined>(undefined)
   
   const [proveedores, setProveedores] = useState<{id: string, nombre: string}[]>([])
   const [selectedProveedor, setSelectedProveedor] = useState<string>("")
   const [costoUnitario, setCostoUnitario] = useState<string>("")
   
   const [estadoPago, setEstadoPago] = useState<string>("pendiente") 
+  const [fechaVencimientoPago, setFechaVencimientoPago] = useState<Date | undefined>(addDays(new Date(), 15))
   const [medioPago, setMedioPago] = useState<string>("efectivo") 
 
   useEffect(() => {
@@ -56,81 +55,84 @@ export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStoc
   const decrementar = () => setCantidad((prev) => (prev > 1 ? prev - 1 : 1))
 
   const handleGuardar = async () => {
-    if (!sucursalId) {
-        toast.error("Error", { description: "No se seleccionó una sucursal." })
-        return
-    }
-    if (!fechaVencimiento) {
-      toast.error("Falta fecha", { description: "Selecciona cuándo vence el producto." })
-      return
-    }
-    if (cantidad < 1) {
-      toast.error("Error", { description: "La cantidad debe ser mayor a 0." })
-      return
-    }
-
+    if (!sucursalId) return toast.error("Error: No se seleccionó sucursal")
+    if (!fechaVencimientoProd) return toast.error("Falta fecha de vencimiento del producto")
+    
     setLoading(true)
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
       const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user?.id).single()
-      
-      if (!perfil?.organization_id) throw new Error("No se encontró la organización del usuario.")
+      if (!perfil?.organization_id) throw new Error("No se encontró la organización.")
 
       let compraId: string | null = null;
       const costoNum = parseFloat(costoUnitario) || 0;
+      const montoTotal = costoNum * cantidad;
 
       if (selectedProveedor && costoNum > 0) {
-          const montoTotal = costoNum * cantidad;
           const { data: compraData, error: compraError } = await supabase
             .from('compras')
-            .insert([
-                {
-                    organization_id: perfil.organization_id,
-                    proveedor_id: selectedProveedor,
-                    monto_total: montoTotal,
-                    estado_pago: estadoPago, 
-                    medio_pago: estadoPago === 'pagado' ? medioPago : null,
-                    fecha_compra: new Date().toISOString(),
-                }
-            ])
-            .select()
-            .single()
+            .insert([{
+                organization_id: perfil.organization_id,
+                proveedor_id: selectedProveedor,
+                monto_total: montoTotal,
+                estado_pago: estadoPago, 
+                medio_pago: estadoPago === 'pagado' ? medioPago : null,
+                fecha_compra: new Date().toISOString(),
+                vencimiento_pago: estadoPago === 'pendiente' ? fechaVencimientoPago?.toISOString() : null
+            }])
+            .select().single()
 
           if (compraError) throw compraError
-          if (compraData) compraId = compraData.id
+          compraId = compraData.id
+
+          if (estadoPago === 'pagado' && medioPago === 'efectivo') {
+              const { data: cajaActiva } = await supabase.from('caja_diaria').select('id').eq('sucursal_id', sucursalId).is('fecha_cierre', null).single()
+              if (cajaActiva) {
+                  await supabase.from('movimientos_caja').insert({
+                      caja_diaria_id: cajaActiva.id,
+                      monto: montoTotal,
+                      tipo: 'egreso',
+                      descripcion: `Pago Proveedor: ${producto.nombre} (Lote)`,
+                      categoria: 'proveedores'
+                  })
+              }
+          }
       }
 
-      const { error } = await supabase.from('stock').insert({
+      const { error: stockError } = await supabase.from('stock').insert({
         organization_id: perfil.organization_id,
         sucursal_id: sucursalId,
         producto_id: producto.id,
         cantidad: cantidad,           
         tipo_movimiento: 'entrada',   
-        fecha_vencimiento: format(fechaVencimiento, 'yyyy-MM-dd'),
+        fecha_vencimiento: format(fechaVencimientoProd, 'yyyy-MM-dd'),
         estado: 'disponible',         
         proveedor_id: selectedProveedor || null,
         compra_id: compraId,
         costo_unitario_historico: costoNum > 0 ? costoNum : null,
         fecha_ingreso: new Date().toISOString()
       })
-
-      if (error) throw error
+      if (stockError) throw stockError
 
       if (costoNum > 0) {
-          await supabase.from('productos').update({ costo: costoNum }).eq('id', producto.id)
+          const { data: pOld } = await supabase.from('productos').select('costo, precio_venta').eq('id', producto.id).single()
+          if (pOld && pOld.costo !== costoNum) {
+              await supabase.from('historial_precios').insert({
+                  organization_id: perfil.organization_id,
+                  producto_id: producto.id,
+                  costo_anterior: pOld.costo, costo_nuevo: costoNum,
+                  precio_venta_anterior: pOld.precio_venta, precio_venta_nuevo: pOld.precio_venta,
+                  empleado_id: user?.id, fecha_cambio: new Date().toISOString()
+              })
+              await supabase.from('productos').update({ costo: costoNum }).eq('id', producto.id)
+          }
       }
 
-      toast.success("Stock guardado")
-      setCantidad(1)
-      setFechaVencimiento(undefined)
-      setSelectedProveedor("")
-      setCostoUnitario("")
-      setEstadoPago("pendiente")
+      toast.success("Lote ingresado correctamente")
       setOpen(false)
       if (onStockAdded) onStockAdded()
     } catch (error: any) {
-      console.error(error)
       toast.error("Error al guardar", { description: error.message })
     } finally {
       setLoading(false)
@@ -145,118 +147,130 @@ export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStoc
         </Button>
       </DialogTrigger>
       
-      <DialogContent className="sm:max-w-md bg-white max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-md bg-white max-h-[95vh] overflow-y-auto rounded-3xl border-0 shadow-2xl">
         <DialogHeader>
-          <DialogTitle>Ingresar: {producto.nombre}</DialogTitle>
+          <DialogTitle className="font-black text-xl uppercase tracking-tighter">Ingreso de Mercadería</DialogTitle>
+          <p className="text-sm font-bold text-slate-400 uppercase">{producto.nombre}</p>
         </DialogHeader>
         
-        <div className="flex flex-col gap-5 py-2">
-          <div className="space-y-2">
-            <Label className="text-center block text-xs uppercase font-bold text-muted-foreground">Cantidad</Label>
-            <div className="flex items-center justify-center gap-4">
-              <Button variant="outline" size="icon" onClick={decrementar} className="h-10 w-10 rounded-full" aria-label="Disminuir cantidad"><MinusIcon className="h-5 w-5" /></Button>
-              <Input type="number" min="1" value={cantidad} onChange={(e) => setCantidad(parseInt(e.target.value) || 0)} className="h-12 w-20 text-center text-xl font-bold" aria-label="Cantidad a ingresar"/>
-              <Button variant="outline" size="icon" onClick={incrementar} className="h-10 w-10 rounded-full" aria-label="Aumentar cantidad"><PlusIcon className="h-5 w-5" /></Button>
+        <div className="flex flex-col gap-6 py-4">
+          <div className="space-y-3">
+            <Label className="text-center block text-[10px] uppercase font-black text-slate-500 tracking-widest">Cantidad a Ingresar</Label>
+            <div className="flex items-center justify-center gap-6">
+              <Button variant="outline" size="icon" onClick={decrementar} className="h-14 w-14 rounded-2xl border-2 hover:bg-slate-50 shadow-sm"><MinusIcon className="h-6 w-6" /></Button>
+              <Input type="number" value={cantidad} onChange={(e) => setCantidad(parseInt(e.target.value) || 0)} className="h-20 w-32 text-center text-4xl font-black rounded-3xl border-2" />
+              <Button variant="outline" size="icon" onClick={incrementar} className="h-14 w-14 rounded-2xl border-2 hover:bg-slate-50 shadow-sm"><PlusIcon className="h-6 w-6" /></Button>
             </div>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-xs uppercase font-bold text-muted-foreground">Fecha Vencimiento</Label>
+          <div className="space-y-2">
+            <Label className="text-[10px] uppercase font-black text-slate-500 tracking-widest">Vencimiento del Alimento/Prod.</Label>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant={"outline"} className={cn("h-10 w-full justify-start text-left font-normal", !fechaVencimiento && "text-muted-foreground")}>
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {fechaVencimiento ? format(fechaVencimiento, "dd/MM/yyyy", { locale: es }) : "Seleccionar fecha"}
+                <Button variant={"outline"} className={cn("h-12 w-full justify-start text-left font-bold rounded-2xl border-2 shadow-sm", !fechaVencimientoProd && "text-slate-400")}>
+                  <CalendarIcon className="mr-2 h-4 w-4 text-primary" />
+                  {fechaVencimientoProd ? format(fechaVencimientoProd, "dd 'de' MMMM, yyyy", { locale: es }) : "Seleccionar fecha"}
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar mode="single" selected={fechaVencimiento} onSelect={setFechaVencimiento} initialFocus locale={es}/>
+              <PopoverContent className="w-auto p-0 rounded-2xl" align="start">
+                <Calendar mode="single" selected={fechaVencimientoProd} onSelect={setFechaVencimientoProd} locale={es}/>
               </PopoverContent>
             </Popover>
           </div>
 
-          <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 space-y-3">
-            <div className="flex items-center gap-2 mb-1">
-                <Users className="h-4 w-4 text-primary" />
-                <Label className="font-bold text-sm">Datos de Compra (Opcional)</Label>
+          <div className="p-5 bg-slate-50 rounded-[2rem] border-2 border-slate-100 space-y-4">
+            <div className="flex items-center gap-2 mb-2">
+                <div className="p-2 bg-white rounded-lg shadow-sm"><DollarSign className="h-4 w-4 text-emerald-600" /></div>
+                <Label className="font-black text-xs uppercase tracking-tighter">Costos y Proveedor</Label>
             </div>
             
-            <div className="space-y-1">
-                <Label htmlFor="proveedor-select" className="text-xs text-muted-foreground">Proveedor</Label>
-                {/* ✅ CORRECCIÓN 1: Select con id, title y aria-label */}
-                <select 
-                    id="proveedor-select"
-                    name="proveedor"
-                    title="Seleccionar Proveedor"
-                    aria-label="Seleccionar Proveedor"
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:ring-1 focus:ring-primary"
-                    value={selectedProveedor}
-                    onChange={(e) => setSelectedProveedor(e.target.value)}
-                >
-                    <option value="">-- Sin asignar --</option>
-                    {proveedores.map(p => (
-                        <option key={p.id} value={p.id}>{p.nombre}</option>
-                    ))}
-                </select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Costo Unitario</Label>
-                    <div className="relative">
-                        <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                        <Input type="number" placeholder="0.00" className="pl-7 h-9 bg-white" value={costoUnitario} onChange={(e) => setCostoUnitario(e.target.value)}/>
-                    </div>
+            <div className="grid gap-4">
+                <div className="space-y-1.5">
+                    <Label htmlFor="proveedor-select" className="text-[10px] font-black text-slate-400 uppercase">Seleccionar Proveedor</Label>
+                    {/* ✅ ACCESIBILIDAD: id + title + aria-label */}
+                    <select 
+                        id="proveedor-select"
+                        title="Proveedor"
+                        aria-label="Seleccionar Proveedor"
+                        className="w-full h-12 rounded-2xl border-2 bg-white px-4 text-sm font-bold focus:ring-2 focus:ring-slate-900 appearance-none"
+                        value={selectedProveedor}
+                        onChange={(e) => setSelectedProveedor(e.target.value)}
+                    >
+                        <option value="">-- No registrar compra (Solo stock) --</option>
+                        {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                    </select>
                 </div>
-                
-                {selectedProveedor && (
-                    <div className="space-y-1 animate-in fade-in">
-                        <Label htmlFor="estado-pago-select" className="text-xs text-muted-foreground">Estado Pago</Label>
-                        {/* ✅ CORRECCIÓN 2: Select con id, title y aria-label */}
+
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                        <Label className="text-[10px] font-black text-slate-400 uppercase">Costo Unitario</Label>
+                        <div className="relative">
+                            <Input type="number" placeholder="0" className="pl-10 h-12 rounded-2xl border-2 font-black text-lg" value={costoUnitario} onChange={(e) => setCostoUnitario(e.target.value)}/>
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-slate-400">$</span>
+                        </div>
+                    </div>
+                    
+                    {selectedProveedor && (
+                        <div className="space-y-1.5 animate-in fade-in">
+                            <Label htmlFor="estado-pago-select" className="text-[10px] font-black text-slate-400 uppercase">Estado Pago</Label>
+                            {/* ✅ ACCESIBILIDAD: id + title + aria-label */}
+                            <select 
+                                id="estado-pago-select"
+                                title="Estado de Pago"
+                                aria-label="Seleccionar Estado de Pago"
+                                className="w-full h-12 rounded-2xl border-2 bg-white px-4 text-sm font-bold"
+                                value={estadoPago}
+                                onChange={(e) => setEstadoPago(e.target.value)}
+                            >
+                                <option value="pendiente">Cuenta Corriente (Deuda)</option>
+                                <option value="pagado">Pagado en el momento</option>
+                            </select>
+                        </div>
+                    )}
+                </div>
+
+                {selectedProveedor && estadoPago === 'pendiente' && (
+                    <div className="space-y-1.5 animate-in slide-in-from-top-2">
+                        <Label className="text-[10px] font-black text-orange-600 uppercase flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3"/> Pagar antes de:
+                        </Label>
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button variant={"outline"} className="h-10 w-full justify-start text-[11px] font-bold rounded-xl border-orange-100 bg-orange-50 text-orange-700">
+                                    <CalendarIcon className="mr-2 h-3 w-3" />
+                                    {fechaVencimientoPago ? format(fechaVencimientoPago, "dd/MM/yyyy") : "Elegir fecha"}
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0 rounded-2xl" align="start">
+                                <Calendar mode="single" selected={fechaVencimientoPago} onSelect={setFechaVencimientoPago} locale={es}/>
+                            </PopoverContent>
+                        </Popover>
+                    </div>
+                )}
+
+                {selectedProveedor && estadoPago === 'pagado' && (
+                    <div className="space-y-1.5 animate-in slide-in-from-top-2">
+                        <Label htmlFor="medio-pago-select" className="text-[10px] font-black text-slate-400 uppercase">Medio de Pago Utilizado</Label>
+                        {/* ✅ ACCESIBILIDAD: id + title + aria-label */}
                         <select 
-                            id="estado-pago-select"
-                            name="estadoPago"
-                            title="Seleccionar Estado del Pago"
-                            aria-label="Seleccionar Estado del Pago"
-                            className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:ring-1 focus:ring-primary"
-                            value={estadoPago}
-                            onChange={(e) => setEstadoPago(e.target.value)}
+                            id="medio-pago-select"
+                            title="Medio de Pago"
+                            aria-label="Seleccionar Medio de Pago"
+                            className="w-full h-12 rounded-2xl border-2 bg-white px-4 text-sm font-bold"
+                            value={medioPago}
+                            onChange={(e) => setMedioPago(e.target.value)}
                         >
-                            <option value="pendiente">Cuenta Corriente</option>
-                            <option value="pagado">Pagado</option>
+                            <option value="efectivo">Efectivo (Baja de Caja Real)</option>
+                            <option value="transferencia">Transferencia / QR</option>
+                            <option value="debito">Tarjeta Débito</option>
                         </select>
                     </div>
                 )}
             </div>
-
-            {selectedProveedor && estadoPago === 'pagado' && (
-                <div className="space-y-1 animate-in slide-in-from-top-2">
-                    <Label htmlFor="medio-pago-select" className="text-xs text-muted-foreground flex items-center gap-1">
-                        <CreditCard className="h-3 w-3"/> Medio de Pago
-                    </Label>
-                    {/* ✅ CORRECCIÓN 3: Select con id, title y aria-label */}
-                    <select 
-                        id="medio-pago-select"
-                        name="medioPago"
-                        title="Seleccionar Medio de Pago"
-                        aria-label="Seleccionar Medio de Pago"
-                        className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:ring-1 focus:ring-primary font-medium"
-                        value={medioPago}
-                        onChange={(e) => setMedioPago(e.target.value)}
-                    >
-                        <option value="efectivo">Efectivo 💵</option>
-                        <option value="transferencia">Transferencia 🏦</option>
-                        <option value="debito">Tarjeta Débito 💳</option>
-                        <option value="credito">Tarjeta Crédito 💳</option>
-                        <option value="cheque">Cheque 🎫</option>
-                        <option value="otro">Otro</option>
-                    </select>
-                </div>
-            )}
           </div>
 
-          <Button onClick={handleGuardar} disabled={loading} size="lg" className="w-full font-bold mt-2">
-            {loading ? <span className="flex items-center gap-2"><Loader2 className="animate-spin h-4 w-4"/> Guardando...</span> : "Confirmar Ingreso"}
+          <Button onClick={handleGuardar} disabled={loading} size="lg" className="w-full h-16 font-black text-lg rounded-[1.5rem] shadow-xl mt-2 transition-all active:scale-95">
+            {loading ? <Loader2 className="animate-spin h-6 w-6"/> : "REGISTRAR ENTRADA"}
           </Button>
         </div>
       </DialogContent>

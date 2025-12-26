@@ -62,7 +62,8 @@ export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStoc
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user?.id).single()
+      if (!user?.id) throw new Error("No hay sesión activa")
+      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single()
       if (!perfil?.organization_id) throw new Error("No se encontró la organización.")
 
       let compraId: string | null = null;
@@ -123,7 +124,7 @@ export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStoc
                   producto_id: producto.id,
                   costo_anterior: pOld.costo, costo_nuevo: costoNum,
                   precio_venta_anterior: pOld.precio_venta, precio_venta_nuevo: pOld.precio_venta,
-                  empleado_id: user?.id, fecha_cambio: new Date().toISOString()
+                  empleado_id: user.id, fecha_cambio: new Date().toISOString()
               })
               await supabase.from('productos').update({ costo: costoNum }).eq('id', producto.id)
           }

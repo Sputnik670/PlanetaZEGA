@@ -91,8 +91,9 @@ export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStoc
           if (estadoPago === 'pagado' && medioPago === 'efectivo') {
               const { data: cajaActiva } = await supabase.from('caja_diaria').select('id').eq('sucursal_id', sucursalId).is('fecha_cierre', null).single()
               if (cajaActiva) {
-                  await supabase.from('movimientos_caja').insert({
+                  await (supabase.from('movimientos_caja') as any).insert({
                       caja_diaria_id: cajaActiva.id,
+                      organization_id: perfil.organization_id,
                       monto: montoTotal,
                       tipo: 'egreso',
                       descripcion: `Pago Proveedor: ${producto.nombre} (Lote)`,
@@ -102,7 +103,7 @@ export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStoc
           }
       }
 
-      const { error: stockError } = await supabase.from('stock').insert({
+      const { error: stockError } = await (supabase.from('stock') as any).insert({
         organization_id: perfil.organization_id,
         sucursal_id: sucursalId,
         producto_id: producto.id,
@@ -120,7 +121,7 @@ export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStoc
       if (costoNum > 0) {
           const { data: pOld } = await supabase.from('productos').select('costo, precio_venta').eq('id', producto.id).single()
           if (pOld && pOld.costo !== costoNum) {
-              await supabase.from('historial_precios').insert({
+              await (supabase.from('historial_precios') as any).insert({
                   organization_id: perfil.organization_id,
                   producto_id: producto.id,
                   costo_anterior: pOld.costo, costo_nuevo: costoNum,

@@ -74,7 +74,7 @@ export function InvitarEmpleado() {
       const { error } = await supabase.auth.signInWithOtp({
           email: emailDestino,
           options: {
-              emailRedirectTo: `${window.location.origin}/login/confirm`, 
+              emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined, 
               shouldCreateUser: true 
           }
       })

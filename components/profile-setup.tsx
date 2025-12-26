@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -17,6 +17,56 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
   const [selectedRole, setSelectedRole] = useState<"dueño" | "empleado" | null>(null)
   const [loading, setLoading] = useState(false)
   const [name, setName] = useState(user?.email?.split('@')[0] || "Usuario")
+  const [checkingInvitation, setCheckingInvitation] = useState(true)
+  const [invitacionData, setInvitacionData] = useState<{ organization_id: string; sucursal_id: string | null } | null>(null)
+
+  // Verificar si hay una invitación pendiente al cargar
+  useEffect(() => {
+    const checkInvitation = async () => {
+      if (!user?.email) {
+        setCheckingInvitation(false)
+        return
+      }
+
+      try {
+        const { data: invitacion } = await supabase
+          .from('pending_invites')
+          .select('organization_id, sucursal_id')
+          .eq('email', user.email.toLowerCase())
+          .maybeSingle()
+
+        if (invitacion) {
+          // Si hay invitación, el perfil debería haberse creado automáticamente
+          // Pero por si acaso, verificamos si ya existe el perfil
+          const { data: perfil } = await supabase
+            .from('perfiles')
+            .select('id, rol')
+            .eq('id', user.id)
+            .maybeSingle()
+
+          if (perfil) {
+            // Ya existe perfil, redirigir
+            onProfileCreated(perfil.rol as "dueño" | "empleado")
+            return
+          }
+          
+          // Si hay invitación pero no perfil, pre-seleccionar empleado y guardar datos
+          setSelectedRole('empleado')
+          setInvitacionData({
+            organization_id: invitacion.organization_id,
+            sucursal_id: invitacion.sucursal_id
+          })
+          toast.info("Invitación detectada", { description: "Tu cuenta será vinculada a la organización." })
+        }
+      } catch (error) {
+        console.error("Error verificando invitación:", error)
+      } finally {
+        setCheckingInvitation(false)
+      }
+    }
+
+    checkInvitation()
+  }, [user, onProfileCreated])
 
   const handleSaveProfile = async () => {
     if (!selectedRole) {
@@ -43,8 +93,35 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
       }
 
       let orgId = null
+      let sucursalId = null
 
-      // 1. Si es dueño, CREAMOS la organización
+      // 1. Si es empleado, verificar si hay invitación
+      if (selectedRole === 'empleado') {
+        if (invitacionData) {
+          // Usar datos de la invitación
+          orgId = invitacionData.organization_id
+          sucursalId = invitacionData.sucursal_id
+        } else if (user?.email) {
+          // Buscar invitación por si acaso no se cargó antes
+          const { data: invitacion } = await supabase
+            .from('pending_invites')
+            .select('organization_id, sucursal_id')
+            .eq('email', user.email.toLowerCase())
+            .maybeSingle()
+          
+          if (invitacion) {
+            orgId = invitacion.organization_id
+            sucursalId = invitacion.sucursal_id
+            setInvitacionData(invitacion)
+          } else {
+            throw new Error("No se encontró una invitación. Contacta al administrador para ser invitado.")
+          }
+        } else {
+          throw new Error("No se pudo obtener la información de la invitación.")
+        }
+      }
+
+      // 2. Si es dueño, CREAMOS la organización
       if (selectedRole === 'dueño') {
         const { data: orgData, error: orgError } = await supabase
           .from('organizations')
@@ -56,7 +133,7 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
         orgId = orgData.id
       } 
       
-      // 2. Insertamos el perfil
+      // 3. Insertamos el perfil
       const { error: insertError } = await supabase
         .from('perfiles')
         .insert({ 
@@ -64,7 +141,8 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
           rol: selectedRole,
           nombre: name,
           email: user.email, 
-          organization_id: orgId 
+          organization_id: orgId,
+          sucursal_id: sucursalId // Vincular a la sucursal si viene de invitación
         })
 
       if (insertError) {
@@ -76,7 +154,15 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
         throw insertError
       }
 
-      toast.success("¡Bienvenido!", { description: "Tu local está listo para operar." })
+      // 4. Si había una invitación, eliminarla
+      if (selectedRole === 'empleado' && user?.email) {
+        await supabase
+          .from('pending_invites')
+          .delete()
+          .eq('email', user.email.toLowerCase())
+      }
+
+      toast.success("¡Bienvenido!", { description: "Tu cuenta está lista para usar." })
       
       // Delay para asegurar propagación
       setTimeout(() => onProfileCreated(selectedRole), 800)
@@ -89,6 +175,17 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
     } finally {
       setLoading(false)
     }
+  }
+
+  if (checkingInvitation) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-10 w-10 animate-spin text-primary mx-auto" />
+          <p className="text-slate-600 font-medium">Verificando invitación...</p>
+        </div>
+      </div>
+    )
   }
 
   return (

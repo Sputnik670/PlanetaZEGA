@@ -66,14 +66,18 @@ export default function HappyHour({ criticos, onDiscountApplied }: HappyHourProp
             // Idealmente esto debería estar en un trigger de DB o en una función RPC, 
             // pero lo hacemos aquí rápido como en tu dashboard.
             const { data: { user } } = await supabase.auth.getUser()
-            await supabase.from('historial_precios').insert({
+            if (!user?.id) throw new Error("No hay sesión activa")
+            const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single<{ organization_id: string | null }>()
+            if (!perfil?.organization_id) throw new Error("No se encontró la organización.")
+            await (supabase.from('historial_precios') as any).insert({
                 producto_id: item.producto_id,
                 precio_venta_anterior: precioViejo,
                 precio_venta_nuevo: precioNuevo,
                 costo_anterior: 0, // No cambiamos costo
                 costo_nuevo: 0,
                 fecha_cambio: new Date().toISOString(),
-                empleado_id: user?.id
+                empleado_id: user.id,
+                organization_id: perfil.organization_id
             })
 
             toast.success("¡Oferta Activada! 🔥", {

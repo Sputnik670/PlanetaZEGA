@@ -28,16 +28,19 @@ interface Proveedor {
     telefono: string | null
     email: string | null
     condicion_pago: string | null
-    saldo_actual: number
+    saldo_actual: number | null
 }
 
 interface Compra {
     id: string
-    created_at: string
     monto_total: number
-    estado_pago: string
-    medio_pago: string
-    fecha_compra: string
+    estado_pago: string | null
+    medio_pago: string | null
+    fecha_compra: string | null
+    comprobante_nro: string | null
+    proveedor_id: string | null
+    organization_id: string
+    vencimiento_pago: string | null
 }
 
 interface GestionProveedoresProps {
@@ -220,7 +223,7 @@ export default function GestionProveedores({ sucursalId, organizationId }: Gesti
                     <h4 className="text-xs font-bold uppercase text-muted-foreground mb-3">Últimos Pedidos</h4>
                     {loadingHistory ? <Loader2 className="animate-spin h-5 w-5 mx-auto"/> : historialCompras.map(compra => (
                         <div key={compra.id} className="flex justify-between items-center p-2 mb-2 bg-white border rounded shadow-sm text-xs">
-                            <span className="font-medium">{format(parseISO(compra.fecha_compra), 'dd/MM/yy')}</span>
+                            <span className="font-medium">{compra.fecha_compra ? format(parseISO(compra.fecha_compra), 'dd/MM/yy') : 'N/A'}</span>
                             <span className="font-bold">{formatMoney(compra.monto_total)}</span>
                         </div>
                     ))}

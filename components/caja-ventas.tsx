@@ -80,7 +80,7 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
                   nombre: prod.nombre,
                   precio: prod.precio_venta,
                   stock: 0,
-                  codigo_barras: prod.codigo_barras
+                  codigo_barras: prod.codigo_barras ?? undefined
               })
           }
       }
@@ -160,7 +160,8 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
       })
 
       if (error) throw error
-      if (!data.success) throw new Error(data.message)
+      const result = data as { success?: boolean; message?: string } | null
+      if (!result || !result.success) throw new Error(result?.message || "Error al procesar la venta")
 
       generarTicketVenta({
         organizacion: "Planeta ZEGA",

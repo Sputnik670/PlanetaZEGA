@@ -10,7 +10,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "generate-types": "node scripts/generate-types.js",
+    "generate-types:cli": "npx supabase gen types typescript --project-id cwuzcdzjkmgodgtkekbd > types/tipos-db.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

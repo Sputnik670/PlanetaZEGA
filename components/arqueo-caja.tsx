@@ -115,22 +115,24 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
     setLoading(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user?.id).single()
+      if (!user?.id) throw new Error("No hay sesión activa")
+      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single<{ organization_id: string | null }>()
+      if (!perfil?.organization_id) throw new Error("No se encontró la organización.")
 
       const { data, error } = await supabase
         .from('caja_diaria')
         .insert({
-          organization_id: perfil?.organization_id, 
+          organization_id: perfil.organization_id, 
           sucursal_id: sucursalId, 
           monto_inicial: monto,
-          empleado_id: user?.id,
+          empleado_id: user.id,
           fecha_apertura: new Date().toISOString()
         })
         .select().single()
       
       if (error) throw error
 
-      await generarMisiones(data.id, user!.id, perfil!.organization_id)
+      await generarMisiones(data.id, user.id, perfil.organization_id)
       setCaja(data as CajaDiaria)
       onCajaAbierta(data.id)
       toast.success("Turno Iniciado")
@@ -162,8 +164,8 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
 
       if (exitoArqueo) {
           await supabase.from('misiones').update({ es_completada: true, unidades_completadas: 1 }).eq('caja_diaria_id', caja.id).eq('tipo', 'arqueo_cierre')
-          const { data: p } = await supabase.from('perfiles').select('xp').eq('id', caja.empleado_id).single()
-          if (p) await supabase.from('perfiles').update({ xp: p.xp + 20 }).eq('id', caja.empleado_id)
+          const { data: p } = await supabase.from('perfiles').select('xp').eq('id', caja.empleado_id).single<{ xp: number | null }>()
+          if (p && p.xp !== null) await supabase.from('perfiles').update({ xp: p.xp + 20 }).eq('id', caja.empleado_id)
           triggerConfetti()
           toast.success("🏆 Cierre Excelente", { description: "La caja coincide con el sistema." })
       } else {

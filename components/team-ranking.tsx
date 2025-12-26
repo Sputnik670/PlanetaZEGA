@@ -31,7 +31,7 @@ export default function TeamRanking() {
         setLoading(true)
         
         // 1. Traer empleados
-        const { data: empleados } = await supabase.from('perfiles').select('id, nombre, xp, avatar_url').eq('rol', 'empleado')
+        const { data: empleados } = await supabase.from('perfiles').select('id, nombre, xp').eq('rol', 'empleado')
         
         if (!empleados) return setLoading(false)
 
@@ -95,8 +95,7 @@ export default function TeamRanking() {
 
             metricas.push({
                 id: emp.id,
-                nombre: emp.nombre,
-                avatar_url: emp.avatar_url,
+                nombre: emp.nombre || 'Sin nombre',
                 xp: emp.xp || 0,
                 ventas_total: simuladoVentas, // Reemplazar con real
                 misiones_completadas: misiones || 0,

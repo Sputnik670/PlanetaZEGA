@@ -50,9 +50,10 @@ export default function WidgetSube({ onVentaRegistrada }: { onVentaRegistrada: (
             const { data: { user } } = await supabase.auth.getUser()
             
             // Buscar turno abierto
+            if (!user?.id) return
             const { data: turno } = await supabase.from('caja_diaria')
                 .select('id, organization_id')
-                .eq('empleado_id', user?.id)
+                .eq('empleado_id', user.id)
                 .is('fecha_cierre', null)
                 .single()
 
@@ -63,7 +64,7 @@ export default function WidgetSube({ onVentaRegistrada }: { onVentaRegistrada: (
             }
 
             // 1. Registramos la "Venta" en Stock (Siempre se registra, sea cual sea el medio de pago)
-            const { error } = await supabase.from('stock').insert({
+            const { error } = await (supabase.from('stock') as any).insert({
                 organization_id: turno.organization_id,
                 producto_id: subeProductId,
                 estado: 'vendido',

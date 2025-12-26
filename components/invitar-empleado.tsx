@@ -38,7 +38,8 @@ export function InvitarEmpleado() {
 
   const cargarDatos = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
-    const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user?.id).single()
+    if (!user?.id) return
+    const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single<{ organization_id: string | null }>()
     
     if (perfil?.organization_id) {
         setOrgId(perfil.organization_id)

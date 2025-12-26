@@ -63,10 +63,11 @@ export default function WidgetServicios({ onVentaRegistrada }: { onVentaRegistra
             fechaArgentina.setHours(fechaArgentina.getHours() - 3);
 
             const { data: { user } } = await supabase.auth.getUser()
+            if (!user?.id) return
             
             const { data: turno } = await supabase.from('caja_diaria')
                 .select('id, organization_id')
-                .eq('empleado_id', user?.id)
+                .eq('empleado_id', user.id)
                 .is('fecha_cierre', null)
                 .single()
 
@@ -107,7 +108,7 @@ export default function WidgetServicios({ onVentaRegistrada }: { onVentaRegistra
             }
 
             // ✅ 2. REGISTRAR VENTA EN STOCK (Historial)
-            const { error: errorStock } = await supabase.from('stock').insert({
+            const { error: errorStock } = await (supabase.from('stock') as any).insert({
                 organization_id: turno.organization_id,
                 caja_diaria_id: turno.id,
                 producto_id: virtualProductId,

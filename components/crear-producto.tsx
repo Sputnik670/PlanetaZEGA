@@ -90,14 +90,16 @@ export default function CrearProducto({ onProductCreated, sucursalId }: CrearPro
 
     try {
         const { data: { user } } = await supabase.auth.getUser()
-        const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user?.id).single()
+        if (!user?.id) throw new Error("No hay sesión activa")
+        const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single<{ organization_id: string | null }>()
+        if (!perfil?.organization_id) throw new Error("No se encontró la organización.")
 
         // 🛡️ Buscamos solo en nuestra organización
         const { data: existente } = await supabase
             .from('productos')
             .select('nombre')
             .eq('codigo_barras', code)
-            .eq('organization_id', perfil?.organization_id)
+            .eq('organization_id', perfil.organization_id)
             .maybeSingle() 
 
         if (existente) { 
@@ -127,7 +129,8 @@ export default function CrearProducto({ onProductCreated, sucursalId }: CrearPro
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user?.id).single()
+      if (!user?.id) throw new Error("No hay sesión activa")
+      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single<{ organization_id: string | null }>()
       
       if (!perfil?.organization_id) throw new Error("No se encontró organización activa.")
 

@@ -13,7 +13,8 @@ interface Sucursal {
   id: string
   nombre: string
   direccion: string | null
-  created_at: string
+  organization_id: string
+  created_at: string | null
 }
 
 // ⚠️ AUDITORÍA: Hacemos 'onUpdate' opcional para que no rompa si el padre no lo pasa.

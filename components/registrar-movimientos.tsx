@@ -45,14 +45,17 @@ export default function RegistrarMovimiento({ cajaId, onMovimientoRegistrado }: 
 
     setLoading(true)
     try {
-      const { error } = await supabase
-        .from('movimientos_caja')
-        .insert({
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user?.id) throw new Error("No hay sesión activa")
+      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single<{ organization_id: string | null }>()
+      if (!perfil?.organization_id) throw new Error("No se encontró la organización.")
+      const { error } = await (supabase.from('movimientos_caja') as any).insert({
           caja_diaria_id: cajaId,
           monto: valorMonto,
           tipo: 'egreso', // Siempre egreso en este formulario de gastos
           descripcion: descripcion.trim(),
-          categoria: categoria
+          categoria: categoria,
+          organization_id: perfil.organization_id
         })
 
       if (error) throw error

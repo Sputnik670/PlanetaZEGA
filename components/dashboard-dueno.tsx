@@ -56,11 +56,11 @@ interface MetricaStock {
 interface Producto {
     id: string
     nombre: string
-    categoria: string
+    categoria: string | null
     precio_venta: number
     costo: number
-    emoji: string
-    codigo_barras?: string 
+    emoji: string | null
+    codigo_barras?: string | null
     stock_disponible?: number
 }
 
@@ -580,7 +580,7 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
             <DialogHeader><DialogTitle className="font-black uppercase flex items-center gap-2"><Pencil className="h-5 w-5 text-primary"/> Editar Catálogo</DialogTitle></DialogHeader>
             {editingProduct && (
                 <div className="space-y-6 py-4">
-                    <div className="grid grid-cols-4 gap-3"><div className="col-span-1"><Label className="text-[10px] font-black uppercase">Icono</Label><Input value={editingProduct.emoji} onChange={e => setEditingProduct({...editingProduct, emoji: e.target.value})} className="text-center text-3xl h-16 rounded-2xl bg-slate-50" /></div><div className="col-span-3"><Label className="text-[10px] font-black uppercase">Nombre</Label><Input value={editingProduct.nombre} onChange={e => setEditingProduct({...editingProduct, nombre: e.target.value})} className="h-16 font-bold rounded-2xl" /></div></div>
+                    <div className="grid grid-cols-4 gap-3"><div className="col-span-1"><Label className="text-[10px] font-black uppercase">Icono</Label><Input value={editingProduct.emoji ?? ""} onChange={e => setEditingProduct({...editingProduct, emoji: e.target.value})} className="text-center text-3xl h-16 rounded-2xl bg-slate-50" /></div><div className="col-span-3"><Label className="text-[10px] font-black uppercase">Nombre</Label><Input value={editingProduct.nombre} onChange={e => setEditingProduct({...editingProduct, nombre: e.target.value})} className="h-16 font-bold rounded-2xl" /></div></div>
                     <div className="grid grid-cols-2 gap-4"><div><Label className="text-[10px] font-black uppercase text-slate-400">Costo</Label><Input type="number" value={editingProduct.costo} onChange={e => setEditingProduct({...editingProduct, costo: parseFloat(e.target.value)})} className="rounded-xl h-12" /></div><div><Label className="text-[10px] font-black uppercase text-primary">Precio</Label><Input type="number" value={editingProduct.precio_venta} onChange={e => setEditingProduct({...editingProduct, precio_venta: parseFloat(e.target.value)})} className="border-primary/40 font-black h-12 rounded-xl text-lg" /></div></div>
                     <Button onClick={handleUpdateProduct} disabled={actionLoading} className="w-full h-14 font-black text-lg rounded-2xl shadow-lg">{actionLoading ? <Loader2 className="animate-spin"/> : "GUARDAR CAMBIOS"}</Button>
                     <Button variant="ghost" className="w-full text-red-500 text-[10px] font-black" onClick={async () => { if(confirm("¿Eliminar?")){ await supabase.from('productos').delete().eq('id', editingProduct.id); fetchData(); setEditingProduct(null); } }}>ELIMINAR PRODUCTO</Button>

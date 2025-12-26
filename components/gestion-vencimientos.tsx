@@ -78,7 +78,7 @@ export default function GestionVencimientos({ turnoId, empleadoId, onAccionReali
             if (misiones && misiones.length > 0) {
                 const mision = misiones[0]
                 const nuevasUnidades = (mision.unidades_completadas || 0) + 1
-                const completada = nuevasUnidades >= mision.objetivo_unidades
+                const completada = mision.objetivo_unidades !== null && nuevasUnidades >= mision.objetivo_unidades
 
                 await supabase
                     .from('misiones')
@@ -91,8 +91,8 @@ export default function GestionVencimientos({ turnoId, empleadoId, onAccionReali
                 if (completada) {
                     toast.success("¡Misión Completada! 🎯", { description: "Has gestionado todos los vencimientos." })
                       // Sumar XP al perfil
-                      const { data: perfil } = await supabase.from('perfiles').select('xp').eq('id', empleadoId).single()
-                      if (perfil) {
+                      const { data: perfil } = await supabase.from('perfiles').select('xp').eq('id', empleadoId).single<{ xp: number | null }>()
+                      if (perfil && perfil.xp !== null && mision.puntos !== null) {
                         await supabase.from('perfiles').update({ xp: perfil.xp + mision.puntos }).eq('id', empleadoId)
                       }
                 }

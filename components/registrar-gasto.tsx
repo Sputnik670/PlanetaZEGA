@@ -29,8 +29,8 @@ export default function RegistrarGasto({ turnoId }: { turnoId: string }) {
         const { data: perfil } = await supabase
             .from('perfiles')
             .select('organization_id')
-            .eq('id', user?.id)
-            .single()
+            .eq('id', user!.id)
+            .single<{ organization_id: string | null }>()
 
         if (!perfil?.organization_id) throw new Error("No se encontró organización activa.")
 

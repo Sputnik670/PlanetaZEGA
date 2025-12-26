@@ -56,7 +56,8 @@ export default function AsignarMision({ turnoId, empleadoNombre, empleadoId, suc
         const { data: { user } } = await supabase.auth.getUser()
         
         // 🔍 Buscamos la organización del dueño
-        const { data: perfilOwner } = await supabase.from('perfiles').select('organization_id').eq('id', user?.id).single()
+        if (!user?.id) throw new Error("No hay sesión activa")
+        const { data: perfilOwner } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single<{ organization_id: string | null }>()
         const orgId = perfilOwner?.organization_id
 
         if (!orgId) throw new Error("No se pudo determinar la organización")

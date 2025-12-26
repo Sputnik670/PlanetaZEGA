@@ -119,7 +119,7 @@ export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStoc
       if (stockError) throw stockError
 
       if (costoNum > 0) {
-          const { data: pOld } = await supabase.from('productos').select('costo, precio_venta').eq('id', producto.id).single()
+          const { data: pOld } = await supabase.from('productos').select('costo, precio_venta').eq('id', producto.id).single<{ costo: number, precio_venta: number }>()
           if (pOld && pOld.costo !== costoNum) {
               await (supabase.from('historial_precios') as any).insert({
                   organization_id: perfil.organization_id,

@@ -50,7 +50,7 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
         .eq('estado', 'disponible')
         .lt('fecha_vencimiento', fechaLimite)
       
-      const totalUnidadesRiesgo = stockCritico?.reduce((acc, curr) => acc + (curr.cantidad || 0), 0) || 0
+      const totalUnidadesRiesgo = (stockCritico as Array<{ cantidad: number }> | null)?.reduce((acc, curr) => acc + (curr.cantidad || 0), 0) || 0
       const misionesABulkInsert = []
       
       if (totalUnidadesRiesgo > 0) {
@@ -103,7 +103,7 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
       }
 
       if (misionesABulkInsert.length > 0) {
-        await supabase.from('misiones').insert(misionesABulkInsert)
+        await (supabase.from('misiones') as any).insert(misionesABulkInsert)
       }
     } catch (error) { console.error("Error misiones:", error) }
   }

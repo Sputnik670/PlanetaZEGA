@@ -70,9 +70,9 @@ export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStoc
       const costoNum = parseFloat(costoUnitario) || 0;
       const montoTotal = costoNum * cantidad;
 
-      if (selectedProveedor && costoNum > 0) {
-          const { data: compraData, error: compraError } = await supabase
-            .from('compras')
+      if (selectedProveedor && costoNum > 0 && perfil.organization_id) {
+          const { data: compraData, error: compraError } = await (supabase
+            .from('compras') as any)
             .insert([{
                 organization_id: perfil.organization_id,
                 proveedor_id: selectedProveedor,
@@ -82,7 +82,8 @@ export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStoc
                 fecha_compra: new Date().toISOString(),
                 vencimiento_pago: estadoPago === 'pendiente' ? fechaVencimientoPago?.toISOString() : null
             }])
-            .select().single()
+            .select()
+            .single()
 
           if (compraError) throw compraError
           compraId = compraData.id

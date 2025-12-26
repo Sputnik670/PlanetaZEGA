@@ -63,7 +63,7 @@ export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStoc
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user?.id) throw new Error("No hay sesión activa")
-      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single()
+      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single<{ organization_id: string | null }>()
       if (!perfil?.organization_id) throw new Error("No se encontró la organización.")
 
       let compraId: string | null = null;

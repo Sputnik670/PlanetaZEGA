@@ -128,7 +128,7 @@ export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStoc
                   precio_venta_anterior: pOld.precio_venta, precio_venta_nuevo: pOld.precio_venta,
                   empleado_id: user.id, fecha_cambio: new Date().toISOString()
               })
-              await supabase.from('productos').update({ costo: costoNum }).eq('id', producto.id)
+              await (supabase.from('productos') as any).update({ costo: costoNum }).eq('id', producto.id)
           }
       }
 

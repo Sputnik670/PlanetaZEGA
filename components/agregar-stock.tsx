@@ -89,8 +89,8 @@ export function AgregarStock({ producto, onStockAdded, sucursalId }: AgregarStoc
           compraId = compraData.id
 
           if (estadoPago === 'pagado' && medioPago === 'efectivo') {
-              const { data: cajaActiva } = await supabase.from('caja_diaria').select('id').eq('sucursal_id', sucursalId).is('fecha_cierre', null).single()
-              if (cajaActiva) {
+              const { data: cajaActiva } = await supabase.from('caja_diaria').select('id').eq('sucursal_id', sucursalId).is('fecha_cierre', null).single<{ id: string }>()
+              if (cajaActiva?.id) {
                   await (supabase.from('movimientos_caja') as any).insert({
                       caja_diaria_id: cajaActiva.id,
                       organization_id: perfil.organization_id,

@@ -122,9 +122,16 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
         
         console.log("🔍 QR detectado:", text.substring(0, 100)) // Log para depuración
         
+        // Mostrar feedback visual en móvil
+        toast.info("QR detectado", { 
+          description: `Procesando: ${text.substring(0, 50)}...`,
+          duration: 2000
+        })
+        
         // Evitar procesar el mismo QR múltiples veces
         if (processedQRRef.current === text) {
           console.log("⚠️ QR ya procesado, ignorando")
+          toast.warning("QR ya procesado", { description: "Esperando nuevo escaneo..." })
           return
         }
         
@@ -151,6 +158,12 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           }
           
           console.log("🚀 Redirigiendo a:", redirectUrl)
+          
+          // Mostrar feedback visual antes de redirigir
+          toast.success("Redirigiendo...", { 
+            description: "Procesando fichaje",
+            duration: 1000
+          })
           
           // Detener TODO inmediatamente
           setScanning(false)

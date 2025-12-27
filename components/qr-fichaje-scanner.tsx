@@ -44,78 +44,54 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
     }
   }, [isOpen])
 
-  // Inicializar cámara cuando se abre el dialog
+  // Verificar que el video esté reproduciéndose antes de activar el scanner
   useEffect(() => {
-    if (!isOpen) {
-      setLoading(true)
-      setError(null)
-      setHasPermission(null)
-      setScanning(false)
-      return
+    if (!isOpen || !videoRef.current) return
+
+    const video = videoRef.current
+    
+    const handleCanPlay = () => {
+      console.log("✅ Video listo, activando scanner")
+      setScanning(true)
+      setLoading(false)
     }
 
-    // iOS Safari requiere que el video esté visible y montado
-    // Esperamos a que el Dialog esté completamente renderizado
-    const initCamera = async () => {
-      try {
-        setLoading(true)
-        setError(null)
-
-        // Verificar soporte
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error("Tu navegador no soporta el acceso a la cámara")
-        }
-
-        // Esperar un momento para que el video esté en el DOM (crítico para iOS)
-        await new Promise(resolve => setTimeout(resolve, 300))
-
-        // Solicitar permisos con constraints simples para iOS
-        const constraints: MediaStreamConstraints = {
-          video: {
-            facingMode: "environment",
-            // iOS requiere constraints muy básicos
-            width: { ideal: 640 },
-            height: { ideal: 480 }
-          },
-          audio: false
-        }
-
-        const stream = await navigator.mediaDevices.getUserMedia(constraints)
-        streamRef.current = stream
-
-        // Asignar stream al video manualmente (importante para iOS)
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          videoRef.current.play().catch(err => {
-            console.error("Error al reproducir video:", err)
-          })
-        }
-
-        setHasPermission(true)
-        setScanning(true)
-        setLoading(false)
-      } catch (err: any) {
-        console.error("Error inicializando cámara:", err)
-        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-          setError("Se necesita permiso para acceder a la cámara. Por favor, permite el acceso en la configuración de tu navegador.")
-          setHasPermission(false)
-        } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-          setError("No se encontró ninguna cámara en tu dispositivo")
-          setHasPermission(false)
-        } else {
-          setError(`Error al acceder a la cámara: ${err.message || "Intenta nuevamente"}`)
-          setHasPermission(false)
-        }
-        setLoading(false)
-      }
+    const handlePlay = () => {
+      console.log("▶️ Video reproduciéndose")
+      setScanning(true)
     }
 
-    initCamera()
-  }, [isOpen])
+    const handleError = (e: any) => {
+      console.error("❌ Error en video:", e)
+      setError("Error al reproducir video de la cámara")
+      setLoading(false)
+    }
+
+    video.addEventListener('canplay', handleCanPlay)
+    video.addEventListener('play', handlePlay)
+    video.addEventListener('error', handleError)
+
+    // Verificar si ya está reproduciéndose
+    if (video.readyState >= 2) {
+      setScanning(true)
+      setLoading(false)
+    }
+
+    return () => {
+      video.removeEventListener('canplay', handleCanPlay)
+      video.removeEventListener('play', handlePlay)
+      video.removeEventListener('error', handleError)
+    }
+  }, [isOpen, videoRef.current])
 
   const { ref: zxingRef } = useZxing({
     onDecodeResult(result: any) {
-      if (!scanning || !isOpen || isProcessingRef.current) return
+      console.log("🎯 onDecodeResult llamado", { scanning, isOpen, isProcessing: isProcessingRef.current })
+      
+      if (!scanning || !isOpen || isProcessingRef.current) {
+        console.log("⚠️ Condiciones no cumplidas, ignorando")
+        return
+      }
       
       try {
         const text = result?.getText ? result.getText() : String(result)
@@ -244,25 +220,35 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
     constraints: { 
       video: { 
         facingMode: "environment",
-        width: { ideal: 640 },
-        height: { ideal: 480 }
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
       }, 
       audio: false 
     },
     timeBetweenDecodingAttempts: 300,
-    pause: !isOpen || !scanning || !hasPermission || isProcessingRef.current
+    pause: !isOpen || !scanning || !hasPermission || isProcessingRef.current || loading
   } as any)
 
   // Combinar ambas refs para que useZxing y nuestro manejo manual funcionen
   const combinedRef = (node: HTMLVideoElement | null) => {
     videoRef.current = node
-    // useZxing devuelve una ref que puede ser función o objeto
+    
+    // Pasar la ref a useZxing
     if (node) {
       if (typeof zxingRef === 'function') {
         (zxingRef as (node: HTMLVideoElement | null) => void)(node)
       } else if (zxingRef && typeof zxingRef === 'object' && 'current' in zxingRef) {
         (zxingRef as React.MutableRefObject<HTMLVideoElement | null>).current = node
       }
+      
+      // Verificar que el video esté listo
+      node.addEventListener('loadedmetadata', () => {
+        console.log("📹 Video metadata cargada")
+        if (node.readyState >= 2) {
+          setScanning(true)
+          setLoading(false)
+        }
+      })
     }
   }
 
@@ -385,6 +371,23 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
               WebkitPlaysinline: "true",
               objectFit: "cover"
             } as any}
+            onLoadedMetadata={() => {
+              console.log("📹 Video metadata cargada, readyState:", videoRef.current?.readyState)
+              if (videoRef.current && videoRef.current.readyState >= 2) {
+                setScanning(true)
+                setLoading(false)
+              }
+            }}
+            onPlaying={() => {
+              console.log("▶️ Video reproduciéndose")
+              setScanning(true)
+              setLoading(false)
+            }}
+            onError={(e) => {
+              console.error("❌ Error en video:", e)
+              setError("Error al reproducir video")
+              setLoading(false)
+            }}
           />
           
           <div className="absolute top-0 left-0 w-full h-full border-2 border-primary/50 pointer-events-none">

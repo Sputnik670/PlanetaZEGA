@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useZxing } from "react-zxing"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -26,7 +26,18 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
   const [loading, setLoading] = useState(true)
   const [hasPermission, setHasPermission] = useState<boolean | null>(null)
   const [scanning, setScanning] = useState(false)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
 
+  // Limpiar stream al cerrar
+  useEffect(() => {
+    if (!isOpen && streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop())
+      streamRef.current = null
+    }
+  }, [isOpen])
+
+  // Inicializar cámara cuando se abre el dialog
   useEffect(() => {
     if (!isOpen) {
       setLoading(true)
@@ -36,17 +47,66 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
       return
     }
 
-    // iOS requiere que el video esté montado antes de solicitar permisos
-    // Usamos un pequeño delay para asegurar que el DOM esté listo
-    const timer = setTimeout(() => {
-      setLoading(false)
-      setScanning(true)
-    }, 100)
+    // iOS Safari requiere que el video esté visible y montado
+    // Esperamos a que el Dialog esté completamente renderizado
+    const initCamera = async () => {
+      try {
+        setLoading(true)
+        setError(null)
 
-    return () => clearTimeout(timer)
+        // Verificar soporte
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error("Tu navegador no soporta el acceso a la cámara")
+        }
+
+        // Esperar un momento para que el video esté en el DOM (crítico para iOS)
+        await new Promise(resolve => setTimeout(resolve, 300))
+
+        // Solicitar permisos con constraints simples para iOS
+        const constraints: MediaStreamConstraints = {
+          video: {
+            facingMode: "environment",
+            // iOS requiere constraints muy básicos
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          },
+          audio: false
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints)
+        streamRef.current = stream
+
+        // Asignar stream al video manualmente (importante para iOS)
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          videoRef.current.play().catch(err => {
+            console.error("Error al reproducir video:", err)
+          })
+        }
+
+        setHasPermission(true)
+        setScanning(true)
+        setLoading(false)
+      } catch (err: any) {
+        console.error("Error inicializando cámara:", err)
+        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+          setError("Se necesita permiso para acceder a la cámara. Por favor, permite el acceso en la configuración de tu navegador.")
+          setHasPermission(false)
+        } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+          setError("No se encontró ninguna cámara en tu dispositivo")
+          setHasPermission(false)
+        } else {
+          setError(`Error al acceder a la cámara: ${err.message || "Intenta nuevamente"}`)
+          setHasPermission(false)
+        }
+        setLoading(false)
+      }
+    }
+
+    initCamera()
   }, [isOpen])
 
-  const { ref } = useZxing({
+  const { ref: zxingRef } = useZxing({
     onDecodeResult(result: any) {
       if (!scanning || !isOpen) return
       
@@ -78,32 +138,33 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
       }
     },
     onError(err: any) {
-      console.error("Error del scanner:", err)
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-        setError("Se necesita permiso para acceder a la cámara. Por favor, permite el acceso en la configuración de tu navegador.")
-        setHasPermission(false)
-        setLoading(false)
-      } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-        setError("No se encontró ninguna cámara en tu dispositivo")
-        setHasPermission(false)
-        setLoading(false)
-      } else if (err.name !== "NotFoundError") {
-        setError(`Error al escanear: ${err.message || "Intenta nuevamente"}`)
+      console.error("Error del scanner ZXing:", err)
+      // No mostrar error si ya tenemos un error de permisos
+      if (hasPermission !== false && err.name !== "NotFoundError") {
+        console.warn("Error de decodificación (puede ser normal):", err.message)
       }
     },
     constraints: { 
       video: { 
         facingMode: "environment",
-        // iOS Safari requiere constraints muy simples
         width: { ideal: 640 },
         height: { ideal: 480 }
       }, 
       audio: false 
     },
-    // Mejorar compatibilidad con iOS
     timeBetweenDecodingAttempts: 300,
-    pause: !isOpen || !scanning
+    pause: !isOpen || !scanning || !hasPermission
   } as any)
+
+  // Combinar ambas refs para que useZxing y nuestro manejo manual funcionen
+  const combinedRef = (node: HTMLVideoElement | null) => {
+    videoRef.current = node
+    if (typeof zxingRef === 'function') {
+      zxingRef(node)
+    } else if (zxingRef) {
+      (zxingRef as any).current = node
+    }
+  }
 
   const validateAndProcessQR = async (qrData: QRData) => {
     setScanning(false)
@@ -214,12 +275,16 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           )}
           
           <video 
-            ref={ref} 
+            ref={combinedRef} 
             className="w-full h-full object-cover" 
             playsInline={true}
             muted={true}
             autoPlay={true}
-            style={{ maxHeight: "70vh", WebkitPlaysinline: "true" } as any}
+            style={{ 
+              maxHeight: "70vh", 
+              WebkitPlaysinline: "true",
+              objectFit: "cover"
+            } as any}
           />
           
           <div className="absolute top-0 left-0 w-full h-full border-2 border-primary/50 pointer-events-none">

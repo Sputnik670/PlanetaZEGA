@@ -35,7 +35,6 @@
   "exclude": [
     "node_modules",
     "e2e/**/*",
-    "testsprite_tests/**/*",
     "playwright.config.ts",
     "playwright-report/**/*"
   ]

@@ -43,14 +43,35 @@ export default function TeamRanking() {
         const fechaStr = fechaInicio.toISOString()
 
         for (const emp of empleados) {
-            // A. Ventas
-            const { count: ventas } = await supabase
-                .from('stock')
-                .select('*', { count: 'exact', head: true })
-                .eq('estado', 'vendido')
-                // Nota: Asumimos que guardamos quien vendió. Si no tienes esa col en stock, 
-                // usamos la XP como proxy de actividad por ahora.
-                // Idealmente: .eq('vendedor_id', emp.id)
+            // A. Ventas - Calcular monto total vendido por este empleado
+            // Primero obtenemos los turnos del empleado
+            const { data: turnosVentas } = await supabase
+                .from('caja_diaria')
+                .select('id')
+                .eq('empleado_id', emp.id)
+                .not('fecha_cierre', 'is', null)
+                .gte('fecha_apertura', fechaStr)
+            
+            let totalVentas = 0
+            if (turnosVentas && turnosVentas.length > 0) {
+                // Obtenemos las ventas de esos turnos
+                const turnosIds = turnosVentas.map(t => t.id)
+                const { data: ventasData } = await supabase
+                    .from('stock')
+                    .select('precio_venta_historico, cantidad')
+                    .eq('estado', 'vendido')
+                    .in('caja_diaria_id', turnosIds)
+                    .gte('fecha_venta', fechaStr)
+                
+                // Calcular total de ventas
+                if (ventasData) {
+                    totalVentas = ventasData.reduce((sum: number, v: any) => {
+                        const precio = Number(v.precio_venta_historico) || 0
+                        const cantidad = Number(v.cantidad) || 1
+                        return sum + (precio * cantidad)
+                    }, 0)
+                }
+            }
             
             // B. Misiones
             const { count: misiones } = await supabase
@@ -63,7 +84,7 @@ export default function TeamRanking() {
             // C. Diferencia de Caja (CRÍTICO)
             const { data: turnos } = await supabase
                 .from('caja_diaria')
-                .select('monto_inicial, monto_final, movimientos_caja(monto, tipo)')
+                .select('monto_inicial, monto_final, diferencia, movimientos_caja(monto, tipo)')
                 .eq('empleado_id', emp.id)
                 .not('fecha_cierre', 'is', null)
                 .gte('fecha_apertura', fechaStr)
@@ -74,32 +95,34 @@ export default function TeamRanking() {
             if (turnos) {
                 countTurnos = turnos.length
                 turnos.forEach((t: any) => {
-                    const gastos = t.movimientos_caja
-                        ?.filter((m: any) => m.tipo === 'egreso')
-                        .reduce((sum: number, m: any) => sum + m.monto, 0) || 0
-                    
-                    // Simplificación: Asumimos ventas en efectivo aprox. 
-                    // Para mayor precisión necesitaríamos filtrar ventas por turno.
-                    // Aquí usaremos la diferencia bruta reportada vs esperada si tuvieras el dato exacto.
-                    // Como fallback útil: Sumamos si el cierre fue exitoso o forzado.
-                    
-                    // Si tienes un campo 'diferencia_declarada' úsalo. Si no, calculamos simple:
-                    // Si monto_final < monto_inicial (muy raro en kiosco salvo retiro), alerta.
+                    // Usar la diferencia calculada si existe, sino calcularla
+                    if (t.diferencia !== null && t.diferencia !== undefined) {
+                        diffAcumulada += Number(t.diferencia) || 0
+                    } else if (t.monto_final !== null && t.monto_inicial !== null) {
+                        // Calcular diferencia manualmente si no está calculada
+                        const gastos = t.movimientos_caja
+                            ?.filter((m: any) => m.tipo === 'egreso')
+                            .reduce((sum: number, m: any) => sum + m.monto, 0) || 0
+                        
+                        const ingresos = t.movimientos_caja
+                            ?.filter((m: any) => m.tipo === 'ingreso')
+                            .reduce((sum: number, m: any) => sum + m.monto, 0) || 0
+                        
+                        // Diferencia = monto_final - (monto_inicial + ingresos - gastos)
+                        const esperado = Number(t.monto_inicial) + ingresos - gastos
+                        const diferencia = Number(t.monto_final) - esperado
+                        diffAcumulada += diferencia
+                    }
                 })
             }
-            
-            // D. Hack para simular datos si la DB está vacía y mostrarte el diseño
-            // (BORRAR ESTO CUANDO TENGAS DATOS REALES)
-            const simuladoVentas = Math.floor(Math.random() * 500000)
-            const simuladoDiff = Math.floor(Math.random() * -2000) // Siempre falta algo jaja
 
             metricas.push({
                 id: emp.id,
                 nombre: emp.nombre || 'Sin nombre',
                 xp: emp.xp || 0,
-                ventas_total: simuladoVentas, // Reemplazar con real
+                ventas_total: totalVentas, // ✅ Datos reales
                 misiones_completadas: misiones || 0,
-                diferencia_caja_acumulada: simuladoDiff, // Reemplazar con real
+                diferencia_caja_acumulada: diffAcumulada, // ✅ Datos reales
                 turnos_cerrados: countTurnos
             })
         }

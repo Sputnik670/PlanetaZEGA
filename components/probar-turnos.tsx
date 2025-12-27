@@ -25,17 +25,30 @@ export default function ProbarTurnos() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
+      const { data: perfil } = await supabase
+        .from('perfiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+
+      if (!perfil?.organization_id) return
+
       const { data: sucursal } = await supabase
         .from('sucursales')
         .select('id')
+        .eq('organization_id', perfil.organization_id)
         .limit(1)
         .single()
+
+      if (!sucursal || !sucursal.id) return
+
+      const sucursalId = sucursal.id
 
       const { data } = await supabase
         .from('caja_diaria')
         .select('*')
         .eq('empleado_id', user.id)
-        .eq('sucursal_id', sucursal?.id)
+        .eq('sucursal_id', sucursalId)
         .is('fecha_cierre', null)
         .maybeSingle()
 
@@ -74,7 +87,7 @@ export default function ProbarTurnos() {
         .limit(1)
         .single()
 
-      if (!sucursal) throw new Error("No se encontró sucursal")
+      if (!sucursal || !sucursal.id) throw new Error("No se encontró sucursal")
 
       const { data, error } = await supabase
         .from('caja_diaria')

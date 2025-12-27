@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Clock, LogIn, LogOut, MapPin, Loader2 } from "lucide-react"
+import { Clock, LogIn, LogOut, MapPin, Loader2, QrCode } from "lucide-react"
 import { toast } from "sonner"
 import { format, parseISO } from "date-fns"
 import { es } from "date-fns/locale"
@@ -14,9 +14,10 @@ interface RelojControlProps {
   sucursalId: string
   sucursalNombre: string
   onActionComplete: () => void // ✅ Prop agregada para sincronizar con el padre
+  onScanQR?: () => void // ✅ Opción para escanear QR en lugar de botón manual
 }
 
-export default function RelojControl({ sucursalId, sucursalNombre, onActionComplete }: RelojControlProps) {
+export default function RelojControl({ sucursalId, sucursalNombre, onActionComplete, onScanQR }: RelojControlProps) {
   const [loading, setLoading] = useState(false)
   const [fichajeActivo, setFichajeActivo] = useState<any>(null)
 
@@ -114,25 +115,47 @@ export default function RelojControl({ sucursalId, sucursalNombre, onActionCompl
           </div>
         </div>
 
-        <Button 
-          onClick={handleFichaje} 
-          disabled={loading}
-          variant={fichajeActivo ? "destructive" : "default"}
-          className={cn(
-            "w-full sm:w-auto rounded-2xl px-10 font-black text-xs h-14 shadow-lg transition-all active:scale-95",
-            !fichajeActivo && "bg-blue-600 hover:bg-blue-700 shadow-blue-200"
-          )}
-        >
-          {loading ? (
-            <Loader2 className="animate-spin h-5 w-5" />
-          ) : (
-            fichajeActivo ? (
-                <><LogOut className="mr-2 h-4 w-4"/> FINALIZAR TURNO</>
+        {onScanQR ? (
+          <Button 
+            onClick={onScanQR} 
+            disabled={loading}
+            variant={fichajeActivo ? "destructive" : "default"}
+            className={cn(
+              "w-full sm:w-auto rounded-2xl px-10 font-black text-xs h-14 shadow-lg transition-all active:scale-95",
+              !fichajeActivo && "bg-blue-600 hover:bg-blue-700 shadow-blue-200"
+            )}
+          >
+            {loading ? (
+              <Loader2 className="animate-spin h-5 w-5" />
             ) : (
-                <><LogIn className="mr-2 h-4 w-4"/> REGISTRAR ENTRADA</>
-            )
-          )}
-        </Button>
+              fichajeActivo ? (
+                  <><QrCode className="mr-2 h-4 w-4"/> ESCANEAR QR SALIDA</>
+              ) : (
+                  <><QrCode className="mr-2 h-4 w-4"/> ESCANEAR QR ENTRADA</>
+              )
+            )}
+          </Button>
+        ) : (
+          <Button 
+            onClick={handleFichaje} 
+            disabled={loading}
+            variant={fichajeActivo ? "destructive" : "default"}
+            className={cn(
+              "w-full sm:w-auto rounded-2xl px-10 font-black text-xs h-14 shadow-lg transition-all active:scale-95",
+              !fichajeActivo && "bg-blue-600 hover:bg-blue-700 shadow-blue-200"
+            )}
+          >
+            {loading ? (
+              <Loader2 className="animate-spin h-5 w-5" />
+            ) : (
+              fichajeActivo ? (
+                  <><LogOut className="mr-2 h-4 w-4"/> FINALIZAR TURNO</>
+              ) : (
+                  <><LogIn className="mr-2 h-4 w-4"/> REGISTRAR ENTRADA</>
+              )
+            )}
+          </Button>
+        )}
       </div>
       
       {fichajeActivo && (

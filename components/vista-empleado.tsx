@@ -18,8 +18,11 @@ import GestionVencimientos from "@/components/gestion-vencimientos"
 import WidgetServicios from "@/components/widget-servicios" 
 import WidgetSube from "@/components/widget-sube"
 import RelojControl from "@/components/reloj-control" 
+import QRFichajeScanner from "@/components/qr-fichaje-scanner"
+import QRTester from "@/components/qr-tester"
 import { Progress } from "@/components/ui/progress" 
 import { cn } from "@/lib/utils"
+import { QrCode } from "lucide-react"
 
 interface UserProfile {
     id: string
@@ -40,7 +43,8 @@ export default function VistaEmpleado({ onBack, sucursalId }: VistaEmpleadoProps
     const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
     const [sucursalNombre, setSucursalNombre] = useState("") 
     const [isClockedIn, setIsClockedIn] = useState(false) 
-    const [refreshKey, setRefreshKey] = useState(0) 
+    const [refreshKey, setRefreshKey] = useState(0)
+    const [showQRScanner, setShowQRScanner] = useState(false) 
 
     const fetchContexto = useCallback(async () => {
         try {
@@ -138,13 +142,80 @@ export default function VistaEmpleado({ onBack, sucursalId }: VistaEmpleadoProps
             </div>
 
             <div className="p-4 space-y-4 -mt-6">
+                {/* 🧪 Componente de prueba - Solo visible en desarrollo */}
+                {process.env.NODE_ENV === 'development' && (
+                    <QRTester />
+                )}
+                
                 <div className="relative z-20">
                     <RelojControl 
                         sucursalId={sucursalId} 
                         sucursalNombre={sucursalNombre} 
                         onActionComplete={handleDataUpdated}
+                        onScanQR={() => setShowQRScanner(true)}
                     />
                 </div>
+
+                <QRFichajeScanner
+                    isOpen={showQRScanner}
+                    onClose={() => setShowQRScanner(false)}
+                    onQRScanned={async (data) => {
+                        // Procesar fichaje automáticamente según el tipo de QR
+                        try {
+                            const { data: { user } } = await supabase.auth.getUser()
+                            if (!user) return
+
+                            const { data: perfil } = await supabase
+                                .from('perfiles')
+                                .select('organization_id')
+                                .eq('id', user.id)
+                                .single()
+
+                            if (!perfil?.organization_id) return
+
+                            if (data.tipo === "entrada") {
+                                // Registrar entrada
+                                const { error } = await supabase
+                                    .from('asistencia')
+                                    .insert({
+                                        organization_id: perfil.organization_id,
+                                        sucursal_id: data.sucursal_id,
+                                        empleado_id: user.id,
+                                        entrada: new Date().toISOString()
+                                    })
+                                
+                                if (error) throw error
+                                toast.success("Entrada registrada", { description: `Local: ${data.sucursal_nombre}` })
+                            } else {
+                                // Registrar salida
+                                const { data: asistenciaActual } = await supabase
+                                    .from('asistencia')
+                                    .select('id')
+                                    .eq('empleado_id', user.id)
+                                    .eq('sucursal_id', data.sucursal_id)
+                                    .is('salida', null)
+                                    .maybeSingle()
+
+                                if (!asistenciaActual) {
+                                    throw new Error("No tienes una entrada registrada en este local")
+                                }
+
+                                const { error } = await supabase
+                                    .from('asistencia')
+                                    .update({ salida: new Date().toISOString() })
+                                    .eq('id', asistenciaActual.id)
+                                
+                                if (error) throw error
+                                toast.info("Salida registrada", { description: "Jornada finalizada correctamente." })
+                            }
+
+                            handleDataUpdated()
+                            setShowQRScanner(false)
+                        } catch (error: any) {
+                            toast.error("Error al procesar fichaje", { description: error.message })
+                        }
+                    }}
+                />
 
                 {!isClockedIn ? (
                     <Card className="p-12 border-2 border-dashed border-slate-200 bg-white/80 backdrop-blur-sm flex flex-col items-center text-center space-y-4 rounded-[2.5rem]">

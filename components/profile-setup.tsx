@@ -29,15 +29,24 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
       }
 
       try {
-        const { data: invitacion } = await supabase
+        const { data: invitacion, error: inviteError } = await supabase
           .from('pending_invites')
           .select('organization_id, sucursal_id')
-          .eq('email', user.email.toLowerCase())
+          .eq('email', user.email.toLowerCase().trim())
           .maybeSingle()
 
+        if (inviteError) {
+          console.error("Error buscando invitación:", inviteError)
+        }
+
         if (invitacion) {
-          // Si hay invitación, el perfil debería haberse creado automáticamente
-          // Pero por si acaso, verificamos si ya existe el perfil
+          console.log("✅ Invitación encontrada:", { 
+            email: user.email, 
+            orgId: invitacion.organization_id,
+            sucursalId: invitacion.sucursal_id 
+          })
+          
+          // Si hay invitación, verificar si ya existe el perfil
           const { data: perfil } = await supabase
             .from('perfiles')
             .select('id, rol')
@@ -46,6 +55,7 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
 
           if (perfil) {
             // Ya existe perfil, redirigir
+            console.log("✅ Perfil ya existe, redirigiendo...")
             onProfileCreated(perfil.rol as "dueño" | "empleado")
             return
           }
@@ -57,6 +67,9 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
             sucursal_id: invitacion.sucursal_id
           })
           toast.info("Invitación detectada", { description: "Tu cuenta será vinculada a la organización." })
+        } else {
+          // No hay invitación - permitir que el usuario elija ser dueño
+          console.log("⚠️ No se encontró invitación para:", user.email.toLowerCase().trim())
         }
       } catch (error) {
         console.error("Error verificando invitación:", error)
@@ -95,29 +108,91 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
       let orgId = null
       let sucursalId = null
 
-      // 1. Si es empleado, verificar si hay invitación
+      // 1. Si es empleado, SIEMPRE verificar si hay invitación
       if (selectedRole === 'empleado') {
-        if (invitacionData) {
-          // Usar datos de la invitación
-          orgId = invitacionData.organization_id
-          sucursalId = invitacionData.sucursal_id
-        } else if (user?.email) {
-          // Buscar invitación por si acaso no se cargó antes
-          const { data: invitacion } = await supabase
-            .from('pending_invites')
-            .select('organization_id, sucursal_id')
-            .eq('email', user.email.toLowerCase())
-            .maybeSingle()
+        if (!user?.email) {
+          throw new Error("No se pudo obtener el email del usuario.")
+        }
+
+        // Buscar invitación (siempre buscar, incluso si ya tenemos invitacionData)
+        const emailNormalizado = user.email.toLowerCase().trim()
+        console.log("🔍 Buscando invitación para:", emailNormalizado, "Email original:", user.email, "User ID:", user.id)
+        
+        // Primero intentar búsqueda exacta
+        let { data: invitacion, error: inviteError } = await supabase
+          .from('pending_invites')
+          .select('organization_id, sucursal_id, id, email')
+          .eq('email', emailNormalizado)
+          .maybeSingle()
+        
+        console.log("📊 Resultado de búsqueda:", { invitacion, inviteError, hasData: !!invitacion })
+        
+        // Si hay error, puede ser un problema de RLS - intentar buscar todas para debug
+        if (inviteError) {
+          console.error("❌ Error buscando invitación:", inviteError)
+          console.log("⚠️ Intentando buscar todas las invitaciones para debug...")
           
-          if (invitacion) {
-            orgId = invitacion.organization_id
-            sucursalId = invitacion.sucursal_id
-            setInvitacionData(invitacion)
-          } else {
-            throw new Error("No se encontró una invitación. Contacta al administrador para ser invitado.")
+          const { data: todasInvitaciones, error: errorTodas } = await supabase
+            .from('pending_invites')
+            .select('email, organization_id, sucursal_id, id')
+            .limit(10)
+          
+          console.log("📋 Todas las invitaciones (si RLS lo permite):", todasInvitaciones)
+          console.log("❌ Error al buscar todas:", errorTodas)
+          
+          // Si el error es de permisos, dar un mensaje más específico
+          if (inviteError.code === '42501' || inviteError.message?.includes('permission') || inviteError.message?.includes('policy')) {
+            throw new Error("Error de permisos al verificar la invitación. Verifica que las políticas RLS estén configuradas correctamente.")
           }
-        } else {
-          throw new Error("No se pudo obtener la información de la invitación.")
+          
+          throw new Error(`Error al verificar la invitación: ${inviteError.message || 'Error desconocido'}`)
+        }
+        
+        // Si no se encuentra, buscar todas las invitaciones para debug
+        if (!invitacion) {
+          console.log("⚠️ No se encontró con búsqueda exacta, buscando todas las invitaciones...")
+          const { data: todasInvitaciones, error: errorTodas } = await supabase
+            .from('pending_invites')
+            .select('email, organization_id, sucursal_id, id')
+            .limit(10)
+          
+          console.log("📋 Invitaciones en la BD:", todasInvitaciones)
+          console.log("❌ Error al buscar todas:", errorTodas)
+          
+          // Verificar si hay alguna invitación con email similar (por si hay problema de normalización)
+          if (todasInvitaciones && todasInvitaciones.length > 0) {
+            const emailSimilar = todasInvitaciones.find(inv => 
+              inv.email?.toLowerCase().trim() === emailNormalizado
+            )
+            
+            if (emailSimilar) {
+              console.log("✅ Encontrada invitación con email similar:", emailSimilar)
+              invitacion = emailSimilar
+            } else {
+              console.log("📧 Emails en BD:", todasInvitaciones.map(inv => inv.email))
+              console.log("📧 Email buscado:", emailNormalizado)
+            }
+          }
+        }
+
+        if (!invitacion) {
+          // No hay invitación - mostrar mensaje más útil
+          console.error("❌ No se encontró invitación para:", emailNormalizado)
+          throw new Error(`No se encontró una invitación para ${user.email}. Contacta al administrador para ser invitado.`)
+        }
+
+        console.log("✅ Invitación encontrada al guardar perfil:", invitacion)
+
+        // Usar datos de la invitación encontrada
+        orgId = invitacion.organization_id
+        sucursalId = invitacion.sucursal_id
+        
+        // Guardar en estado por si acaso
+        if (!invitacionData) {
+          setInvitacionData({
+            organization_id: invitacion.organization_id,
+            sucursal_id: invitacion.sucursal_id
+          })
         }
       }
 
@@ -156,10 +231,15 @@ export default function ProfileSetup({ user, onProfileCreated }: ProfileSetupPro
 
       // 4. Si había una invitación, eliminarla
       if (selectedRole === 'empleado' && user?.email) {
-        await supabase
+        const { error: deleteError } = await supabase
           .from('pending_invites')
           .delete()
-          .eq('email', user.email.toLowerCase())
+          .eq('email', user.email.toLowerCase().trim())
+        
+        if (deleteError) {
+          console.error("Error eliminando invitación:", deleteError)
+          // No lanzamos error aquí, el perfil ya se creó
+        }
       }
 
       toast.success("¡Bienvenido!", { description: "Tu cuenta está lista para usar." })

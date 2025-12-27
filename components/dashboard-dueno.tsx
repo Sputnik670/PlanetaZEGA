@@ -14,7 +14,7 @@ import {
   Eye, TrendingDown, Star, User, ShoppingBag, Clock, 
   Pencil, Trash2, History, Save, ChevronDown, ChevronUp, Calculator, ScanBarcode,
   Users, Sparkles, Printer, Briefcase, Receipt, X, MapPin, Settings, ChevronRight,
-  ArrowDownRight 
+  ArrowDownRight, QrCode
 } from "lucide-react" 
 import { BarChart, Bar, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts" 
 import CrearProducto from "@/components/crear-producto"
@@ -37,6 +37,7 @@ import HappyHour from "@/components/happy-hour"
 import TeamRanking from "@/components/team-ranking"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import GestionSucursales from "@/components/gestion-sucursales"
+import GenerarQRFichaje from "@/components/generar-qr-fichaje"
 import RegistrarMovimiento from "@/components/registrar-movimientos"
 
 const UMBRAL_STOCK_BAJO = 5 
@@ -563,7 +564,22 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
 
         {activeTab === "catalog" && <CrearProducto sucursalId={currentSucursalId} onProductCreated={() => { setActiveTab("inventory"); fetchData(); }} />}
         {activeTab === "suppliers" && <div className="space-y-6 animate-in fade-in"><ControlSaldoProveedor /><GestionProveedores sucursalId={currentSucursalId} organizationId={organizationId} /></div>}
-        {activeTab === "team" && <div className="space-y-6 animate-in fade-in"><TeamRanking /><InvitarEmpleado /></div>}
+        {activeTab === "team" && (
+            <div className="space-y-6 animate-in fade-in">
+                <TeamRanking />
+                <InvitarEmpleado />
+                <Card className="p-6 border-2">
+                    <h3 className="text-lg font-black text-slate-800 uppercase mb-4 flex items-center gap-2">
+                        <QrCode className="h-5 w-5 text-blue-600" />
+                        Generar QR de Fichaje
+                    </h3>
+                    <p className="text-sm text-slate-600 mb-4">
+                        Genera códigos QR para que tus empleados puedan fichar entrada y salida escaneando el código del local.
+                    </p>
+                    <GenerarQRFichaje />
+                </Card>
+            </div>
+        )}
         {activeTab === "alerts" && (
             <div className="space-y-6 animate-in fade-in">
                 <HappyHour criticos={capitalEnRiesgo.criticos} onDiscountApplied={fetchData} />

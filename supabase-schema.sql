@@ -192,6 +192,17 @@ CREATE TABLE IF NOT EXISTS public.asistencia (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Tabla: pending_invites (Invitaciones pendientes para empleados)
+CREATE TABLE IF NOT EXISTS public.pending_invites (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email TEXT NOT NULL,
+    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+    sucursal_id UUID REFERENCES public.sucursales(id) ON DELETE SET NULL,
+    rol TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(email)
+);
+
 -- =====================================================
 -- MIGRACIONES: Agregar columnas faltantes si la tabla ya existe
 -- =====================================================
@@ -338,6 +349,10 @@ CREATE INDEX IF NOT EXISTS idx_asistencia_salida ON public.asistencia(salida) WH
 -- Índice compuesto para asistencia (empleado sin salida)
 CREATE INDEX IF NOT EXISTS idx_asistencia_empleado_sin_salida ON public.asistencia(empleado_id, sucursal_id) WHERE salida IS NULL;
 
+-- Índices para pending_invites (optimización de búsquedas por email)
+CREATE INDEX IF NOT EXISTS idx_pending_invites_email_lower ON public.pending_invites(LOWER(TRIM(email)));
+CREATE INDEX IF NOT EXISTS idx_pending_invites_organization_id ON public.pending_invites(organization_id);
+
 -- =====================================================
 -- VISTA: view_productos_con_stock
 -- =====================================================
@@ -412,6 +427,21 @@ ALTER TABLE public.misiones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.plantillas_misiones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.historial_precios ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.asistencia ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pending_invites ENABLE ROW LEVEL SECURITY;
+
+-- Tabla: pending_invites (Invitaciones pendientes para empleados)
+CREATE TABLE IF NOT EXISTS public.pending_invites (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email TEXT NOT NULL,
+    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+    sucursal_id UUID REFERENCES public.sucursales(id) ON DELETE SET NULL,
+    rol TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(email)
+);
+
+-- Habilitar RLS para pending_invites
+ALTER TABLE public.pending_invites ENABLE ROW LEVEL SECURITY;
 
 -- Política: Los usuarios solo pueden ver/modificar datos de su organización
 -- NOTA: Estas son políticas básicas. Ajusta según tus necesidades de seguridad específicas.
@@ -420,6 +450,12 @@ ALTER TABLE public.asistencia ENABLE ROW LEVEL SECURITY;
 CREATE OR REPLACE FUNCTION public.get_user_organization_id()
 RETURNS UUID AS $$
     SELECT organization_id FROM public.perfiles WHERE id = auth.uid() LIMIT 1
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+-- Función helper para obtener email del usuario autenticado
+CREATE OR REPLACE FUNCTION public.get_user_email()
+RETURNS TEXT AS $$
+    SELECT email FROM auth.users WHERE id = auth.uid() LIMIT 1;
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 -- Políticas para organizations
@@ -539,6 +575,37 @@ CREATE POLICY "Users can manage asistencia in their organization"
     ON public.asistencia FOR ALL
     USING (organization_id = public.get_user_organization_id());
 
+-- Políticas para pending_invites
+-- CRÍTICO: Los usuarios autenticados pueden ver su propia invitación por email (incluso sin perfil)
+-- Esta política funciona incluso si el usuario NO tiene perfil aún
+CREATE POLICY "Users can view their own invitation"
+    ON public.pending_invites FOR SELECT
+    USING (
+        auth.uid() IS NOT NULL 
+        AND public.get_user_email() IS NOT NULL
+        AND LOWER(TRIM(email)) = LOWER(TRIM(public.get_user_email()))
+    );
+
+-- Los usuarios con perfil pueden ver invitaciones de su organización (para dueños)
+CREATE POLICY "Users can view invitations in their organization"
+    ON public.pending_invites FOR SELECT
+    USING (
+        organization_id = public.get_user_organization_id()
+        AND public.get_user_organization_id() IS NOT NULL
+    );
+
+-- Los dueños pueden gestionar invitaciones de su organización
+CREATE POLICY "Owners can manage invitations in their organization"
+    ON public.pending_invites FOR ALL
+    USING (
+        organization_id = public.get_user_organization_id()
+        AND public.get_user_organization_id() IS NOT NULL
+    )
+    WITH CHECK (
+        organization_id = public.get_user_organization_id()
+        AND public.get_user_organization_id() IS NOT NULL
+    );
+
 -- NOTA: Las vistas no soportan políticas RLS directamente
 -- La seguridad se maneja a través de las políticas RLS de las tablas subyacentes (productos, stock, sucursales)
 -- Por lo tanto, los usuarios solo verán datos de su organización automáticamente
@@ -560,5 +627,6 @@ COMMENT ON TABLE public.misiones IS 'Misiones asignadas a empleados';
 COMMENT ON TABLE public.plantillas_misiones IS 'Plantillas para crear misiones';
 COMMENT ON TABLE public.historial_precios IS 'Historial de cambios de precios y costos';
 COMMENT ON TABLE public.asistencia IS 'Registro de asistencia de empleados (entrada/salida)';
+COMMENT ON TABLE public.pending_invites IS 'Invitaciones pendientes para empleados antes de crear su perfil';
 COMMENT ON VIEW public.view_productos_con_stock IS 'Vista que calcula el stock disponible por producto y sucursal';
 

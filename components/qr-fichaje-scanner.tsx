@@ -120,14 +120,54 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
       try {
         const text = result?.getText ? result.getText() : String(result)
         
+        console.log("🔍 QR detectado:", text.substring(0, 100)) // Log para depuración
+        
         // Evitar procesar el mismo QR múltiples veces
         if (processedQRRef.current === text) {
+          console.log("⚠️ QR ya procesado, ignorando")
           return
         }
         
         // Marcar como procesando inmediatamente
         isProcessingRef.current = true
         processedQRRef.current = text
+        
+        // Verificar si es una URL (absoluta o relativa con /fichaje)
+        const isUrl = text.startsWith('http://') || 
+                     text.startsWith('https://') || 
+                     text.startsWith('/fichaje') ||
+                     (text.includes('/fichaje') && text.includes('sucursal_id'))
+        
+        // Si es URL, redirigir INMEDIATAMENTE sin validar
+        if (isUrl) {
+          console.log("✅ URL detectada, redirigiendo...")
+          
+          // Construir URL completa si es relativa
+          let redirectUrl = text
+          if (text.startsWith('/fichaje')) {
+            redirectUrl = `${window.location.origin}${text}`
+          } else if (text.includes('/fichaje') && !text.startsWith('http')) {
+            redirectUrl = `${window.location.origin}${text.startsWith('/') ? '' : '/'}${text}`
+          }
+          
+          console.log("🚀 Redirigiendo a:", redirectUrl)
+          
+          // Detener TODO inmediatamente
+          setScanning(false)
+          
+          // Detener el stream de video PRIMERO
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop())
+            streamRef.current = null
+          }
+          
+          // Cerrar el dialog
+          onClose()
+          
+          // Redirigir inmediatamente (sin delay)
+          window.location.href = redirectUrl
+          return
+        }
         
         // Intentar parsear como URL primero (nuevo formato)
         let data: QRData | null = null
@@ -162,29 +202,10 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           throw new Error("QR inválido: tipo debe ser 'entrada' o 'salida'")
         }
 
-        // Si es URL, detener scanner y redirigir INMEDIATAMENTE
-        if (text.startsWith('http')) {
-          // Detener TODO inmediatamente
-          setScanning(false)
-          
-          // Detener el stream de video PRIMERO
-          if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop())
-            streamRef.current = null
-          }
-          
-          // Cerrar el dialog
-          onClose()
-          
-          // Redirigir inmediatamente (sin delay)
-          window.location.href = text
-          return
-        }
-
         // Si es JSON (formato antiguo), procesar directamente
         validateAndProcessQR(data)
       } catch (err: any) {
-        console.error("Error procesando QR:", err)
+        console.error("❌ Error procesando QR:", err)
         isProcessingRef.current = false
         
         // Solo mostrar error si no es un error de parsing esperado

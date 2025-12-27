@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
+import { useRouter } from "next/navigation"
 import { useZxing } from "react-zxing"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -22,6 +23,7 @@ interface QRFichajeScannerProps {
 }
 
 export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFichajeScannerProps) {
+  const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [hasPermission, setHasPermission] = useState<boolean | null>(null)
@@ -29,6 +31,7 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const processedQRRef = useRef<string | null>(null)
   const isProcessingRef = useRef(false)
+  const streamRef = useRef<MediaStream | null>(null)
 
   // Resetear refs cuando se abre el scanner
   useEffect(() => {
@@ -58,11 +61,20 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           return
         }
 
-        // Intentar acceder a la cámara para verificar permisos
+        // Intentar acceder a la cámara para verificar permisos con timeout
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: "environment" } 
-          })
+          const getUserMediaWithTimeout = () => {
+            return Promise.race([
+              navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "environment" } 
+              }),
+              new Promise<never>((_, reject) => 
+                setTimeout(() => reject(new Error("Timeout: El acceso a la cámara está tardando demasiado. Intenta nuevamente.")), 10000)
+              )
+            ])
+          }
+          
+          const stream = await getUserMediaWithTimeout()
           stream.getTracks().forEach(track => track.stop()) // Detener inmediatamente
           setHasPermission(true)
           setLoading(false)
@@ -72,6 +84,9 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
             setHasPermission(false)
           } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
             setError("No se encontró ninguna cámara en tu dispositivo")
+            setHasPermission(false)
+          } else if (err.message && err.message.includes("Timeout")) {
+            setError(err.message)
             setHasPermission(false)
           } else {
             setError(`Error al acceder a la cámara: ${err.message || "Intenta nuevamente"}`)
@@ -88,6 +103,31 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
 
     checkPermissions()
   }, [isOpen])
+
+  // Función helper para limpiar el stream de video (previene memory leaks)
+  // Usamos useCallback para que pueda ser usada en los hooks
+  const cleanupVideoStream = useCallback(() => {
+    try {
+      // Limpiar desde videoRef
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream
+        stream.getTracks().forEach(track => {
+          track.stop()
+        })
+        videoRef.current.srcObject = null
+      }
+      
+      // Limpiar desde streamRef si existe
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => {
+          track.stop()
+        })
+        streamRef.current = null
+      }
+    } catch (err) {
+      console.warn("Error durante cleanup del video stream:", err)
+    }
+  }, [])
 
   const { ref: zxingRef } = useZxing({
     onDecodeResult(result: any) {
@@ -120,25 +160,41 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
         isProcessingRef.current = true
         processedQRRef.current = text
         
-        // Verificar si es una URL (absoluta o relativa con /fichaje)
-        const isUrl = text.startsWith('http://') || 
-                     text.startsWith('https://') || 
-                     text.startsWith('/fichaje') ||
-                     (text.includes('/fichaje') && text.includes('sucursal_id'))
+        // Intentar parsear como URL primero (nuevo formato)
+        let redirectUrl: string | null = null
         
-        // Si es URL, redirigir INMEDIATAMENTE sin validar
-        if (isUrl) {
-          console.log("✅ URL detectada, redirigiendo...")
-          
-          // Construir URL completa si es relativa
-          let redirectUrl = text
+        try {
+          // Si ya es una ruta relativa con /fichaje
           if (text.startsWith('/fichaje')) {
-            redirectUrl = `${window.location.origin}${text}`
-          } else if (text.includes('/fichaje') && !text.startsWith('http')) {
-            redirectUrl = `${window.location.origin}${text.startsWith('/') ? '' : '/'}${text}`
+            redirectUrl = text
+          } else if (text.startsWith('http://') || text.startsWith('https://')) {
+            // Si es URL completa, extraer la ruta y query params
+            const url = new URL(text)
+            if (url.pathname === '/fichaje') {
+              redirectUrl = url.pathname + url.search
+            }
+          } else {
+            // Intentar parsear como URL (puede ser sin protocolo)
+            const url = new URL(text, window.location.origin)
+            if (url.pathname === '/fichaje') {
+              redirectUrl = url.pathname + url.search
+            }
           }
-          
-          console.log("🚀 Redirigiendo a:", redirectUrl)
+        } catch {
+          // Si no es URL, intentar parsear como JSON (formato antiguo) y construir URL
+          try {
+            const data = JSON.parse(text) as QRData
+            if (data.sucursal_id && data.tipo) {
+              redirectUrl = `/fichaje?sucursal_id=${data.sucursal_id}&tipo=${data.tipo}`
+            }
+          } catch {
+            // No hacer nada, redirectUrl seguirá siendo null
+          }
+        }
+        
+        // Si tenemos una URL válida, redirigir INMEDIATAMENTE sin validar
+        if (redirectUrl) {
+          console.log("✅ QR válido detectado, redirigiendo a:", redirectUrl)
           
           // Mostrar feedback visual antes de redirigir
           toast.success("Redirigiendo...", { 
@@ -149,56 +205,29 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           // Detener TODO inmediatamente
           setScanning(false)
           
-          // Detener el stream de video PRIMERO
-          if (videoRef.current && videoRef.current.srcObject) {
-            const stream = videoRef.current.srcObject as MediaStream
-            stream.getTracks().forEach(track => track.stop())
-            videoRef.current.srcObject = null
+          // Detener el stream de video PRIMERO (cleanup)
+          cleanupVideoStream()
+          // Limpiar zxingRef directamente aquí también
+          if (typeof zxingRef !== 'function' && zxingRef && typeof zxingRef === 'object' && 'current' in zxingRef && zxingRef.current) {
+            const video = zxingRef.current as HTMLVideoElement
+            if (video.srcObject) {
+              const stream = video.srcObject as MediaStream
+              stream.getTracks().forEach(track => track.stop())
+              video.srcObject = null
+            }
           }
           
           // Cerrar el dialog
           onClose()
           
-          // Redirigir inmediatamente (sin delay)
-          window.location.href = redirectUrl
+          // Redirigir usando router.push para mantener el estado de React
+          router.push(redirectUrl)
           return
         }
         
-        // Intentar parsear como URL primero (nuevo formato)
-        let data: QRData | null = null
-        
-        try {
-          const url = new URL(text)
-          if (url.pathname === '/fichaje') {
-            const params = new URLSearchParams(url.search)
-            data = {
-              sucursal_id: params.get('sucursal_id') || '',
-              tipo: (params.get('tipo') as "entrada" | "salida") || "entrada"
-            }
-          }
-        } catch {
-          // Si no es URL, intentar parsear como JSON (formato antiguo)
-          try {
-            data = JSON.parse(text) as QRData
-          } catch {
-            isProcessingRef.current = false
-            throw new Error("QR inválido: formato no reconocido")
-          }
-        }
-
-        // Validar estructura del QR
-        if (!data || !data.sucursal_id || !data.tipo) {
-          isProcessingRef.current = false
-          throw new Error("QR inválido: faltan datos requeridos")
-        }
-
-        if (data.tipo !== "entrada" && data.tipo !== "salida") {
-          isProcessingRef.current = false
-          throw new Error("QR inválido: tipo debe ser 'entrada' o 'salida'")
-        }
-
-        // Si es JSON (formato antiguo), procesar directamente
-        validateAndProcessQR(data)
+        // Si llegamos aquí, el QR no es válido
+        isProcessingRef.current = false
+        throw new Error("QR inválido: formato no reconocido")
       } catch (err: any) {
         console.error("❌ Error procesando QR:", err)
         isProcessingRef.current = false
@@ -235,18 +264,65 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
     pause: !isOpen || !scanning || !hasPermission || isProcessingRef.current || loading
   } as any)
 
-  // Usar la ref de useZxing directamente, pero también guardarla en videoRef para limpiar el stream
+  // Función adicional para limpiar desde zxingRef directamente
+  const cleanupZxingRef = useCallback(() => {
+    try {
+      // Limpiar desde zxingRef si es un objeto
+      if (typeof zxingRef !== 'function' && zxingRef && typeof zxingRef === 'object' && 'current' in zxingRef && zxingRef.current) {
+        const video = zxingRef.current as HTMLVideoElement
+        if (video.srcObject) {
+          const stream = video.srcObject as MediaStream
+          stream.getTracks().forEach(track => {
+            track.stop()
+          })
+          video.srcObject = null
+        }
+      }
+    } catch (err) {
+      console.warn("Error durante cleanup de zxingRef:", err)
+    }
+  }, [zxingRef])
+
+  // Cleanup del video stream cuando el componente se desmonta o se cierra el dialog
+  useEffect(() => {
+    if (!isOpen) {
+      cleanupVideoStream()
+      cleanupZxingRef()
+    }
+    
+    // Cleanup al desmontar el componente
+    return () => {
+      cleanupVideoStream()
+      cleanupZxingRef()
+    }
+  }, [isOpen, cleanupVideoStream, cleanupZxingRef])
+
+  // Usar la ref de useZxing directamente, pero también guardarla en videoRef y trackear el stream
   useEffect(() => {
     if (typeof zxingRef === 'function') {
       // Si es función, no podemos guardarla directamente
+      // Pero podemos intentar obtener el stream desde el video cuando esté disponible
+      return () => {
+        // Cleanup cuando zxingRef cambia
+        cleanupVideoStream()
+        cleanupZxingRef()
+      }
     } else if (zxingRef && typeof zxingRef === 'object' && 'current' in zxingRef) {
       videoRef.current = zxingRef.current
+      
+      // Guardar referencia al stream
+      if (zxingRef.current && zxingRef.current.srcObject) {
+        streamRef.current = zxingRef.current.srcObject as MediaStream
+      }
       
       // Cuando el video esté listo, activar el escaneo
       const video = zxingRef.current
       if (video) {
         const handleLoadedMetadata = () => {
           console.log("📹 Video metadata cargada")
+          if (video.srcObject) {
+            streamRef.current = video.srcObject as MediaStream
+          }
           setScanning(true)
           setLoading(false)
         }
@@ -264,76 +340,17 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
         if (video.readyState >= 2) {
           handleLoadedMetadata()
         }
+        
+        // Cleanup de event listeners cuando el componente se desmonte o zxingRef cambie
+        return () => {
+          video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+          video.removeEventListener('playing', handlePlaying)
+          cleanupVideoStream()
+          cleanupZxingRef()
+        }
       }
     }
-  }, [zxingRef, isOpen])
-
-  const validateAndProcessQR = async (qrData: QRData) => {
-    setScanning(false)
-    
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        throw new Error("No hay sesión activa")
-      }
-
-      // Verificar que la sucursal existe y obtener su nombre
-      const { data: sucursal, error: sucursalError } = await supabase
-        .from('sucursales')
-        .select('id, nombre, organization_id')
-        .eq('id', qrData.sucursal_id)
-        .single()
-
-      if (sucursalError || !sucursal) {
-        throw new Error("Sucursal no encontrada. El QR puede estar desactualizado.")
-      }
-
-      // Verificar que el empleado pertenece a la misma organización
-      const { data: perfil } = await supabase
-        .from('perfiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!perfil || perfil.organization_id !== sucursal.organization_id) {
-        throw new Error("No tienes acceso a esta sucursal")
-      }
-
-      // Verificar estado actual de fichaje
-      const { data: asistenciaActual } = await supabase
-        .from('asistencia')
-        .select('id, salida')
-        .eq('empleado_id', user.id)
-        .eq('sucursal_id', qrData.sucursal_id)
-        .is('salida', null)
-        .maybeSingle()
-
-      // Validar lógica de entrada/salida
-      if (qrData.tipo === "entrada" && asistenciaActual) {
-        throw new Error("Ya tienes una entrada registrada en este local. Debes fichar la salida primero.")
-      }
-
-      if (qrData.tipo === "salida" && !asistenciaActual) {
-        throw new Error("No tienes una entrada registrada en este local. Debes fichar la entrada primero.")
-      }
-
-      // Vibración si está disponible
-      if (navigator.vibrate) {
-        navigator.vibrate(100)
-      }
-
-      // QR válido, procesar
-      onQRScanned({
-        ...qrData,
-        sucursal_nombre: sucursal.nombre
-      })
-      
-      onClose()
-    } catch (err: any) {
-      toast.error("Error al validar QR", { description: err.message })
-      setScanning(true) // Reintentar
-    }
-  }
+  }, [zxingRef, isOpen, cleanupVideoStream, cleanupZxingRef])
 
   if (error && hasPermission === false) {
     return (

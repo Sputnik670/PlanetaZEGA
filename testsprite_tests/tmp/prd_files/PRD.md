@@ -1,8 +1,8 @@
-# PRD - PlanetaZEGA
+# PRD - Kiosco 24hs
 
 ## Descripción del Proyecto
 
-PlanetaZEGA es un sistema completo de gestión de kioscos que incluye funcionalidades de venta, inventario, gestión de empleados, control de caja y reportes. El sistema está construido con Next.js 16, TypeScript, y utiliza Supabase como backend (PostgreSQL + Auth).
+Kiosco 24hs es un sistema completo de gestión de kioscos que incluye funcionalidades de venta, inventario, gestión de empleados, control de caja y reportes. El sistema está construido con Next.js 16, TypeScript, y utiliza Supabase como backend (PostgreSQL + Auth).
 
 ## Características Principales
 

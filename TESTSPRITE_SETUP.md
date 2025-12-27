@@ -1,4 +1,4 @@
-# 🧪 Configuración de TestSprite para PlanetaZEGA
+# 🧪 Configuración de TestSprite para Kiosco 24hs
 
 ## Requisitos Previos
 

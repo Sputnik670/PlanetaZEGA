@@ -70,7 +70,7 @@ export default function SeleccionarSucursal({ organizationId, onSelect, userRol 
             <div className="bg-blue-500 p-3 rounded-2xl shadow-lg shadow-blue-500/20">
               <Store className="h-8 w-8 text-white" />
             </div>
-            <h1 className="text-3xl font-black uppercase tracking-tighter italic">Planeta ZEGA</h1>
+            <h1 className="text-3xl font-black uppercase tracking-tighter italic">Kiosco 24hs</h1>
             <p className="text-blue-400 text-[10px] font-black uppercase tracking-[0.4em]">Control de Acceso</p>
           </div>
         </div>
@@ -143,7 +143,7 @@ export default function SeleccionarSucursal({ organizationId, onSelect, userRol 
              <Button variant="ghost" size="sm" onClick={() => window.location.reload()} className="text-[10px] font-black uppercase text-slate-400 hover:text-blue-600 transition-colors tracking-[0.2em]">
                 Actualizar Lista
              </Button>
-             <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">Planeta ZEGA v2.0</p>
+             <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">Kiosco 24hs v2.0</p>
           </div>
         </div>
       </Card>

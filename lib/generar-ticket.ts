@@ -33,7 +33,7 @@ export const generarTicketPDF = (datos: DatosReporte) => {
   // Encabezado
   doc.setFontSize(22)
   doc.setFont("helvetica", "bold")
-  doc.text("Planeta ZEGA", 105, 20, { align: "center" })
+  doc.text("Kiosco 24hs", 105, 20, { align: "center" })
   
   doc.setFontSize(12)
   doc.setFont("helvetica", "normal")
@@ -98,7 +98,7 @@ export const generarTicketPDF = (datos: DatosReporte) => {
   const pageHeight = doc.internal.pageSize.height
   doc.setFontSize(8)
   doc.setFont("helvetica", "italic")
-  doc.text("Documento oficial de auditoría - Planeta ZEGA Cloud System", 105, pageHeight - 10, { align: "center" })
+  doc.text("Documento oficial de auditoría - Kiosco 24hs Cloud System", 105, pageHeight - 10, { align: "center" })
 
   const nombreArchivo = `Cierre_${datos.empleado}_${datos.fechaApertura.replace(/[\/\s:]/g, '-')}.pdf`
   doc.save(nombreArchivo)
@@ -193,7 +193,7 @@ export const generarTicketVenta = (datos: DatosVenta) => {
   doc.setFontSize(8)
   doc.text("¡GRACIAS POR SU COMPRA!", 40, y, { align: "center" })
   y += 4
-  doc.text("Planeta ZEGA", 40, y, { align: "center" })
+  doc.text("Kiosco 24hs", 40, y, { align: "center" })
 
   const nombreArchivo = `Ticket_${datos.fecha.replace(/[\/\s:]/g, '-')}.pdf`
   doc.save(nombreArchivo)

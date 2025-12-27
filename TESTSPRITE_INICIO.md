@@ -49,7 +49,7 @@ Una vez que la API key esté configurada correctamente:
 
 ## 🔍 Información del Proyecto
 
-- **Nombre**: PlanetaZEGA
+- **Nombre**: Kiosco 24hs
 - **Tipo**: Frontend (Next.js 16)
 - **Puerto**: 3000 (detectado automáticamente)
 - **URL Base**: http://localhost:3000

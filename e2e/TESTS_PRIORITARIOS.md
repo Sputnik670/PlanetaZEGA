@@ -1,4 +1,4 @@
-# 🎯 Tests Prioritarios para PlanetaZEGA
+# 🎯 Tests Prioritarios para Kiosco 24hs
 
 Esta es una lista de tests E2E que deberían implementarse en orden de prioridad.
 

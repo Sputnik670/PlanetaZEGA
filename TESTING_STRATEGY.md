@@ -1,10 +1,10 @@
-# 🧪 Estrategia de Testing - PlanetaZEGA
+# 🧪 Estrategia de Testing - Kiosco 24hs
 
 ## Recomendación Inicial
 
 ### Opción Recomendada: Playwright + Jest (Stack Moderno y Gratuito)
 
-Para un proyecto Next.js con Supabase como PlanetaZEGA, recomendamos comenzar con **Playwright** para pruebas E2E y **Jest** para pruebas unitarias.
+Para un proyecto Next.js con Supabase como Kiosco 24hs, recomendamos comenzar con **Playwright** para pruebas E2E y **Jest** para pruebas unitarias.
 
 **Ventajas:**
 - ✅ Gratuito y open-source

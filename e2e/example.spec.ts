@@ -18,6 +18,6 @@ test('el título de la página es correcto', async ({ page }) => {
   await page.goto('/');
   
   // Verificar el título de la página (ajusta según tu aplicación)
-  await expect(page).toHaveTitle(/PlanetaZEGA|Kiosco/i);
+  await expect(page).toHaveTitle(/Kiosco 24hs/i);
 });
 

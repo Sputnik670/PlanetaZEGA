@@ -40,7 +40,7 @@ function EscanearQRFichaje({ onQRScanned }: { onQRScanned: (data: { sucursal_id:
           <div className="bg-blue-500 p-3 rounded-2xl shadow-lg shadow-blue-500/20 inline-block mb-4">
             <QrCode className="h-8 w-8 text-white" />
           </div>
-          <h1 className="text-3xl font-black uppercase tracking-tighter italic mb-2">Planeta ZEGA</h1>
+          <h1 className="text-3xl font-black uppercase tracking-tighter italic mb-2">Kiosco 24hs</h1>
           <p className="text-blue-400 text-[10px] font-black uppercase tracking-[0.4em]">Sistema de Fichaje</p>
         </div>
 

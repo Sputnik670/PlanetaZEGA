@@ -4,7 +4,7 @@
   "scope": "codebase",
   "localEndpoint": "https://eurythmic-krista-apolitically.ngrok-free.dev",
   "executionArgs": {
-    "projectName": "PlanetaZEGA",
+    "projectName": "Kiosco 24hs",
     "projectPath": "C:\\Users\\Rram\\Desktop\\PlanetaZEGA-main",
     "testIds": [],
     "additionalInstruction": "All test files have been updated to use ngrok URL: https://eurythmic-krista-apolitically.ngrok-free.dev",

@@ -1,6 +1,6 @@
-# 🗄️ Configuración de Base de Datos - PlanetaZEGA
+# 🗄️ Configuración de Base de Datos - Kiosco 24hs
 
-Este documento explica cómo configurar la base de datos en Supabase para PlanetaZEGA.
+Este documento explica cómo configurar la base de datos en Supabase para Kiosco 24hs.
 
 ## 📋 Requisitos Previos
 

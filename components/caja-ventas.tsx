@@ -393,7 +393,7 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
       if (!result || !result.success) throw new Error(result?.message || "Error al procesar la venta")
 
       generarTicketVenta({
-        organizacion: "Planeta ZEGA",
+        organizacion: "Kiosco 24hs",
         fecha: new Date().toLocaleString('es-AR'),
         items: carrito.map(i => ({
             cantidad: i.cantidad,

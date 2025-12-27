@@ -14,7 +14,7 @@ Esto ocurre porque las variables de entorno de Supabase no están configuradas e
 ### Paso 1: Acceder a la Configuración de Vercel
 
 1. Ve a tu proyecto en Vercel: https://vercel.com
-2. Selecciona el proyecto **PlanetaZEGA**
+2. Selecciona el proyecto **Kiosco 24hs**
 3. Ve a **Settings** → **Environment Variables**
 
 ### Paso 2: Agregar Variables de Entorno

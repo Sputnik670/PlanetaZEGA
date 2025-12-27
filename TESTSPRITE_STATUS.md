@@ -59,7 +59,7 @@ testsprite_tests/
 
 ## 🔍 Información del Proyecto para TestSprite
 
-- **Nombre**: PlanetaZEGA
+- **Nombre**: Kiosco 24hs
 - **Tipo**: Frontend (Next.js 16)
 - **Puerto**: 3001
 - **URL**: http://localhost:3001

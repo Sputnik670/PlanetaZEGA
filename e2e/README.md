@@ -1,6 +1,6 @@
 # 🧪 Tests E2E con Playwright
 
-Este directorio contiene los tests end-to-end (E2E) para PlanetaZEGA usando Playwright.
+Este directorio contiene los tests end-to-end (E2E) para Kiosco 24hs usando Playwright.
 
 ## 🚀 Ejecutar Tests
 
@@ -68,7 +68,7 @@ import { test, expect } from '@playwright/test';
 
 test('mi test', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('h1')).toHaveText('PlanetaZEGA');
+  await expect(page.locator('h1')).toHaveText('Kiosco 24hs');
 });
 ```
 

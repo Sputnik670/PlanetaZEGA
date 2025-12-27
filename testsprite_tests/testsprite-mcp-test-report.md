@@ -3,7 +3,7 @@
 ---
 
 ## 1️⃣ Document Metadata
-- **Project Name:** PlanetaZEGA
+- **Project Name:** Kiosco 24hs
 - **Date:** 2025-12-26
 - **Prepared by:** TestSprite AI Team
 - **Test Execution:** Segunda ejecución (servidor confirmado corriendo en puerto 3000)

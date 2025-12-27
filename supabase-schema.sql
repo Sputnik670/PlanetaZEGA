@@ -1,5 +1,5 @@
 -- =====================================================
--- ESQUEMA SQL COMPLETO PARA PLANETAZEGA - SUPABASE
+-- ESQUEMA SQL COMPLETO PARA KIOSCO 24HS - SUPABASE
 -- =====================================================
 -- Este archivo contiene todas las tablas, relaciones,
 -- índices y vistas necesarias para el sistema.

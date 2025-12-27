@@ -1,4 +1,4 @@
-# 🧪 Guía de Uso de TestSprite para PlanetaZEGA
+# 🧪 Guía de Uso de TestSprite para Kiosco 24hs
 
 ## Configuración Actual
 

@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Configuración de Playwright para PlanetaZEGA
+ * Configuración de Playwright para Kiosco 24hs
  * 
  * Variables de entorno requeridas:
  * - NEXT_PUBLIC_SUPABASE_URL

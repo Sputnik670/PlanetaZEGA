@@ -1,5 +1,5 @@
 {
-  "project_name": "PlanetaZEGA",
+  "project_name": "Kiosco 24hs",
   "description": "Sistema de gestión de kioscos con funcionalidades de venta, inventario, gestión de empleados y reportes",
   "tech_stack": {
     "framework": "Next.js 16.0.10",

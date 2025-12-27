@@ -16,10 +16,10 @@
 
 1. **Ve a GitHub** y crea un nuevo repositorio:
    - https://github.com/new
-   - Dale un nombre (ej: `PlanetaZEGA`)
+   - Dale un nombre (ej: `Kiosco-24hs`)
    - NO inicialices con README, .gitignore o licencia (ya los tenemos)
 
-2. **Copia la URL del repositorio** (algo como: `https://github.com/TU_USUARIO/PlanetaZEGA.git`)
+2. **Copia la URL del repositorio** (algo como: `https://github.com/TU_USUARIO/Kiosco-24hs.git`)
 
 3. **En tu terminal, ejecuta:**
    ```bash

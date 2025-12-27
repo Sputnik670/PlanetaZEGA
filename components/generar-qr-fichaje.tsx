@@ -64,14 +64,58 @@ export default function GenerarQRFichaje() {
 
   const descargarQR = (sucursalId: string, tipo: "entrada" | "salida", nombre: string) => {
     const qrData = generarQRData(sucursalId, tipo)
-    const canvas = document.getElementById(`qr-${sucursalId}-${tipo}`) as HTMLCanvasElement
-    if (!canvas) return
+    
+    // Para iOS, necesitamos convertir SVG a imagen
+    const svgElement = document.querySelector(`#qr-${sucursalId}-${tipo}`) as SVGSVGElement
+    if (!svgElement) {
+      toast.error("No se encontró el código QR")
+      return
+    }
 
-    const url = canvas.toDataURL('image/png')
-    const link = document.createElement('a')
-    link.download = `QR-${tipo}-${nombre.replace(/\s+/g, '-')}.png`
-    link.href = url
-    link.click()
+    try {
+      // Convertir SVG a canvas para mejor compatibilidad
+      const svgData = new XMLSerializer().serializeToString(svgElement)
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      const img = new Image()
+      
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' })
+      const url = URL.createObjectURL(svgBlob)
+      
+      img.onload = () => {
+        canvas.width = img.width
+        canvas.height = img.height
+        ctx?.drawImage(img, 0, 0)
+        
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const downloadUrl = URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = downloadUrl
+            link.download = `QR-${tipo}-${nombre.replace(/\s+/g, '-')}.png`
+            
+            // Para iOS, abrir en nueva ventana si no funciona el download
+            if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+              window.open(downloadUrl, '_blank')
+              toast.info("QR abierto en nueva ventana", { description: "Guarda la imagen desde ahí" })
+            } else {
+              document.body.appendChild(link)
+              link.click()
+              document.body.removeChild(link)
+              toast.success("QR descargado")
+            }
+            
+            URL.revokeObjectURL(downloadUrl)
+          }
+        }, 'image/png')
+        URL.revokeObjectURL(url)
+      }
+      
+      img.src = url
+    } catch (error) {
+      console.error("Error descargando QR:", error)
+      toast.error("Error al descargar QR", { description: "Intenta copiar el JSON y usar qr.io" })
+    }
   }
 
   const copiarQRData = (sucursalId: string, tipo: "entrada" | "salida") => {
@@ -191,6 +235,12 @@ export default function GenerarQRFichaje() {
               </Button>
             </div>
 
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
+              <p className="text-xs text-yellow-800 font-bold">
+                💡 <strong>iOS:</strong> Si la descarga no funciona, copia el JSON arriba y usa <a href="https://qr.io/es/" target="_blank" rel="noopener noreferrer" className="underline text-yellow-900">qr.io</a> para generar el QR
+              </p>
+            </div>
+            
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="text-xs text-blue-800 font-bold">
                 💡 <strong>Instrucciones:</strong> Imprime este QR y colócalo en el local. 

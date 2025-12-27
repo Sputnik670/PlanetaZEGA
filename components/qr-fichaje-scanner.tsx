@@ -106,11 +106,15 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
     constraints: { 
       video: { 
         facingMode: "environment",
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
+        // iOS Safari requiere constraints más simples
+        width: { ideal: 640, max: 1280 },
+        height: { ideal: 480, max: 720 }
       }, 
       audio: false 
-    }
+    },
+    // Mejorar compatibilidad con iOS
+    timeBetweenDecodingAttempts: 300,
+    pause: !scanning
   } as any)
 
   const validateAndProcessQR = async (qrData: QRData) => {
@@ -224,6 +228,8 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
             playsInline 
             muted 
             autoPlay
+            webkit-playsinline="true"
+            x5-playsinline="true"
             style={{ maxHeight: "70vh" }}
           />
           

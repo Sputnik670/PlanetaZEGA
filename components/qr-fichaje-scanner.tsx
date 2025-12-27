@@ -159,10 +159,13 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
   // Combinar ambas refs para que useZxing y nuestro manejo manual funcionen
   const combinedRef = (node: HTMLVideoElement | null) => {
     videoRef.current = node
-    if (typeof zxingRef === 'function') {
-      zxingRef(node)
-    } else if (zxingRef) {
-      (zxingRef as any).current = node
+    // useZxing devuelve una ref que puede ser función o objeto
+    if (node) {
+      if (typeof zxingRef === 'function') {
+        (zxingRef as (node: HTMLVideoElement | null) => void)(node)
+      } else if (zxingRef && typeof zxingRef === 'object' && 'current' in zxingRef) {
+        (zxingRef as React.MutableRefObject<HTMLVideoElement | null>).current = node
+      }
     }
   }
 

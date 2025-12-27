@@ -364,11 +364,11 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={onClose} data-testid="qr-scanner-dialog">
       <DialogContent className="sm:max-w-md p-0 overflow-hidden bg-black border-none">
         <div className="relative flex flex-col items-center justify-center bg-black w-full min-h-[400px] max-h-[70vh]">
           {loading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-50">
+            <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-50" data-testid="qr-scanner-loading">
               <div className="text-center text-white">
                 <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
                 <p className="text-sm">Iniciando cámara...</p>
@@ -378,6 +378,7 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           
           <video 
             ref={zxingRef} 
+            data-testid="qr-scanner-video"
             className="w-full h-full object-cover" 
             playsInline={true}
             muted={true}
@@ -416,7 +417,7 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           </div>
           
           <div className="absolute bottom-4 left-0 right-0 flex flex-col items-center gap-2 z-50">
-            <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2">
+            <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2" data-testid="qr-scanner-status">
               <p className="text-white text-xs font-bold text-center">
                 {scanning ? "Escaneando..." : "Esperando QR..."}
               </p>
@@ -426,6 +427,7 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
               variant="destructive" 
               className="rounded-full px-6 shadow-lg" 
               onClick={onClose}
+              data-testid="qr-scanner-close"
             >
               <X className="mr-2 h-4 w-4" /> Cancelar
             </Button>

@@ -5,13 +5,15 @@ import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { QRCodeSVG } from "qrcode.react"
-import { Download, QrCode, MapPin, LogIn, LogOut, Copy, Check } from "lucide-react"
+import { Download, QrCode, MapPin, LogIn, LogOut, Copy, Check, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 interface Sucursal {
   id: string
   nombre: string
+  qr_entrada_url?: string | null
+  qr_salida_url?: string | null
 }
 
 export default function GenerarQRFichaje() {
@@ -20,6 +22,7 @@ export default function GenerarQRFichaje() {
   const [mostrarQR, setMostrarQR] = useState(false)
   const [tipoQR, setTipoQR] = useState<"entrada" | "salida">("entrada")
   const [copiado, setCopiado] = useState(false)
+  const [guardando, setGuardando] = useState(false)
 
   useEffect(() => {
     cargarSucursales()
@@ -38,16 +41,41 @@ export default function GenerarQRFichaje() {
 
       if (!perfil?.organization_id) return
 
-      const { data } = await supabase
+      // Cargar sucursales (sin los campos QR primero para evitar errores si no existen)
+      const { data: dataSimple } = await supabase
         .from('sucursales')
         .select('id, nombre')
         .eq('organization_id', perfil.organization_id)
         .order('nombre')
 
-      if (data) {
-        setSucursales(data)
-        if (data.length > 0) {
-          setSucursalSeleccionada(data[0].id)
+      if (dataSimple) {
+        // Intentar cargar los campos QR si existen
+        const { data: dataWithQR, error: qrError } = await supabase
+          .from('sucursales')
+          .select('id, nombre, qr_entrada_url, qr_salida_url')
+          .eq('organization_id', perfil.organization_id)
+          .order('nombre')
+
+        const sucursalesData: Sucursal[] = dataSimple.map(s => {
+          // Solo usar dataWithQR si no hay error y es un array válido
+          if (!qrError && dataWithQR && Array.isArray(dataWithQR)) {
+            const withQR = dataWithQR.find((sq: any) => sq.id === s.id) as any
+            return {
+              ...s,
+              qr_entrada_url: (withQR?.qr_entrada_url as string | null) || null,
+              qr_salida_url: (withQR?.qr_salida_url as string | null) || null
+            }
+          }
+          return {
+            ...s,
+            qr_entrada_url: null,
+            qr_salida_url: null
+          }
+        })
+
+        if (sucursalesData.length > 0) {
+          setSucursales(sucursalesData)
+          setSucursalSeleccionada(sucursalesData[0].id)
         }
       }
     } catch (error) {
@@ -67,6 +95,28 @@ export default function GenerarQRFichaje() {
     })
     
     return `${baseUrl}/fichaje?${params.toString()}`
+  }
+
+  const guardarQR = async (sucursalId: string, tipo: "entrada" | "salida", qrUrl: string) => {
+    try {
+      const updateData: any = {}
+      if (tipo === "entrada") {
+        updateData.qr_entrada_url = qrUrl
+      } else {
+        updateData.qr_salida_url = qrUrl
+      }
+
+      const { error } = await supabase
+        .from('sucursales')
+        .update(updateData)
+        .eq('id', sucursalId)
+
+      if (error) throw error
+      toast.success("QR guardado", { description: "El QR quedó guardado permanentemente para este local" })
+    } catch (error: any) {
+      console.error("Error guardando QR:", error)
+      toast.error("Error al guardar QR", { description: error.message })
+    }
   }
 
   const descargarQR = (sucursalId: string, tipo: "entrada" | "salida", nombre: string) => {
@@ -163,10 +213,13 @@ export default function GenerarQRFichaje() {
               setMostrarQR(true)
             }}
             variant={tipoQR === "entrada" && mostrarQR ? "default" : "outline"}
-            className="h-16 flex flex-col items-center gap-2"
+            className="h-16 flex flex-col items-center gap-2 relative"
           >
             <LogIn className="h-5 w-5" />
             <span className="text-xs font-bold">QR Entrada</span>
+            {sucursales.find(s => s.id === sucursalSeleccionada)?.qr_entrada_url && (
+              <span className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full"></span>
+            )}
           </Button>
           <Button
             onClick={() => {
@@ -174,10 +227,13 @@ export default function GenerarQRFichaje() {
               setMostrarQR(true)
             }}
             variant={tipoQR === "salida" && mostrarQR ? "default" : "outline"}
-            className="h-16 flex flex-col items-center gap-2"
+            className="h-16 flex flex-col items-center gap-2 relative"
           >
             <LogOut className="h-5 w-5" />
             <span className="text-xs font-bold">QR Salida</span>
+            {sucursales.find(s => s.id === sucursalSeleccionada)?.qr_salida_url && (
+              <span className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full"></span>
+            )}
           </Button>
         </div>
       </div>
@@ -214,7 +270,41 @@ export default function GenerarQRFichaje() {
               />
             </div>
 
+            {/* Mostrar si ya hay un QR guardado */}
+            {((tipoQR === "entrada" && sucursalActual?.qr_entrada_url) || 
+              (tipoQR === "salida" && sucursalActual?.qr_salida_url)) && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                <p className="text-xs text-green-800 font-bold">
+                  ✅ Este QR ya está guardado para este local
+                </p>
+              </div>
+            )}
+
             <div className="flex gap-2">
+              <Button
+                onClick={async () => {
+                  setGuardando(true)
+                  const qrUrl = generarQRData(sucursalSeleccionada, tipoQR)
+                  await guardarQR(sucursalSeleccionada, tipoQR, qrUrl)
+                  // Recargar sucursales para actualizar los QR guardados
+                  await cargarSucursales()
+                  setGuardando(false)
+                }}
+                disabled={guardando}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {guardando ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Guardando...
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-4 w-4 mr-2" />
+                    Guardar QR
+                  </>
+                )}
+              </Button>
               <Button
                 onClick={() => descargarQR(sucursalSeleccionada, tipoQR, sucursalActual.nombre)}
                 variant="outline"

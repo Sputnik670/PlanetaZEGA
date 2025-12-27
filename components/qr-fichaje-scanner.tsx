@@ -26,25 +26,19 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
   const [loading, setLoading] = useState(true)
   const [hasPermission, setHasPermission] = useState<boolean | null>(null)
   const [scanning, setScanning] = useState(false)
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const streamRef = useRef<MediaStream | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
   const processedQRRef = useRef<string | null>(null)
   const isProcessingRef = useRef(false)
 
-  // Limpiar stream al cerrar y resetear refs
+  // Resetear refs cuando se abre el scanner
   useEffect(() => {
-    if (!isOpen && streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop())
-      streamRef.current = null
-    }
-    // Resetear refs cuando se abre el scanner
     if (isOpen) {
       processedQRRef.current = null
       isProcessingRef.current = false
     }
   }, [isOpen])
 
-  // Inicializar cámara cuando se abre el dialog
+  // Verificar permisos cuando se abre el dialog
   useEffect(() => {
     if (!isOpen) {
       setLoading(true)
@@ -54,95 +48,45 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
       return
     }
 
-    // iOS Safari requiere que el video esté visible y montado
-    // Esperamos a que el Dialog esté completamente renderizado
-    const initCamera = async () => {
+    // Verificar permisos de cámara
+    const checkPermissions = async () => {
       try {
-        setLoading(true)
-        setError(null)
-
-        // Verificar soporte
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error("Tu navegador no soporta el acceso a la cámara")
+          setError("Tu navegador no soporta el acceso a la cámara")
+          setHasPermission(false)
+          setLoading(false)
+          return
         }
 
-        // Esperar un momento para que el video esté en el DOM (crítico para iOS)
-        await new Promise(resolve => setTimeout(resolve, 500))
-
-        // Verificar que el video esté montado
-        if (!videoRef.current) {
-          throw new Error("Video element no está disponible")
-        }
-
-        // Solicitar permisos con constraints simples para iOS
-        const constraints: MediaStreamConstraints = {
-          video: {
-            facingMode: "environment",
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
-          audio: false
-        }
-
-        const stream = await navigator.mediaDevices.getUserMedia(constraints)
-        streamRef.current = stream
-
-        // Asignar stream al video manualmente (importante para iOS)
-        const video = videoRef.current
-        if (!video) {
-          throw new Error("Video element no está disponible")
-        }
-        
-        video.srcObject = stream
-        console.log("📹 Stream asignado al video")
-        
-        // Esperar a que el video esté listo antes de reproducir
-        await new Promise<void>((resolve) => {
-          const handleLoadedMetadata = () => {
-            video.removeEventListener('loadedmetadata', handleLoadedMetadata)
-            console.log("✅ Video metadata cargada")
-            resolve()
-          }
-          video.addEventListener('loadedmetadata', handleLoadedMetadata)
-          
-          // Si ya tiene metadata, resolver inmediatamente
-          if (video.readyState >= 2) {
-            handleLoadedMetadata()
-          }
-        })
-
-        // Reproducir el video
+        // Intentar acceder a la cámara para verificar permisos
         try {
-          await video.play()
-          console.log("▶️ Video reproduciéndose correctamente")
-        } catch (playError: any) {
-          console.error("⚠️ Error al reproducir video:", playError)
-          // Continuar de todas formas, el video puede reproducirse automáticamente
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: "environment" } 
+          })
+          stream.getTracks().forEach(track => track.stop()) // Detener inmediatamente
+          setHasPermission(true)
+          setLoading(false)
+        } catch (err: any) {
+          if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+            setError("Se necesita permiso para acceder a la cámara. Por favor, permite el acceso en la configuración de tu navegador.")
+            setHasPermission(false)
+          } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+            setError("No se encontró ninguna cámara en tu dispositivo")
+            setHasPermission(false)
+          } else {
+            setError(`Error al acceder a la cámara: ${err.message || "Intenta nuevamente"}`)
+            setHasPermission(false)
+          }
+          setLoading(false)
         }
-
-        // useZxing se conectará automáticamente a través de combinedRef
-        console.log("✅ Video listo para escaneo")
-
-        setHasPermission(true)
-        setScanning(true)
-        setLoading(false)
       } catch (err: any) {
-        console.error("Error inicializando cámara:", err)
-        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-          setError("Se necesita permiso para acceder a la cámara. Por favor, permite el acceso en la configuración de tu navegador.")
-          setHasPermission(false)
-        } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-          setError("No se encontró ninguna cámara en tu dispositivo")
-          setHasPermission(false)
-        } else {
-          setError(`Error al acceder a la cámara: ${err.message || "Intenta nuevamente"}`)
-          setHasPermission(false)
-        }
+        setError("Error al verificar permisos de cámara")
+        setHasPermission(false)
         setLoading(false)
       }
     }
 
-    initCamera()
+    checkPermissions()
   }, [isOpen])
 
   const { ref: zxingRef } = useZxing({
@@ -206,9 +150,10 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           setScanning(false)
           
           // Detener el stream de video PRIMERO
-          if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop())
-            streamRef.current = null
+          if (videoRef.current && videoRef.current.srcObject) {
+            const stream = videoRef.current.srcObject as MediaStream
+            stream.getTracks().forEach(track => track.stop())
+            videoRef.current.srcObject = null
           }
           
           // Cerrar el dialog
@@ -278,43 +223,50 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
         console.warn("Error de decodificación (puede ser normal):", err.message)
       }
     },
-    // NO pasar constraints aquí porque ya estamos manejando el stream manualmente
-    // useZxing usará el video que ya tiene el stream asignado
+    constraints: { 
+      video: { 
+        facingMode: "environment",
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }, 
+      audio: false 
+    },
     timeBetweenDecodingAttempts: 300,
     pause: !isOpen || !scanning || !hasPermission || isProcessingRef.current || loading
   } as any)
 
-  // Combinar ambas refs para que useZxing y nuestro manejo manual funcionen
-  const combinedRef = (node: HTMLVideoElement | null) => {
-    videoRef.current = node
-    
-    // Pasar la ref a useZxing INMEDIATAMENTE cuando el nodo esté disponible
-    if (node) {
-      if (typeof zxingRef === 'function') {
-        (zxingRef as (node: HTMLVideoElement | null) => void)(node)
-      } else if (zxingRef && typeof zxingRef === 'object' && 'current' in zxingRef) {
-        (zxingRef as React.MutableRefObject<HTMLVideoElement | null>).current = node
-      }
+  // Usar la ref de useZxing directamente, pero también guardarla en videoRef para limpiar el stream
+  useEffect(() => {
+    if (typeof zxingRef === 'function') {
+      // Si es función, no podemos guardarla directamente
+    } else if (zxingRef && typeof zxingRef === 'object' && 'current' in zxingRef) {
+      videoRef.current = zxingRef.current
       
-      console.log("✅ Video ref asignada a useZxing")
-      
-      // Verificar que el video esté listo
-      const handleLoadedMetadata = () => {
-        console.log("📹 Video metadata cargada, readyState:", node.readyState)
-        if (node.readyState >= 2) {
+      // Cuando el video esté listo, activar el escaneo
+      const video = zxingRef.current
+      if (video) {
+        const handleLoadedMetadata = () => {
+          console.log("📹 Video metadata cargada")
           setScanning(true)
           setLoading(false)
         }
-      }
-      
-      // Si ya tiene metadata, ejecutar inmediatamente
-      if (node.readyState >= 2) {
-        handleLoadedMetadata()
-      } else {
-        node.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true })
+        
+        const handlePlaying = () => {
+          console.log("▶️ Video reproduciéndose")
+          setScanning(true)
+          setLoading(false)
+        }
+        
+        video.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true })
+        video.addEventListener('playing', handlePlaying, { once: true })
+        
+        // Si ya está listo, activar inmediatamente
+        if (video.readyState >= 2) {
+          handleLoadedMetadata()
+        }
       }
     }
-  }
+  }, [zxingRef, isOpen])
 
   const validateAndProcessQR = async (qrData: QRData) => {
     setScanning(false)
@@ -425,7 +377,7 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           )}
           
           <video 
-            ref={combinedRef} 
+            ref={zxingRef} 
             className="w-full h-full object-cover" 
             playsInline={true}
             muted={true}
@@ -436,11 +388,9 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
               objectFit: "cover"
             } as any}
             onLoadedMetadata={() => {
-              console.log("📹 Video metadata cargada, readyState:", videoRef.current?.readyState)
-              if (videoRef.current && videoRef.current.readyState >= 2) {
-                setScanning(true)
-                setLoading(false)
-              }
+              console.log("📹 Video metadata cargada")
+              setScanning(true)
+              setLoading(false)
             }}
             onPlaying={() => {
               console.log("▶️ Video reproduciéndose")

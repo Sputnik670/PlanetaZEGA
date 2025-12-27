@@ -44,6 +44,9 @@ export default defineConfig({
     
     /* Video solo en fallos */
     video: 'retain-on-failure',
+    
+    /* Capturar logs de consola y errores */
+    actionTimeout: 30000,
   },
 
   /* Configurar proyectos para múltiples navegadores */
@@ -58,16 +61,22 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['setup'], // Ejecutar setup antes de estos tests
     },
-
-    // Puedes habilitar más navegadores cuando sea necesario
-    // {
-    //   name: 'firefox',
-    //   use: { ...devices['Desktop Firefox'] },
-    // },
-    // {
-    //   name: 'webkit',
-    //   use: { ...devices['Desktop Safari'] },
-    // },
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
+      dependencies: ['setup'],
+    },
+    // Proyectos móviles para tests de QR Scanner
+    {
+      name: 'mobile-chrome',
+      use: { ...devices['Pixel 5'] },
+      dependencies: ['setup'],
+    },
+    {
+      name: 'mobile-safari',
+      use: { ...devices['iPhone 13 Pro'] },
+      dependencies: ['setup'],
+    },
   ],
 
   /* Servidor de desarrollo local - Playwright puede iniciar Next.js automáticamente */

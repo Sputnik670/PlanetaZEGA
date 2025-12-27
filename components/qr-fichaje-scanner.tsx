@@ -112,23 +112,49 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
       
       try {
         const text = result?.getText ? result.getText() : String(result)
-        const data = JSON.parse(text) as QRData
+        
+        // Intentar parsear como URL primero (nuevo formato)
+        let data: QRData | null = null
+        
+        try {
+          const url = new URL(text)
+          if (url.pathname === '/fichaje') {
+            const params = new URLSearchParams(url.search)
+            data = {
+              sucursal_id: params.get('sucursal_id') || '',
+              tipo: (params.get('tipo') as "entrada" | "salida") || "entrada"
+            }
+          }
+        } catch {
+          // Si no es URL, intentar parsear como JSON (formato antiguo)
+          try {
+            data = JSON.parse(text) as QRData
+          } catch {
+            throw new Error("QR inválido: formato no reconocido")
+          }
+        }
 
         // Validar estructura del QR
-        if (!data.sucursal_id || !data.tipo) {
-          throw new Error("QR inválido: formato incorrecto")
+        if (!data || !data.sucursal_id || !data.tipo) {
+          throw new Error("QR inválido: faltan datos requeridos")
         }
 
         if (data.tipo !== "entrada" && data.tipo !== "salida") {
           throw new Error("QR inválido: tipo debe ser 'entrada' o 'salida'")
         }
 
-        // Validar que el empleado tenga acceso a esta sucursal
+        // Si es URL, redirigir a la página de fichaje
+        if (text.startsWith('http')) {
+          window.location.href = text
+          return
+        }
+
+        // Si es JSON (formato antiguo), procesar directamente
         validateAndProcessQR(data)
       } catch (err: any) {
         console.error("Error procesando QR:", err)
         // Solo mostrar error si no es un error de parsing esperado
-        if (err.message && !err.message.includes("JSON")) {
+        if (err.message && !err.message.includes("JSON") && !err.message.includes("URL")) {
           toast.error("QR inválido", { 
             description: err.message || "El código QR no es válido. Asegúrate de escanear el QR correcto del local." 
           })

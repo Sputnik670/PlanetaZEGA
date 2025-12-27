@@ -56,10 +56,17 @@ export default function GenerarQRFichaje() {
   }
 
   const generarQRData = (sucursalId: string, tipo: "entrada" | "salida") => {
-    return JSON.stringify({
+    // Generar URL que apunta a la página de fichaje
+    const baseUrl = typeof window !== 'undefined' 
+      ? window.location.origin 
+      : 'https://tu-app.vercel.app' // Fallback para SSR
+    
+    const params = new URLSearchParams({
       sucursal_id: sucursalId,
       tipo: tipo
     })
+    
+    return `${baseUrl}/fichaje?${params.toString()}`
   }
 
   const descargarQR = (sucursalId: string, tipo: "entrada" | "salida", nombre: string) => {
@@ -119,10 +126,10 @@ export default function GenerarQRFichaje() {
   }
 
   const copiarQRData = (sucursalId: string, tipo: "entrada" | "salida") => {
-    const qrData = generarQRData(sucursalId, tipo)
-    navigator.clipboard.writeText(qrData)
+    const qrUrl = generarQRData(sucursalId, tipo)
+    navigator.clipboard.writeText(qrUrl)
     setCopiado(true)
-    toast.success("Código QR copiado", { description: "Puedes compartirlo o guardarlo" })
+    toast.success("URL del QR copiada", { description: "Puedes compartirla o usarla en qr.io" })
     setTimeout(() => setCopiado(false), 2000)
   }
 
@@ -237,15 +244,27 @@ export default function GenerarQRFichaje() {
 
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
               <p className="text-xs text-yellow-800 font-bold">
-                💡 <strong>iOS:</strong> Si la descarga no funciona, copia el JSON arriba y usa <a href="https://qr.io/es/" target="_blank" rel="noopener noreferrer" className="underline text-yellow-900">qr.io</a> para generar el QR
+                💡 <strong>iOS:</strong> Si la descarga no funciona, copia la URL y usa <a href="https://qr.io/es/" target="_blank" rel="noopener noreferrer" className="underline text-yellow-900">qr.io</a> para generar el QR
               </p>
             </div>
             
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
               <p className="text-xs text-blue-800 font-bold">
-                💡 <strong>Instrucciones:</strong> Imprime este QR y colócalo en el local. 
-                Los empleados deberán escanearlo para fichar su entrada o salida.
+                🔑 <strong>Llave de Acceso:</strong> Este QR funciona como una llave. Al escanearlo, el empleado podrá iniciar o finalizar su turno en este local.
               </p>
+            </div>
+            
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+              <p className="text-xs text-green-800 font-bold">
+                📋 <strong>Instrucciones:</strong> 
+              </p>
+              <ul className="text-xs text-green-700 mt-2 space-y-1 list-disc list-inside">
+                <li>Imprime este QR y colócalo en el local</li>
+                <li>Coloca el QR de ENTRADA en la entrada del local</li>
+                <li>Coloca el QR de SALIDA en la caja o salida</li>
+                <li>Los empleados escanearán el QR con su teléfono</li>
+                <li>El QR abrirá la app y registrará automáticamente el fichaje</li>
+              </ul>
             </div>
           </div>
         </Card>

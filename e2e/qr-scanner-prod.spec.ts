@@ -8,9 +8,16 @@ import { test, expect } from '@playwright/test';
  */
 
 // Usar la URL de producción si está configurada
-const BASE_URL = process.env.PLAYWRIGHT_TEST_BASE_URL || 'https://planetazega.vercel.app';
+const BASE_URL = process.env.PLAYWRIGHT_TEST_BASE_URL || 'https://app-cadena-kiosco-24-7.vercel.app';
+
+// Credenciales de empleado para testing
+const EMPLOYEE_EMAIL = process.env.TEST_EMPLOYEE_EMAIL || 'entornomincyt@gmail.com';
+const EMPLOYEE_PASSWORD = process.env.TEST_EMPLOYEE_PASSWORD || 'RamYLu.2021';
 
 test.describe('QR Scanner - Producción', () => {
+  // Deshabilitar webServer para tests de producción
+  test.use({ baseURL: BASE_URL });
+  
   test('Debería capturar logs y errores del scanner en producción', async ({ page }) => {
     // Array para almacenar todos los logs
     const logs: Array<{ type: string; text: string; timestamp: number }> = [];
@@ -59,7 +66,41 @@ test.describe('QR Scanner - Producción', () => {
       console.log('⚠️ Network idle timeout, continuando...');
     });
 
-    // Esperar un momento para que todo se inicialice
+    // Intentar hacer login como empleado
+    console.log('🔐 Intentando hacer login como empleado...');
+    try {
+      // Buscar campos de email y password
+      const emailInput = page.locator('input[type="email"], input[name*="email" i], input[placeholder*="email" i]').first();
+      const passwordInput = page.locator('input[type="password"]').first();
+      const submitButton = page.locator('button[type="submit"], button:has-text("Iniciar"), button:has-text("Entrar"), button:has-text("Login")').first();
+
+      const emailCount = await emailInput.count();
+      const passwordCount = await passwordInput.count();
+
+      if (emailCount > 0 && passwordCount > 0) {
+        console.log('✅ Campos de login encontrados, llenando formulario...');
+        await emailInput.fill(EMPLOYEE_EMAIL);
+        await passwordInput.fill(EMPLOYEE_PASSWORD);
+        
+        if (await submitButton.count() > 0) {
+          await submitButton.click();
+          console.log('✅ Formulario enviado, esperando autenticación...');
+          
+          // Esperar a que la autenticación complete (redirección o cambio de UI)
+          await page.waitForTimeout(5000);
+          
+          // Verificar si estamos autenticados (la URL cambió o aparece el dashboard)
+          const currentUrl = page.url();
+          console.log(`📍 URL después del login: ${currentUrl}`);
+        }
+      } else {
+        console.log('⚠️ No se encontraron campos de login, puede que ya estés autenticado o la página sea diferente');
+      }
+    } catch (loginError: any) {
+      console.log(`⚠️ Error durante login (puede que ya estés autenticado): ${loginError.message}`);
+    }
+
+    // Esperar un momento para que todo se inicialice después del login
     await page.waitForTimeout(3000);
 
     // Buscar botones relacionados con QR o fichaje

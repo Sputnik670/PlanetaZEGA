@@ -120,13 +120,8 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           // Continuar de todas formas, el video puede reproducirse automáticamente
         }
 
-        // Asegurar que useZxing esté conectado al video
-        if (typeof zxingRef === 'function') {
-          zxingRef(video)
-        } else if (zxingRef && typeof zxingRef === 'object' && 'current' in zxingRef) {
-          (zxingRef as React.MutableRefObject<HTMLVideoElement | null>).current = video
-        }
-        console.log("✅ useZxing conectado al video")
+        // useZxing se conectará automáticamente a través de combinedRef
+        console.log("✅ Video listo para escaneo")
 
         setHasPermission(true)
         setScanning(true)

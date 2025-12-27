@@ -28,50 +28,27 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
   const [scanning, setScanning] = useState(false)
 
   useEffect(() => {
-    if (!isOpen) return
-
-    const checkPermissions = async () => {
-      try {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          setError("Tu navegador no soporta el acceso a la cámara")
-          setHasPermission(false)
-          setLoading(false)
-          return
-        }
-
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: "environment" } 
-          })
-          stream.getTracks().forEach(track => track.stop())
-          setHasPermission(true)
-          setScanning(true)
-        } catch (err: any) {
-          if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-            setError("Se necesita permiso para acceder a la cámara. Por favor, permite el acceso en la configuración de tu navegador.")
-            setHasPermission(false)
-          } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-            setError("No se encontró ninguna cámara en tu dispositivo")
-            setHasPermission(false)
-          } else {
-            setError(`Error al acceder a la cámara: ${err.message}`)
-            setHasPermission(false)
-          }
-        }
-        setLoading(false)
-      } catch (err) {
-        setError("Error al verificar permisos de cámara")
-        setHasPermission(false)
-        setLoading(false)
-      }
+    if (!isOpen) {
+      setLoading(true)
+      setError(null)
+      setHasPermission(null)
+      setScanning(false)
+      return
     }
 
-    checkPermissions()
+    // iOS requiere que el video esté montado antes de solicitar permisos
+    // Usamos un pequeño delay para asegurar que el DOM esté listo
+    const timer = setTimeout(() => {
+      setLoading(false)
+      setScanning(true)
+    }, 100)
+
+    return () => clearTimeout(timer)
   }, [isOpen])
 
   const { ref } = useZxing({
     onDecodeResult(result: any) {
-      if (!scanning) return
+      if (!scanning || !isOpen) return
       
       try {
         const text = result?.getText ? result.getText() : String(result)
@@ -90,31 +67,42 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
         validateAndProcessQR(data)
       } catch (err: any) {
         console.error("Error procesando QR:", err)
-        toast.error("QR inválido", { 
-          description: err.message || "El código QR no es válido. Asegúrate de escanear el QR correcto del local." 
-        })
+        // Solo mostrar error si no es un error de parsing esperado
+        if (err.message && !err.message.includes("JSON")) {
+          toast.error("QR inválido", { 
+            description: err.message || "El código QR no es válido. Asegúrate de escanear el QR correcto del local." 
+          })
+        }
         setScanning(false)
         setTimeout(() => setScanning(true), 2000) // Reintentar después de 2 segundos
       }
     },
     onError(err: any) {
       console.error("Error del scanner:", err)
-      if (err.name !== "NotFoundError") {
-        setError("Error al escanear. Intenta nuevamente.")
+      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+        setError("Se necesita permiso para acceder a la cámara. Por favor, permite el acceso en la configuración de tu navegador.")
+        setHasPermission(false)
+        setLoading(false)
+      } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+        setError("No se encontró ninguna cámara en tu dispositivo")
+        setHasPermission(false)
+        setLoading(false)
+      } else if (err.name !== "NotFoundError") {
+        setError(`Error al escanear: ${err.message || "Intenta nuevamente"}`)
       }
     },
     constraints: { 
       video: { 
         facingMode: "environment",
-        // iOS Safari requiere constraints más simples
-        width: { ideal: 640, max: 1280 },
-        height: { ideal: 480, max: 720 }
+        // iOS Safari requiere constraints muy simples
+        width: { ideal: 640 },
+        height: { ideal: 480 }
       }, 
       audio: false 
     },
     // Mejorar compatibilidad con iOS
     timeBetweenDecodingAttempts: 300,
-    pause: !scanning
+    pause: !isOpen || !scanning
   } as any)
 
   const validateAndProcessQR = async (qrData: QRData) => {
@@ -184,7 +172,7 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
     }
   }
 
-  if (hasPermission === false || error) {
+  if (error && hasPermission === false) {
     return (
       <Dialog open={isOpen} onOpenChange={onClose}>
         <DialogContent className="sm:max-w-md p-0 overflow-hidden">
@@ -194,6 +182,9 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
               <div>
                 <p className="font-bold text-lg mb-2">No se puede acceder a la cámara</p>
                 <p className="text-sm text-gray-300 mb-4">{error}</p>
+                <p className="text-xs text-gray-400 mt-4">
+                  💡 En iOS: Ve a Configuración → Safari → Cámara → Permitir
+                </p>
               </div>
               <Button 
                 variant="outline" 
@@ -225,12 +216,10 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           <video 
             ref={ref} 
             className="w-full h-full object-cover" 
-            playsInline 
-            muted 
-            autoPlay
-            webkit-playsinline="true"
-            x5-playsinline="true"
-            style={{ maxHeight: "70vh" }}
+            playsInline={true}
+            muted={true}
+            autoPlay={true}
+            style={{ maxHeight: "70vh", WebkitPlaysinline: "true" } as any}
           />
           
           <div className="absolute top-0 left-0 w-full h-full border-2 border-primary/50 pointer-events-none">

@@ -67,7 +67,12 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
         }
 
         // Esperar un momento para que el video esté en el DOM (crítico para iOS)
-        await new Promise(resolve => setTimeout(resolve, 300))
+        await new Promise(resolve => setTimeout(resolve, 500))
+
+        // Verificar que el video esté montado
+        if (!videoRef.current) {
+          throw new Error("Video element no está disponible")
+        }
 
         // Solicitar permisos con constraints simples para iOS
         const constraints: MediaStreamConstraints = {
@@ -83,10 +88,26 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
         streamRef.current = stream
 
         // Asignar stream al video manualmente (importante para iOS)
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          await videoRef.current.play()
+        const video = videoRef.current
+        video.srcObject = stream
+        
+        // Esperar a que el video esté listo antes de reproducir
+        await new Promise<void>((resolve, reject) => {
+          const handleLoadedMetadata = () => {
+            video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+            resolve()
+          }
+          video.addEventListener('loadedmetadata', handleLoadedMetadata)
+          video.load() // Forzar carga
+        })
+
+        // Reproducir el video
+        try {
+          await video.play()
           console.log("✅ Video reproduciéndose")
+        } catch (playError: any) {
+          console.error("Error al reproducir video:", playError)
+          // Continuar de todas formas, el video puede reproducirse automáticamente
         }
 
         setHasPermission(true)

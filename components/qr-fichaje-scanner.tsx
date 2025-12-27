@@ -275,36 +275,73 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
 
   // Usar la ref de useZxing directamente, pero también guardarla en videoRef para limpiar el stream
   useEffect(() => {
+    if (!isOpen || !hasPermission) return
+
     if (typeof zxingRef === 'function') {
-      // Si es función, no podemos guardarla directamente
-    } else if (zxingRef && typeof zxingRef === 'object' && 'current' in zxingRef) {
-      videoRef.current = zxingRef.current
-      
-      // Cuando el video esté listo, activar el escaneo
+      console.log("⚠️ zxingRef es función, no ref object")
+      return
+    }
+
+    if (zxingRef && typeof zxingRef === 'object' && 'current' in zxingRef) {
       const video = zxingRef.current
-      if (video) {
-        const handleLoadedMetadata = () => {
-          console.log("📹 Video metadata cargada")
-          setScanning(true)
-          setLoading(false)
-        }
-        
-        const handlePlaying = () => {
-          console.log("▶️ Video reproduciéndose")
-          setScanning(true)
-          setLoading(false)
-        }
-        
-        video.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true })
-        video.addEventListener('playing', handlePlaying, { once: true })
-        
-        // Si ya está listo, activar inmediatamente
-        if (video.readyState >= 2) {
-          handleLoadedMetadata()
-        }
+      if (!video) {
+        console.log("⚠️ Video element no disponible aún")
+        return
+      }
+
+      videoRef.current = video
+      console.log("📹 Video element asignado:", video)
+
+      // Cuando el video esté listo, activar el escaneo
+      const handleLoadedMetadata = () => {
+        console.log("📹 Video metadata cargada, readyState:", video.readyState)
+
+        // iOS Safari requiere llamada explícita a play()
+        video.play()
+          .then(() => {
+            console.log("▶️ Video.play() exitoso")
+            setScanning(true)
+            setLoading(false)
+          })
+          .catch(err => {
+            console.error("❌ Error en video.play():", err)
+            // Intentar de nuevo después de un momento
+            setTimeout(() => {
+              video.play().catch(e => console.error("❌ Retry play falló:", e))
+            }, 100)
+          })
+      }
+
+      const handlePlaying = () => {
+        console.log("▶️ Video reproduciéndose (evento playing)")
+        setScanning(true)
+        setLoading(false)
+      }
+
+      const handleCanPlay = () => {
+        console.log("✅ Video puede reproducirse (canplay)")
+        video.play().catch(err => console.error("❌ Error en canplay play():", err))
+      }
+
+      // Agregar múltiples event listeners para compatibilidad iOS
+      video.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true })
+      video.addEventListener('playing', handlePlaying, { once: true })
+      video.addEventListener('canplay', handleCanPlay, { once: true })
+
+      // Si ya está listo, activar inmediatamente
+      if (video.readyState >= 2) {
+        console.log("✅ Video ya está listo, readyState:", video.readyState)
+        handleLoadedMetadata()
+      }
+
+      // Cleanup
+      return () => {
+        video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+        video.removeEventListener('playing', handlePlaying)
+        video.removeEventListener('canplay', handleCanPlay)
       }
     }
-  }, [zxingRef, isOpen])
+  }, [zxingRef, isOpen, hasPermission])
 
   // Función simplificada: solo redirige a /fichaje sin validar
   // La validación completa se hace en app/fichaje/page.tsx

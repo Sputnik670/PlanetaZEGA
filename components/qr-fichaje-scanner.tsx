@@ -28,12 +28,19 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
   const [scanning, setScanning] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const processedQRRef = useRef<string | null>(null)
+  const isProcessingRef = useRef(false)
 
-  // Limpiar stream al cerrar
+  // Limpiar stream al cerrar y resetear refs
   useEffect(() => {
     if (!isOpen && streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop())
       streamRef.current = null
+    }
+    // Resetear refs cuando se abre el scanner
+    if (isOpen) {
+      processedQRRef.current = null
+      isProcessingRef.current = false
     }
   }, [isOpen])
 
@@ -108,10 +115,19 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
 
   const { ref: zxingRef } = useZxing({
     onDecodeResult(result: any) {
-      if (!scanning || !isOpen) return
+      if (!scanning || !isOpen || isProcessingRef.current) return
       
       try {
         const text = result?.getText ? result.getText() : String(result)
+        
+        // Evitar procesar el mismo QR múltiples veces
+        if (processedQRRef.current === text) {
+          return
+        }
+        
+        // Marcar como procesando inmediatamente
+        isProcessingRef.current = true
+        processedQRRef.current = text
         
         // Intentar parsear como URL primero (nuevo formato)
         let data: QRData | null = null
@@ -130,34 +146,38 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           try {
             data = JSON.parse(text) as QRData
           } catch {
+            isProcessingRef.current = false
             throw new Error("QR inválido: formato no reconocido")
           }
         }
 
         // Validar estructura del QR
         if (!data || !data.sucursal_id || !data.tipo) {
+          isProcessingRef.current = false
           throw new Error("QR inválido: faltan datos requeridos")
         }
 
         if (data.tipo !== "entrada" && data.tipo !== "salida") {
+          isProcessingRef.current = false
           throw new Error("QR inválido: tipo debe ser 'entrada' o 'salida'")
         }
 
-        // Si es URL, detener scanner y redirigir
+        // Si es URL, detener scanner y redirigir INMEDIATAMENTE
         if (text.startsWith('http')) {
+          // Detener TODO inmediatamente
           setScanning(false)
-          onClose() // Cerrar el scanner
           
-          // Detener el stream de video
+          // Detener el stream de video PRIMERO
           if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => track.stop())
             streamRef.current = null
           }
           
-          // Redirigir después de un pequeño delay para que el scanner se cierre
-          setTimeout(() => {
-            window.location.href = text
-          }, 100)
+          // Cerrar el dialog
+          onClose()
+          
+          // Redirigir inmediatamente (sin delay)
+          window.location.href = text
           return
         }
 
@@ -165,6 +185,8 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
         validateAndProcessQR(data)
       } catch (err: any) {
         console.error("Error procesando QR:", err)
+        isProcessingRef.current = false
+        
         // Solo mostrar error si no es un error de parsing esperado
         if (err.message && !err.message.includes("JSON") && !err.message.includes("URL")) {
           toast.error("QR inválido", { 
@@ -172,7 +194,10 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           })
         }
         setScanning(false)
-        setTimeout(() => setScanning(true), 2000) // Reintentar después de 2 segundos
+        setTimeout(() => {
+          processedQRRef.current = null
+          setScanning(true)
+        }, 2000) // Reintentar después de 2 segundos
       }
     },
     onError(err: any) {
@@ -191,7 +216,7 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
       audio: false 
     },
     timeBetweenDecodingAttempts: 300,
-    pause: !isOpen || !scanning || !hasPermission
+    pause: !isOpen || !scanning || !hasPermission || isProcessingRef.current
   } as any)
 
   // Combinar ambas refs para que useZxing y nuestro manejo manual funcionen

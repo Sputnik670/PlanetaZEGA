@@ -89,26 +89,44 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
 
         // Asignar stream al video manualmente (importante para iOS)
         const video = videoRef.current
+        if (!video) {
+          throw new Error("Video element no está disponible")
+        }
+        
         video.srcObject = stream
+        console.log("📹 Stream asignado al video")
         
         // Esperar a que el video esté listo antes de reproducir
-        await new Promise<void>((resolve, reject) => {
+        await new Promise<void>((resolve) => {
           const handleLoadedMetadata = () => {
             video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+            console.log("✅ Video metadata cargada")
             resolve()
           }
           video.addEventListener('loadedmetadata', handleLoadedMetadata)
-          video.load() // Forzar carga
+          
+          // Si ya tiene metadata, resolver inmediatamente
+          if (video.readyState >= 2) {
+            handleLoadedMetadata()
+          }
         })
 
         // Reproducir el video
         try {
           await video.play()
-          console.log("✅ Video reproduciéndose")
+          console.log("▶️ Video reproduciéndose correctamente")
         } catch (playError: any) {
-          console.error("Error al reproducir video:", playError)
+          console.error("⚠️ Error al reproducir video:", playError)
           // Continuar de todas formas, el video puede reproducirse automáticamente
         }
+
+        // Asegurar que useZxing esté conectado al video
+        if (typeof zxingRef === 'function') {
+          zxingRef(video)
+        } else if (zxingRef && typeof zxingRef === 'object' && 'current' in zxingRef) {
+          (zxingRef as React.MutableRefObject<HTMLVideoElement | null>).current = video
+        }
+        console.log("✅ useZxing conectado al video")
 
         setHasPermission(true)
         setScanning(true)
@@ -265,14 +283,8 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
         console.warn("Error de decodificación (puede ser normal):", err.message)
       }
     },
-    constraints: { 
-      video: { 
-        facingMode: "environment",
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      }, 
-      audio: false 
-    },
+    // NO pasar constraints aquí porque ya estamos manejando el stream manualmente
+    // useZxing usará el video que ya tiene el stream asignado
     timeBetweenDecodingAttempts: 300,
     pause: !isOpen || !scanning || !hasPermission || isProcessingRef.current || loading
   } as any)
@@ -281,7 +293,7 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
   const combinedRef = (node: HTMLVideoElement | null) => {
     videoRef.current = node
     
-    // Pasar la ref a useZxing
+    // Pasar la ref a useZxing INMEDIATAMENTE cuando el nodo esté disponible
     if (node) {
       if (typeof zxingRef === 'function') {
         (zxingRef as (node: HTMLVideoElement | null) => void)(node)
@@ -289,14 +301,23 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
         (zxingRef as React.MutableRefObject<HTMLVideoElement | null>).current = node
       }
       
+      console.log("✅ Video ref asignada a useZxing")
+      
       // Verificar que el video esté listo
-      node.addEventListener('loadedmetadata', () => {
-        console.log("📹 Video metadata cargada")
+      const handleLoadedMetadata = () => {
+        console.log("📹 Video metadata cargada, readyState:", node.readyState)
         if (node.readyState >= 2) {
           setScanning(true)
           setLoading(false)
         }
-      })
+      }
+      
+      // Si ya tiene metadata, ejecutar inmediatamente
+      if (node.readyState >= 2) {
+        handleLoadedMetadata()
+      } else {
+        node.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true })
+      }
     }
   }
 

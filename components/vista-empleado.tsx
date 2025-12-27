@@ -20,6 +20,7 @@ import WidgetSube from "@/components/widget-sube"
 import RelojControl from "@/components/reloj-control" 
 import QRFichajeScanner from "@/components/qr-fichaje-scanner"
 import QRTester from "@/components/qr-tester"
+import ProbarTurnos from "@/components/probar-turnos"
 import { Progress } from "@/components/ui/progress" 
 import { cn } from "@/lib/utils"
 import { QrCode } from "lucide-react"
@@ -142,9 +143,12 @@ export default function VistaEmpleado({ onBack, sucursalId }: VistaEmpleadoProps
             </div>
 
             <div className="p-4 space-y-4 -mt-6">
-                {/* 🧪 Componente de prueba - Solo visible en desarrollo */}
+                {/* 🧪 Componentes de prueba - Solo visible en desarrollo */}
                 {process.env.NODE_ENV === 'development' && (
-                    <QRTester />
+                    <>
+                        <QRTester />
+                        <ProbarTurnos />
+                    </>
                 )}
                 
                 <div className="relative z-20">

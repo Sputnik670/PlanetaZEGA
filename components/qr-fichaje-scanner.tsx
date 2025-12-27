@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { useZxing } from "react-zxing"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -22,6 +23,7 @@ interface QRFichajeScannerProps {
 }
 
 export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFichajeScannerProps) {
+  const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [hasPermission, setHasPermission] = useState<boolean | null>(null)
@@ -37,6 +39,21 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
       isProcessingRef.current = false
     }
   }, [isOpen])
+
+  // Cleanup completo del video stream al cerrar o desmontar
+  useEffect(() => {
+    return () => {
+      // Detener TODOS los tracks del stream al desmontar
+      if (videoRef.current?.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream
+        stream.getTracks().forEach(track => {
+          track.stop()
+          console.log("🛑 Track detenido:", track.kind)
+        })
+        videoRef.current.srcObject = null
+      }
+    }
+  }, [isOpen]) // Se ejecuta cuando isOpen cambia o al desmontar
 
   // Verificar permisos cuando se abre el dialog
   useEffect(() => {
@@ -58,11 +75,17 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           return
         }
 
-        // Intentar acceder a la cámara para verificar permisos
+        // Intentar acceder a la cámara para verificar permisos (con timeout de 10s)
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: "environment" } 
+          const getUserMediaPromise = navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" }
           })
+
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Timeout al acceder a la cámara")), 10000)
+          )
+
+          const stream = await Promise.race([getUserMediaPromise, timeoutPromise])
           stream.getTracks().forEach(track => track.stop()) // Detener inmediatamente
           setHasPermission(true)
           setLoading(false)
@@ -121,47 +144,62 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
         processedQRRef.current = text
         
         // Verificar si es una URL (absoluta o relativa con /fichaje)
-        const isUrl = text.startsWith('http://') || 
-                     text.startsWith('https://') || 
+        const isUrl = text.startsWith('http://') ||
+                     text.startsWith('https://') ||
                      text.startsWith('/fichaje') ||
                      (text.includes('/fichaje') && text.includes('sucursal_id'))
-        
-        // Si es URL, redirigir INMEDIATAMENTE sin validar
+
+        // Si es URL, parsear y redirigir
         if (isUrl) {
-          console.log("✅ URL detectada, redirigiendo...")
-          
-          // Construir URL completa si es relativa
-          let redirectUrl = text
-          if (text.startsWith('/fichaje')) {
-            redirectUrl = `${window.location.origin}${text}`
-          } else if (text.includes('/fichaje') && !text.startsWith('http')) {
-            redirectUrl = `${window.location.origin}${text.startsWith('/') ? '' : '/'}${text}`
+          console.log("✅ URL detectada, parseando...")
+
+          try {
+            // Parsear URL para extraer parámetros
+            let urlToParse = text
+
+            // Si es relativa, convertir a absoluta para parsear
+            if (text.startsWith('/fichaje')) {
+              urlToParse = `${window.location.origin}${text}`
+            } else if (text.includes('/fichaje') && !text.startsWith('http')) {
+              urlToParse = `${window.location.origin}${text.startsWith('/') ? '' : '/'}${text}`
+            }
+
+            const url = new URL(urlToParse)
+
+            // Validar que es el mismo dominio (seguridad)
+            if (url.origin !== window.location.origin) {
+              throw new Error("QR inválido: dominio no autorizado")
+            }
+
+            // Validar que es ruta /fichaje
+            if (!url.pathname.includes('/fichaje')) {
+              throw new Error("QR inválido: ruta no autorizada")
+            }
+
+            const params = new URLSearchParams(url.search)
+            const qrData: QRData = {
+              sucursal_id: params.get('sucursal_id') || '',
+              tipo: (params.get('tipo') as "entrada" | "salida") || "entrada"
+            }
+
+            // Validar datos
+            if (!qrData.sucursal_id || !qrData.tipo) {
+              throw new Error("QR inválido: faltan parámetros")
+            }
+
+            // Mostrar feedback
+            toast.success("QR válido", {
+              description: "Procesando fichaje...",
+              duration: 1000
+            })
+
+            // Redirigir usando la función simplificada
+            redirectToFichaje(qrData)
+            return
+          } catch (err: any) {
+            isProcessingRef.current = false
+            throw err
           }
-          
-          console.log("🚀 Redirigiendo a:", redirectUrl)
-          
-          // Mostrar feedback visual antes de redirigir
-          toast.success("Redirigiendo...", { 
-            description: "Procesando fichaje",
-            duration: 1000
-          })
-          
-          // Detener TODO inmediatamente
-          setScanning(false)
-          
-          // Detener el stream de video PRIMERO
-          if (videoRef.current && videoRef.current.srcObject) {
-            const stream = videoRef.current.srcObject as MediaStream
-            stream.getTracks().forEach(track => track.stop())
-            videoRef.current.srcObject = null
-          }
-          
-          // Cerrar el dialog
-          onClose()
-          
-          // Redirigir inmediatamente (sin delay)
-          window.location.href = redirectUrl
-          return
         }
         
         // Intentar parsear como URL primero (nuevo formato)
@@ -197,8 +235,8 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           throw new Error("QR inválido: tipo debe ser 'entrada' o 'salida'")
         }
 
-        // Si es JSON (formato antiguo), procesar directamente
-        validateAndProcessQR(data)
+        // Si es JSON (formato antiguo), redirigir directamente
+        redirectToFichaje(data)
       } catch (err: any) {
         console.error("❌ Error procesando QR:", err)
         isProcessingRef.current = false
@@ -268,71 +306,32 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
     }
   }, [zxingRef, isOpen])
 
-  const validateAndProcessQR = async (qrData: QRData) => {
+  // Función simplificada: solo redirige a /fichaje sin validar
+  // La validación completa se hace en app/fichaje/page.tsx
+  const redirectToFichaje = (qrData: QRData) => {
+    console.log("🚀 Redirigiendo a fichaje:", qrData)
+
+    // Detener escaneo
     setScanning(false)
-    
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        throw new Error("No hay sesión activa")
-      }
 
-      // Verificar que la sucursal existe y obtener su nombre
-      const { data: sucursal, error: sucursalError } = await supabase
-        .from('sucursales')
-        .select('id, nombre, organization_id')
-        .eq('id', qrData.sucursal_id)
-        .single()
-
-      if (sucursalError || !sucursal) {
-        throw new Error("Sucursal no encontrada. El QR puede estar desactualizado.")
-      }
-
-      // Verificar que el empleado pertenece a la misma organización
-      const { data: perfil } = await supabase
-        .from('perfiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
-      if (!perfil || perfil.organization_id !== sucursal.organization_id) {
-        throw new Error("No tienes acceso a esta sucursal")
-      }
-
-      // Verificar estado actual de fichaje
-      const { data: asistenciaActual } = await supabase
-        .from('asistencia')
-        .select('id, salida')
-        .eq('empleado_id', user.id)
-        .eq('sucursal_id', qrData.sucursal_id)
-        .is('salida', null)
-        .maybeSingle()
-
-      // Validar lógica de entrada/salida
-      if (qrData.tipo === "entrada" && asistenciaActual) {
-        throw new Error("Ya tienes una entrada registrada en este local. Debes fichar la salida primero.")
-      }
-
-      if (qrData.tipo === "salida" && !asistenciaActual) {
-        throw new Error("No tienes una entrada registrada en este local. Debes fichar la entrada primero.")
-      }
-
-      // Vibración si está disponible
-      if (navigator.vibrate) {
-        navigator.vibrate(100)
-      }
-
-      // QR válido, procesar
-      onQRScanned({
-        ...qrData,
-        sucursal_nombre: sucursal.nombre
-      })
-      
-      onClose()
-    } catch (err: any) {
-      toast.error("Error al validar QR", { description: err.message })
-      setScanning(true) // Reintentar
+    // Detener el stream de video antes de redirigir
+    if (videoRef.current?.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream
+      stream.getTracks().forEach(track => track.stop())
+      videoRef.current.srcObject = null
     }
+
+    // Vibración si está disponible
+    if (navigator.vibrate) {
+      navigator.vibrate(100)
+    }
+
+    // Cerrar dialog
+    onClose()
+
+    // Redirigir usando Next.js router (mantiene estado de React)
+    const fichajeUrl = `/fichaje?sucursal_id=${qrData.sucursal_id}&tipo=${qrData.tipo}`
+    router.push(fichajeUrl)
   }
 
   if (error && hasPermission === false) {

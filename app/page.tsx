@@ -150,15 +150,6 @@ export default function HomePage() {
   }
 
   useEffect(() => {
-    // Verificar si hay sucursalId en la URL (viene de /fichaje)
-    const urlParams = new URLSearchParams(window.location.search)
-    const sucursalIdFromUrl = urlParams.get('sucursal_id')
-    if (sucursalIdFromUrl) {
-      setSucursalId(sucursalIdFromUrl)
-      // Limpiar la URL
-      window.history.replaceState({}, '', window.location.pathname)
-    }
-
     const handleSessionChange = (session: any) => {
         setSession(session)
         if (session?.user) {
@@ -181,6 +172,20 @@ export default function HomePage() {
 
     return () => subscription.unsubscribe()
   }, [])
+
+  // Leer sucursalId de la URL DESPUÉS de que la sesión esté lista
+  useEffect(() => {
+    if (session && userProfile) {
+      // Verificar si hay sucursalId en la URL (viene de /fichaje)
+      const urlParams = new URLSearchParams(window.location.search)
+      const sucursalIdFromUrl = urlParams.get('sucursal_id')
+      if (sucursalIdFromUrl && !sucursalId) {
+        setSucursalId(sucursalIdFromUrl)
+        // Limpiar la URL
+        window.history.replaceState({}, '', window.location.pathname)
+      }
+    }
+  }, [session, userProfile, sucursalId])
 
   // Si el empleado tiene asistencia activa pero no tiene sucursalId, detectarla automáticamente
   useEffect(() => {

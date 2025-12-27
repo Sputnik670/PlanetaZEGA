@@ -16,6 +16,7 @@ function FichajeContent() {
   const [mensaje, setMensaje] = useState("")
   const [tipo, setTipo] = useState<"entrada" | "salida" | null>(null)
   const [sucursalNombre, setSucursalNombre] = useState("")
+  const [sucursalId, setSucursalId] = useState<string | null>(null)
 
   useEffect(() => {
     procesarFichaje()
@@ -58,6 +59,7 @@ function FichajeContent() {
       }
 
       setSucursalNombre(sucursal.nombre)
+      setSucursalId(sucursalId)
 
       // Verificar que el empleado pertenece a la misma organización
       const { data: perfil } = await supabase
@@ -139,9 +141,10 @@ function FichajeContent() {
       }
 
       // Redirigir a la app con el sucursalId en la URL para que se establezca automáticamente
+      // Usar router.push en lugar de window.location.href para mantener la sesión
       setTimeout(() => {
-        const appUrl = `${window.location.origin}?sucursal_id=${sucursalId}`
-        window.location.href = appUrl
+        const appUrl = `/?sucursal_id=${sucursalId}`
+        router.push(appUrl)
       }, 1500)
 
     } catch (err: any) {
@@ -190,7 +193,7 @@ function FichajeContent() {
               </span>
             </div>
             <Button
-              onClick={() => window.location.href = window.location.origin}
+              onClick={() => router.push(`/?sucursal_id=${sucursalId}`)}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black"
             >
               Ir a la App
@@ -224,7 +227,7 @@ function FichajeContent() {
             <div className="flex gap-2">
               <Button
                 variant="outline"
-                onClick={() => window.location.href = window.location.origin}
+                onClick={() => router.push('/')}
                 className="flex-1"
               >
                 Ir a la App

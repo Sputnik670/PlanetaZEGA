@@ -150,6 +150,15 @@ export default function HomePage() {
   }
 
   useEffect(() => {
+    // Verificar si hay sucursalId en la URL (viene de /fichaje)
+    const urlParams = new URLSearchParams(window.location.search)
+    const sucursalIdFromUrl = urlParams.get('sucursal_id')
+    if (sucursalIdFromUrl) {
+      setSucursalId(sucursalIdFromUrl)
+      // Limpiar la URL
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+
     const handleSessionChange = (session: any) => {
         setSession(session)
         if (session?.user) {
@@ -172,6 +181,32 @@ export default function HomePage() {
 
     return () => subscription.unsubscribe()
   }, [])
+
+  // Si el empleado tiene asistencia activa pero no tiene sucursalId, detectarla automáticamente
+  useEffect(() => {
+    const detectarSucursalActiva = async () => {
+      if (userProfile?.rol === "empleado" && !sucursalId && session?.user) {
+        try {
+          const { data: asistencia } = await supabase
+            .from('asistencia')
+            .select('sucursal_id')
+            .eq('empleado_id', session.user.id)
+            .is('salida', null)
+            .maybeSingle()
+
+          if (asistencia?.sucursal_id) {
+            setSucursalId(asistencia.sucursal_id)
+          }
+        } catch (error) {
+          console.error("Error detectando sucursal activa:", error)
+        }
+      }
+    }
+
+    if (userProfile && session) {
+      detectarSucursalActiva()
+    }
+  }, [userProfile, session, sucursalId])
 
   const handleLogout = async () => {
     setLoading(true)

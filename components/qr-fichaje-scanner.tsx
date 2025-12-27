@@ -143,9 +143,21 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
           throw new Error("QR inválido: tipo debe ser 'entrada' o 'salida'")
         }
 
-        // Si es URL, redirigir a la página de fichaje
+        // Si es URL, detener scanner y redirigir
         if (text.startsWith('http')) {
-          window.location.href = text
+          setScanning(false)
+          onClose() // Cerrar el scanner
+          
+          // Detener el stream de video
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop())
+            streamRef.current = null
+          }
+          
+          // Redirigir después de un pequeño delay para que el scanner se cierre
+          setTimeout(() => {
+            window.location.href = text
+          }, 100)
           return
         }
 

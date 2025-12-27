@@ -138,12 +138,11 @@ function FichajeContent() {
         }
       }
 
-      // Redirigir a la app después de 2 segundos
+      // Redirigir a la app con el sucursalId en la URL para que se establezca automáticamente
       setTimeout(() => {
-        // Intentar abrir la app con deep link
-        const appUrl = window.location.origin
+        const appUrl = `${window.location.origin}?sucursal_id=${sucursalId}`
         window.location.href = appUrl
-      }, 2000)
+      }, 1500)
 
     } catch (err: any) {
       console.error("Error procesando fichaje:", err)

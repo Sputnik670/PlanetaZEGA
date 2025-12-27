@@ -22,7 +22,9 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:debug": "playwright test --debug",
-    "test:e2e:report": "playwright show-report"
+    "test:e2e:report": "playwright show-report",
+    "test:e2e:qr": "playwright test e2e/qr-scanner.spec.ts",
+    "test:e2e:qr:prod": "playwright test e2e/qr-scanner-prod.spec.ts --project=chromium"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

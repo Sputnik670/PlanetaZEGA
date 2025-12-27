@@ -34,7 +34,10 @@ export default defineConfig({
   /* Opciones compartidas para todos los proyectos */
   use: {
     /* Base URL para usar en navegación como `await page.goto('/')` */
-    baseURL: process.env.PLAYWRIGHT_TEST_BASE_URL || 'http://localhost:3000',
+    /* Puedes usar producción con: PLAYWRIGHT_TEST_BASE_URL=https://tu-app.vercel.app */
+    baseURL: process.env.PLAYWRIGHT_TEST_BASE_URL || process.env.NEXT_PUBLIC_VERCEL_URL 
+      ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` 
+      : 'http://localhost:3000',
     
     /* Recopilar trace cuando se reintenta el test fallido */
     trace: 'on-first-retry',
@@ -85,7 +88,7 @@ export default defineConfig({
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
-    stdout: 'ignore',
+    stdout: 'pipe',
     stderr: 'pipe',
   },
 });

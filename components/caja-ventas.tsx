@@ -4,12 +4,14 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Search, Trash2, ShoppingCart, Plus, Minus, Loader2, ScanBarcode, ReceiptText } from "lucide-react"
+import { Search, Trash2, ShoppingCart, Plus, Minus, Loader2, ScanBarcode, ReceiptText, X } from "lucide-react"
 import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { generarTicketVenta } from "@/lib/generar-ticket"
+import { useZxing } from "react-zxing"
 
 interface Producto {
   id: string
@@ -30,6 +32,225 @@ interface CajaVentasProps {
   onVentaCompletada?: () => void 
 }
 
+// --- COMPONENTE SCANNER PARA CAJA DE VENTAS ---
+function BarcodeScannerVentas({ onResult, onClose }: { onResult: (code: string) => void, onClose: () => void }) {
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null)
+  const [manualInput, setManualInput] = useState("")
+  const [showManualInput, setShowManualInput] = useState(false)
+
+  useEffect(() => {
+    const checkPermissions = async () => {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          setError("Tu navegador no soporta el acceso a la cámara")
+          setHasPermission(false)
+          setLoading(false)
+          return
+        }
+
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: "environment" } 
+          })
+          stream.getTracks().forEach(track => track.stop())
+          setHasPermission(true)
+        } catch (err: any) {
+          if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+            setError("Se necesita permiso para acceder a la cámara. Por favor, permite el acceso en la configuración de tu navegador.")
+            setHasPermission(false)
+          } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+            setError("No se encontró ninguna cámara en tu dispositivo")
+            setHasPermission(false)
+          } else {
+            setError(`Error al acceder a la cámara: ${err.message}`)
+            setHasPermission(false)
+          }
+        }
+        setLoading(false)
+      } catch (err) {
+        setError("Error al verificar permisos de cámara")
+        setHasPermission(false)
+        setLoading(false)
+      }
+    }
+
+    checkPermissions()
+  }, [])
+
+  const { ref } = useZxing({
+    onDecodeResult(result: any) {
+      if (result && result.getText) {
+        const code = result.getText()
+        if (navigator.vibrate) {
+          navigator.vibrate(100)
+        }
+        onResult(code)
+      } else {
+        onResult(String(result))
+      }
+    },
+    onError(err: any) {
+      console.error("Error del scanner:", err)
+      if (err.name !== "NotFoundError") {
+        setError("Error al escanear. Intenta nuevamente o usa entrada manual.")
+      }
+    },
+    constraints: { 
+      video: { 
+        facingMode: "environment",
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }, 
+      audio: false 
+    }
+  } as any)
+
+  const handleManualSubmit = () => {
+    if (manualInput.trim()) {
+      onResult(manualInput.trim())
+      setManualInput("")
+      setShowManualInput(false)
+    }
+  }
+
+  if (hasPermission === false || error) {
+    return (
+      <div className="relative flex flex-col items-center justify-center bg-black min-h-[400px] p-6">
+        <div className="text-center space-y-4 text-white">
+          <X className="h-16 w-16 mx-auto text-red-400" />
+          <div>
+            <p className="font-bold text-lg mb-2">No se puede acceder a la cámara</p>
+            <p className="text-sm text-gray-300 mb-4">{error}</p>
+          </div>
+          
+          {!showManualInput ? (
+            <div className="space-y-3">
+              <Button 
+                onClick={() => setShowManualInput(true)}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                Ingresar código manualmente
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={onClose}
+                className="border-white text-white hover:bg-white/10"
+              >
+                Cancelar
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3 w-full max-w-xs">
+              <Input
+                type="text"
+                placeholder="Ingresa el código de barras"
+                value={manualInput}
+                onChange={(e) => setManualInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleManualSubmit()}
+                className="bg-white text-black"
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <Button 
+                  onClick={handleManualSubmit}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700"
+                  disabled={!manualInput.trim()}
+                >
+                  Confirmar
+                </Button>
+                <Button 
+                  variant="outline"
+                  onClick={() => {
+                    setShowManualInput(false)
+                    setManualInput("")
+                  }}
+                  className="border-white text-white hover:bg-white/10"
+                >
+                  Volver
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="relative flex flex-col items-center justify-center bg-black w-full min-h-[400px] max-h-[70vh]">
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-50">
+          <div className="text-center text-white">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
+            <p className="text-sm">Iniciando cámara...</p>
+          </div>
+        </div>
+      )}
+      
+      <video 
+        ref={ref} 
+        className="w-full h-full object-cover" 
+        playsInline 
+        muted 
+        autoPlay
+        style={{ maxHeight: "70vh" }}
+      />
+      
+      <div className="absolute top-0 left-0 w-full h-full border-2 border-primary/50 pointer-events-none">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-40 border-2 border-white/80 rounded-lg shadow-[0_0_0_999px_rgba(0,0,0,0.5)]">
+          <p className="absolute -top-8 w-full text-center text-white font-bold text-sm drop-shadow-md">
+            Apunta al código
+          </p>
+        </div>
+      </div>
+      
+      <div className="absolute bottom-4 left-0 right-0 flex flex-col items-center gap-2 z-50">
+        <Button 
+          type="button" 
+          variant="outline"
+          size="sm"
+          className="bg-white/10 border-white/20 text-white hover:bg-white/20"
+          onClick={() => setShowManualInput(!showManualInput)}
+        >
+          {showManualInput ? "Ocultar entrada manual" : "Ingresar manualmente"}
+        </Button>
+        
+        {showManualInput && (
+          <div className="w-full max-w-xs px-4 space-y-2">
+            <Input
+              type="text"
+              placeholder="Código de barras"
+              value={manualInput}
+              onChange={(e) => setManualInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleManualSubmit()}
+              className="bg-white text-black"
+              autoFocus
+            />
+            <Button 
+              onClick={handleManualSubmit}
+              className="w-full bg-blue-600 hover:bg-blue-700"
+              disabled={!manualInput.trim()}
+            >
+              Confirmar
+            </Button>
+          </div>
+        )}
+        
+        <Button 
+          type="button" 
+          variant="destructive" 
+          className="rounded-full px-6 shadow-lg" 
+          onClick={onClose}
+        >
+          <X className="mr-2 h-4 w-4" /> Cancelar
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVentaCompletada }: CajaVentasProps) {
   const [busqueda, setBusqueda] = useState("")
   const [productos, setProductos] = useState<Producto[]>([])
@@ -37,6 +258,7 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
   const [loading, setLoading] = useState(false)
   const [procesandoVenta, setProcesandoVenta] = useState(false)
   const [metodoPago, setMetodoPago] = useState<"efectivo" | "tarjeta" | "billetera_virtual">("efectivo")
+  const [showScanner, setShowScanner] = useState(false)
   
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -128,6 +350,13 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
     }
   }
 
+  const handleBarcodeScanned = async (code: string) => {
+    setShowScanner(false)
+    // Buscar producto por código de barras y agregarlo automáticamente
+    await buscarProductos(code, true)
+    toast.success("Código escaneado", { description: "Buscando producto..." })
+  }
+
   const cambiarCantidad = (id: string, delta: number) => {
     setCarrito(prev => prev.map(p => 
       p.id === id ? { ...p, cantidad: Math.max(1, p.cantidad + delta) } : p
@@ -209,14 +438,26 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
 
       <div className="p-6 space-y-6 flex-1 bg-slate-50/50">
         <div className="relative">
-          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 z-10">
              <ScanBarcode className="h-6 w-6" />
+          </div>
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 z-10">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setShowScanner(true)}
+              className="bg-blue-600 hover:bg-blue-700 text-white border-0 h-10 px-4 rounded-xl shadow-sm"
+            >
+              <ScanBarcode className="h-4 w-4 mr-2" />
+              Escanear
+            </Button>
           </div>
           <Input 
             ref={inputRef}
             autoFocus
             placeholder="ESCANEAR O BUSCAR PRODUCTO..." 
-            className="pl-12 bg-white font-black border-2 border-slate-100 focus-visible:ring-blue-500 h-16 rounded-2xl shadow-sm text-lg"
+            className="pl-12 pr-32 bg-white font-black border-2 border-slate-100 focus-visible:ring-blue-500 h-16 rounded-2xl shadow-sm text-lg"
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
             onKeyDown={handleKeyDown} 
@@ -317,6 +558,17 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
           )}
         </Button>
       </div>
+
+      <Dialog open={showScanner} onOpenChange={setShowScanner}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden bg-black border-none text-white">
+          {showScanner && (
+            <BarcodeScannerVentas 
+              onResult={handleBarcodeScanned} 
+              onClose={() => setShowScanner(false)} 
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

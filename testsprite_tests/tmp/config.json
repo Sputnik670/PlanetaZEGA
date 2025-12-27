@@ -1,0 +1,16 @@
+{
+  "status": "commited",
+  "type": "frontend",
+  "scope": "codebase",
+  "localEndpoint": "https://eurythmic-krista-apolitically.ngrok-free.dev",
+  "executionArgs": {
+    "projectName": "PlanetaZEGA",
+    "projectPath": "C:\\Users\\Rram\\Desktop\\PlanetaZEGA-main",
+    "testIds": [],
+    "additionalInstruction": "All test files have been updated to use ngrok URL: https://eurythmic-krista-apolitically.ngrok-free.dev",
+    "envs": {
+      "API_KEY": "sk-user-qUOFtFQIHoWkGQz1mEAmyGW_HkS-uheEp5MczhlpAgxvjgaXKAEKq0DQ9Ko9sxb1lAIy43XyRmKlN58jVuMPgnNYVGSD-siEnL30fw_SWndFv6GajXIY0UCBFFO50QDZ79E"
+    }
+  },
+  "proxy": "http://04f56adf-9d1d-4a5e-b835-f38e48bc19c4:7bdaNp3pRu15g5HnVfRskuJlUbbUIQKL@tun.testsprite.com:8080"
+}

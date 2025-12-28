@@ -429,20 +429,9 @@ ALTER TABLE public.historial_precios ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.asistencia ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pending_invites ENABLE ROW LEVEL SECURITY;
 
--- Tabla: pending_invites (Invitaciones pendientes para empleados)
-CREATE TABLE IF NOT EXISTS public.pending_invites (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    email TEXT NOT NULL,
-    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    sucursal_id UUID REFERENCES public.sucursales(id) ON DELETE SET NULL,
-    rol TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(email)
-);
-
--- Habilitar RLS para pending_invites
-ALTER TABLE public.pending_invites ENABLE ROW LEVEL SECURITY;
-
+-- =====================================================
+-- POLÍTICAS DE SEGURIDAD (Row Level Security)
+-- =====================================================
 -- Política: Los usuarios solo pueden ver/modificar datos de su organización
 -- NOTA: Estas son políticas básicas. Ajusta según tus necesidades de seguridad específicas.
 

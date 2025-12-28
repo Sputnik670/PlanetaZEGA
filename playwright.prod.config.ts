@@ -66,3 +66,4 @@ export default defineConfig({
 
   /* NO usar webServer en producción - el sitio ya está desplegado */
 });
+

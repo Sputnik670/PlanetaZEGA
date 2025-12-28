@@ -1,150 +1,129 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { useZxing } from "react-zxing"
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
-import { Loader2, X, QrCode, AlertCircle } from "lucide-react"
+import { Loader2, X, AlertCircle } from "lucide-react"
 import { toast } from "sonner"
 
-interface QRData {
-  sucursal_id: string
-  tipo: "entrada" | "salida"
-  sucursal_nombre?: string
-}
-
+// Interfaz restaurada para compatibilidad con page.tsx
 interface QRFichajeScannerProps {
-  onQRScanned: (data: QRData) => void
+  onQRScanned: (data: any) => void
   onClose: () => void
   isOpen: boolean
 }
 
-export default function QRFichajeScanner({ onClose, isOpen }: QRFichajeScannerProps) {
+export default function QRFichajeScanner({ onClose, isOpen, onQRScanned }: QRFichajeScannerProps) {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null)
-  const [scanning, setScanning] = useState(false)
-  const processedQRRef = useRef<string | null>(null)
+  const scannerRef = useRef<Html5Qrcode | null>(null)
   const isProcessingRef = useRef(false)
-  const streamRef = useRef<MediaStream | null>(null)
+
+  const scannerId = "reader-fichaje-v2"
 
   useEffect(() => {
-    if (isOpen) {
-      processedQRRef.current = null
-      isProcessingRef.current = false
-      setLoading(true)
-      setError(null)
+    if (!isOpen) return
+
+    const startScanner = async () => {
+      try {
+        const html5QrCode = new Html5Qrcode(scannerId)
+        scannerRef.current = html5QrCode
+
+        const config = {
+          fps: 20, // Aumentamos FPS para mayor fluidez
+          qrbox: { width: 280, height: 280 }, // Caja visual más grande para facilitar el encuadre
+          aspectRatio: 1.0,
+          formatsToSupport: [ Html5QrcodeSupportedFormats.QR_CODE ]
+        }
+
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          config,
+          (decodedText) => {
+            if (isProcessingRef.current) return
+            handleScanSuccess(decodedText)
+          },
+          () => {
+            // Error silencioso mientras busca
+          }
+        )
+        setLoading(false)
+      } catch (err: any) {
+        console.error("Error iniciando scanner:", err)
+        setError("Error al acceder a la cámara. Asegúrate de dar permisos.")
+        setLoading(false)
+      }
+    }
+
+    startScanner()
+
+    return () => {
+      if (scannerRef.current?.isScanning) {
+        scannerRef.current.stop().catch(console.error)
+      }
     }
   }, [isOpen])
 
-  const cleanupVideoStream = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop())
-      streamRef.current = null
-    }
-  }, [])
+  const handleScanSuccess = async (text: string) => {
+    isProcessingRef.current = true
+    let redirectUrl: string | null = null
 
-  const { ref: zxingRef } = useZxing({
-    onDecodeResult(result) {
-      if (!isOpen || isProcessingRef.current) return
-      
-      const text = result.getText()
-      if (processedQRRef.current === text) return
-      
-      isProcessingRef.current = true
-      processedQRRef.current = text
-      
-      let redirectUrl: string | null = null
-      
-      try {
-        if (text.includes('/fichaje?')) {
-          redirectUrl = text.substring(text.indexOf('/fichaje'))
-        } else if (text.startsWith('/fichaje')) {
-          redirectUrl = text
-        } else {
-          const data = JSON.parse(text)
-          if (data.sucursal_id && data.tipo) {
-            redirectUrl = `/fichaje?sucursal_id=${data.sucursal_id}&tipo=${data.tipo}`
-          }
-        }
-      } catch (e) {
-        console.error("Error parseando QR", e)
-      }
-
-      if (redirectUrl) {
-        toast.success("QR detectado, redirigiendo...")
-        setScanning(false)
-        cleanupVideoStream()
-        onClose()
-        router.push(redirectUrl)
+    try {
+      // Lógica de detección ultra-flexible para cualquier entorno
+      if (text.includes('/fichaje?')) {
+        redirectUrl = text.substring(text.indexOf('/fichaje'))
+      } else if (text.startsWith('/fichaje')) {
+        redirectUrl = text
       } else {
-        isProcessingRef.current = false
-        toast.error("Formato de QR no reconocido")
-      }
-    },
-    constraints: {
-      video: {
-        facingMode: { ideal: "environment" },
-        // Eliminamos anchos fijos para que el navegador elija la mejor resolución nativa
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        // @ts-ignore
-        focusMode: { ideal: "continuous" }
-      },
-      audio: false
-    },
-    timeBetweenDecodingAttempts: 100,
-    paused: !isOpen || hasPermission === false || isProcessingRef.current
-  })
-
-  useEffect(() => {
-    if (!isOpen) {
-      cleanupVideoStream()
-      return
-    }
-
-    const initCamera = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } }
-        })
-        streamRef.current = stream
-        setHasPermission(true)
-        
-        if (zxingRef.current) {
-          zxingRef.current.srcObject = stream
-          const handleLoaded = () => {
-            setLoading(false)
-            setScanning(true)
-          }
-          zxingRef.current.addEventListener('loadedmetadata', handleLoaded, { once: true })
+        const data = JSON.parse(text)
+        if (data.sucursal_id && data.tipo) {
+          redirectUrl = `/fichaje?sucursal_id=${data.sucursal_id}&tipo=${data.tipo}`
         }
-      } catch (err: any) {
-        setHasPermission(false)
-        setLoading(false)
-        setError(err.name === "NotAllowedError" ? "Permiso denegado" : "Error de cámara")
       }
+    } catch (e) {
+      console.error("Error parseando QR", e)
     }
 
-    initCamera()
+    if (redirectUrl) {
+      toast.success("Código detectado")
+      
+      // Notificar a la app principal (page.tsx)
+      if (onQRScanned) {
+        onQRScanned({ text })
+      }
 
-    const timer = setTimeout(() => setLoading(false), 8000)
-    return () => {
-      clearTimeout(timer)
-      cleanupVideoStream()
+      await stopAndClose()
+      router.push(redirectUrl)
+    } else {
+      isProcessingRef.current = false
+      toast.error("El QR no parece ser un código de fichaje válido")
     }
-  }, [isOpen, zxingRef, cleanupVideoStream])
+  }
 
-  if (error && hasPermission === false) {
+  const stopAndClose = async () => {
+    try {
+      if (scannerRef.current?.isScanning) {
+        await scannerRef.current.stop()
+      }
+    } catch (err) {
+      console.error("Error al detener el scanner:", err)
+    } finally {
+      onClose()
+    }
+  }
+
+  if (error) {
     return (
       <Dialog open={isOpen} onOpenChange={onClose}>
         <DialogContent className="sm:max-w-md p-6 bg-slate-900 text-white border-none">
           <div className="text-center space-y-4">
             <AlertCircle className="h-12 w-12 mx-auto text-red-500" />
-            <p className="font-bold">{error}</p>
-            <Button onClick={onClose} variant="outline" className="text-black">Cerrar</Button>
+            <p className="font-bold text-lg">Cámara no disponible</p>
+            <p className="text-sm text-slate-400">{error}</p>
+            <Button onClick={onClose} variant="outline" className="w-full text-black bg-white">Cerrar</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -152,41 +131,28 @@ export default function QRFichajeScanner({ onClose, isOpen }: QRFichajeScannerPr
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={stopAndClose}>
       <DialogContent className="sm:max-w-md p-0 overflow-hidden bg-black border-none">
-        <div className="relative flex flex-col items-center justify-center min-h-[400px] max-h-[80vh]">
+        <div className="relative flex flex-col items-center justify-center min-h-[450px]">
           {loading && (
             <div className="absolute inset-0 flex items-center justify-center bg-black z-50">
-              <div className="text-center text-white">
-                <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
-                <p className="text-sm">Iniciando cámara...</p>
+              <div className="text-center text-white space-y-4">
+                <Loader2 className="h-10 w-10 animate-spin mx-auto text-blue-500" />
+                <p className="text-sm font-medium">Iniciando motor de escaneo...</p>
               </div>
             </div>
           )}
           
-          <video
-            ref={zxingRef}
-            // CLASES CLAVE: 'contrast-125' y 'brightness-110' ayudan al scanner a "ver" mejor el QR
-            className="w-full h-full object-cover max-h-[80vh] [image-rendering:pixelated] contrast-125 brightness-110"
-            playsInline
-            muted
-            autoPlay
-          />
+          {/* Contenedor del motor html5-qrcode */}
+          <div id={scannerId} className="w-full h-full" />
           
-          <div className="absolute inset-0 pointer-events-none">
-             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 border-2 border-white/50 rounded-lg shadow-[0_0_0_999px_rgba(0,0,0,0.5)]">
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-                  <QrCode className="h-12 w-12 text-white/30" />
-                </div>
-             </div>
-          </div>
-
-          <div className="absolute bottom-6 w-full flex flex-col items-center gap-4">
-            <div className="bg-black/60 px-4 py-1 rounded-full text-white text-xs font-medium">
-              {scanning ? "Buscando código QR..." : "Esperando..."}
-            </div>
-            <Button onClick={onClose} variant="destructive" className="rounded-full px-8">
-              <X className="mr-2 h-4 w-4" /> Cancelar
+          <div className="absolute bottom-8 w-full flex flex-col items-center gap-4 z-50 pointer-events-none">
+            <Button 
+              onClick={stopAndClose} 
+              variant="destructive" 
+              className="rounded-full px-10 shadow-2xl pointer-events-auto h-12 font-bold"
+            >
+              <X className="mr-2 h-5 w-5" /> Cancelar
             </Button>
           </div>
         </div>

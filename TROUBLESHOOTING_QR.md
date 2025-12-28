@@ -1,6 +1,6 @@
 # Troubleshooting QR Scanner - Guía Rápida
 
-## 🔍 Problema: "Esperando QR..." sin activar cámara
+## 🔍 Problema 1: "Esperando QR..." sin activar cámara
 
 ### ✅ SOLUCIONADO (Commit: b14ac3a)
 
@@ -23,6 +23,67 @@ pause: !isOpen || !scanning || !hasPermission || isProcessingRef.current || load
 // DESPUÉS (✅ Funciona):
 pause: !isOpen || hasPermission === false || isProcessingRef.current
 ```
+
+---
+
+## 🔄 Problema 2: Bucle infinito "Escaneando..."
+
+### ✅ SOLUCIONADO (Commit: f6b2edf)
+
+**Síntoma:**
+- La cámara se activa correctamente
+- Aparece "Escaneando..." en bucle infinito
+- El scanner no detecta ningún QR
+- La app puede volverse lenta o no responder
+
+**Causa raíz:**
+- Event listeners duplicados causando re-renders infinitos:
+  - `onLoadedMetadata`, `onPlaying` en el JSX del `<video>`
+  - `handleLoadedMetadata` en useEffect
+  - Cada evento llamaba `setScanning(true)` → re-render → evento nuevamente
+
+**Solución implementada:**
+```typescript
+// ANTES (❌ Bucle infinito):
+<video
+  ref={zxingRef}
+  onLoadedMetadata={() => {
+    setScanning(true)
+    setLoading(false)
+  }}
+  onPlaying={() => {
+    setScanning(true)  // ← DUPLICADO!
+    setLoading(false)
+  }}
+/>
+
+// useEffect también tenía:
+video.addEventListener('loadedmetadata', handleLoadedMetadata)
+video.addEventListener('playing', handlePlaying)  // ← MÁS DUPLICACIÓN!
+
+// DESPUÉS (✅ Sin bucles):
+<video
+  ref={zxingRef}
+  playsInline={true}
+  muted={true}
+  autoPlay={true}
+  // Sin event listeners inline
+/>
+
+// Solo en useEffect:
+video.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true })
+// Y guards para prevenir setState múltiples
+if (!scanning) {
+  setScanning(true)
+}
+```
+
+**Verificación:**
+- ✅ Scanner se abre
+- ✅ Cámara se activa
+- ✅ Muestra "Escaneando..." UNA SOLA VEZ
+- ✅ Detecta QR correctamente
+- ✅ No hay bucles ni lag
 
 ---
 

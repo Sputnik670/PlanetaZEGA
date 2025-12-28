@@ -302,57 +302,50 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
   // Usar la ref de useZxing directamente, pero también guardarla en videoRef y trackear el stream
   useEffect(() => {
     if (typeof zxingRef === 'function') {
-      // Si es función, no podemos guardarla directamente
-      // Pero podemos intentar obtener el stream desde el video cuando esté disponible
       return () => {
-        // Cleanup cuando zxingRef cambia
         cleanupVideoStream()
         cleanupZxingRef()
       }
     } else if (zxingRef && typeof zxingRef === 'object' && 'current' in zxingRef) {
       videoRef.current = zxingRef.current
-      
-      // Guardar referencia al stream
-      if (zxingRef.current && zxingRef.current.srcObject) {
-        streamRef.current = zxingRef.current.srcObject as MediaStream
-      }
-      
-      // Cuando el video esté listo, activar el escaneo
+
       const video = zxingRef.current
       if (video) {
-        const handleLoadedMetadata = () => {
-          console.log("📹 Video metadata cargada")
+        // Guardar stream cuando esté disponible
+        const saveStream = () => {
           if (video.srcObject) {
             streamRef.current = video.srcObject as MediaStream
+            console.log("📹 Stream guardado:", streamRef.current.getTracks().length, "tracks")
           }
-          setScanning(true)
-          setLoading(false)
         }
-        
-        const handlePlaying = () => {
-          console.log("▶️ Video reproduciéndose")
-          setScanning(true)
-          setLoading(false)
+
+        const handleLoadedMetadata = () => {
+          console.log("📹 Video metadata cargada, readyState:", video.readyState)
+          saveStream()
+          // Solo cambiar estado si NO estamos ya escaneando
+          if (!scanning) {
+            setScanning(true)
+          }
+          if (loading) {
+            setLoading(false)
+          }
         }
-        
+
         video.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true })
-        video.addEventListener('playing', handlePlaying, { once: true })
-        
+
         // Si ya está listo, activar inmediatamente
         if (video.readyState >= 2) {
           handleLoadedMetadata()
         }
-        
-        // Cleanup de event listeners cuando el componente se desmonte o zxingRef cambie
+
         return () => {
           video.removeEventListener('loadedmetadata', handleLoadedMetadata)
-          video.removeEventListener('playing', handlePlaying)
           cleanupVideoStream()
           cleanupZxingRef()
         }
       }
     }
-  }, [zxingRef, isOpen, cleanupVideoStream, cleanupZxingRef])
+  }, [zxingRef, isOpen])
 
   if (error && hasPermission === false) {
     return (
@@ -395,33 +388,18 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
             </div>
           )}
           
-          <video 
-            ref={zxingRef} 
+          <video
+            ref={zxingRef}
             data-testid="qr-scanner-video"
-            className="w-full h-full object-cover" 
+            className="w-full h-full object-cover"
             playsInline={true}
             muted={true}
             autoPlay={true}
-            style={{ 
-              maxHeight: "70vh", 
+            style={{
+              maxHeight: "70vh",
               WebkitPlaysinline: "true",
               objectFit: "cover"
             } as any}
-            onLoadedMetadata={() => {
-              console.log("📹 Video metadata cargada")
-              setScanning(true)
-              setLoading(false)
-            }}
-            onPlaying={() => {
-              console.log("▶️ Video reproduciéndose")
-              setScanning(true)
-              setLoading(false)
-            }}
-            onError={(e) => {
-              console.error("❌ Error en video:", e)
-              setError("Error al reproducir video")
-              setLoading(false)
-            }}
           />
           
           <div className="absolute top-0 left-0 w-full h-full border-2 border-primary/50 pointer-events-none">

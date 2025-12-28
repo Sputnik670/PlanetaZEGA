@@ -59,12 +59,10 @@ export default function QRFichajeScanner({ onClose, isOpen }: QRFichajeScannerPr
       let redirectUrl: string | null = null
       
       try {
-        // Lógica de detección flexible (acepta URLs de cualquier dominio que contengan /fichaje)
-        if (text.startsWith('/fichaje')) {
+        if (text.includes('/fichaje?')) {
+          redirectUrl = text.substring(text.indexOf('/fichaje'))
+        } else if (text.startsWith('/fichaje')) {
           redirectUrl = text
-        } else if (text.includes('/fichaje?')) {
-          const urlPart = text.substring(text.indexOf('/fichaje?'))
-          redirectUrl = urlPart
         } else {
           const data = JSON.parse(text)
           if (data.sucursal_id && data.tipo) {
@@ -88,18 +86,14 @@ export default function QRFichajeScanner({ onClose, isOpen }: QRFichajeScannerPr
     },
     constraints: {
       video: {
-        // AJUSTE DE SENSIBILIDAD:
         facingMode: { ideal: "environment" },
-        // Bajamos la resolución ideal para que el procesado de imagen sea más rápido
-        width: { ideal: 640 },
-        height: { ideal: 480 },
-        // Intentamos forzar el auto-enfoque continuo
-        // @ts-ignore - Propiedad experimental pero efectiva en móviles
+        width: { min: 640, ideal: 1280 },
+        height: { min: 480, ideal: 720 },
+        // @ts-ignore
         focusMode: { ideal: "continuous" }
       },
       audio: false
     },
-    // Reducimos el tiempo entre intentos para que se sienta más "instantáneo"
     timeBetweenDecodingAttempts: 150,
     paused: !isOpen || hasPermission === false || isProcessingRef.current
   })
@@ -113,11 +107,7 @@ export default function QRFichajeScanner({ onClose, isOpen }: QRFichajeScannerPr
     const initCamera = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { 
-            facingMode: { ideal: "environment" },
-            width: { ideal: 640 },
-            height: { ideal: 480 }
-          }
+          video: { facingMode: { ideal: "environment" } }
         })
         streamRef.current = stream
         setHasPermission(true)
@@ -133,20 +123,19 @@ export default function QRFichajeScanner({ onClose, isOpen }: QRFichajeScannerPr
       } catch (err: any) {
         setHasPermission(false)
         setLoading(false)
-        setError(err.name === "NotAllowedError" ? "Permiso denegado" : "No se pudo acceder a la cámara")
+        setError(err.name === "NotAllowedError" ? "Permiso denegado" : "Error de cámara")
       }
     }
 
     initCamera()
 
-    const timer = setTimeout(() => setLoading(false), 10000)
+    const timer = setTimeout(() => setLoading(false), 8000)
     return () => {
       clearTimeout(timer)
       cleanupVideoStream()
     }
   }, [isOpen, zxingRef, cleanupVideoStream])
 
-  // ... (El resto del renderizado Dialog se mantiene igual)
   if (error && hasPermission === false) {
     return (
       <Dialog open={isOpen} onOpenChange={onClose}>
@@ -169,14 +158,14 @@ export default function QRFichajeScanner({ onClose, isOpen }: QRFichajeScannerPr
             <div className="absolute inset-0 flex items-center justify-center bg-black z-50">
               <div className="text-center text-white">
                 <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
-                <p>Iniciando cámara...</p>
+                <p className="text-sm">Iniciando cámara...</p>
               </div>
             </div>
           )}
           
           <video
             ref={zxingRef}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover max-h-[80vh] [image-rendering:pixelated]"
             playsInline
             muted
             autoPlay

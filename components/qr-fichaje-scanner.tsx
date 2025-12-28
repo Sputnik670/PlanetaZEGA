@@ -87,14 +87,15 @@ export default function QRFichajeScanner({ onClose, isOpen }: QRFichajeScannerPr
     constraints: {
       video: {
         facingMode: { ideal: "environment" },
-        width: { min: 640, ideal: 1280 },
-        height: { min: 480, ideal: 720 },
+        // Eliminamos anchos fijos para que el navegador elija la mejor resolución nativa
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
         // @ts-ignore
         focusMode: { ideal: "continuous" }
       },
       audio: false
     },
-    timeBetweenDecodingAttempts: 150,
+    timeBetweenDecodingAttempts: 100,
     paused: !isOpen || hasPermission === false || isProcessingRef.current
   })
 
@@ -165,7 +166,8 @@ export default function QRFichajeScanner({ onClose, isOpen }: QRFichajeScannerPr
           
           <video
             ref={zxingRef}
-            className="w-full h-full object-cover max-h-[80vh] [image-rendering:pixelated]"
+            // CLASES CLAVE: 'contrast-125' y 'brightness-110' ayudan al scanner a "ver" mejor el QR
+            className="w-full h-full object-cover max-h-[80vh] [image-rendering:pixelated] contrast-125 brightness-110"
             playsInline
             muted
             autoPlay

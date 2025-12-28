@@ -30,7 +30,6 @@ export default function QRFichajeScanner({ onClose, isOpen }: QRFichajeScannerPr
   const isProcessingRef = useRef(false)
   const streamRef = useRef<MediaStream | null>(null)
 
-  // Resetear refs cuando se abre el scanner
   useEffect(() => {
     if (isOpen) {
       processedQRRef.current = null
@@ -60,13 +59,12 @@ export default function QRFichajeScanner({ onClose, isOpen }: QRFichajeScannerPr
       let redirectUrl: string | null = null
       
       try {
+        // Lógica de detección flexible (acepta URLs de cualquier dominio que contengan /fichaje)
         if (text.startsWith('/fichaje')) {
           redirectUrl = text
-        } else if (text.startsWith('http')) {
-          const url = new URL(text)
-          if (url.pathname === '/fichaje') {
-            redirectUrl = url.pathname + url.search
-          }
+        } else if (text.includes('/fichaje?')) {
+          const urlPart = text.substring(text.indexOf('/fichaje?'))
+          redirectUrl = urlPart
         } else {
           const data = JSON.parse(text)
           if (data.sucursal_id && data.tipo) {
@@ -90,15 +88,19 @@ export default function QRFichajeScanner({ onClose, isOpen }: QRFichajeScannerPr
     },
     constraints: {
       video: {
-        // 'ideal' permite compatibilidad con Notebook (frontal) y Móvil (trasera)
+        // AJUSTE DE SENSIBILIDAD:
         facingMode: { ideal: "environment" },
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
+        // Bajamos la resolución ideal para que el procesado de imagen sea más rápido
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+        // Intentamos forzar el auto-enfoque continuo
+        // @ts-ignore - Propiedad experimental pero efectiva en móviles
+        focusMode: { ideal: "continuous" }
       },
       audio: false
     },
-    timeBetweenDecodingAttempts: 300,
-    // CORRECCIÓN: Se cambió 'pause' por 'paused' para cumplir con el tipo UseZxingOptions
+    // Reducimos el tiempo entre intentos para que se sienta más "instantáneo"
+    timeBetweenDecodingAttempts: 150,
     paused: !isOpen || hasPermission === false || isProcessingRef.current
   })
 
@@ -111,7 +113,11 @@ export default function QRFichajeScanner({ onClose, isOpen }: QRFichajeScannerPr
     const initCamera = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } }
+          video: { 
+            facingMode: { ideal: "environment" },
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          }
         })
         streamRef.current = stream
         setHasPermission(true)
@@ -133,13 +139,14 @@ export default function QRFichajeScanner({ onClose, isOpen }: QRFichajeScannerPr
 
     initCamera()
 
-    const timer = setTimeout(() => setLoading(false), 10000) // Timeout extendido para notebooks
+    const timer = setTimeout(() => setLoading(false), 10000)
     return () => {
       clearTimeout(timer)
       cleanupVideoStream()
     }
   }, [isOpen, zxingRef, cleanupVideoStream])
 
+  // ... (El resto del renderizado Dialog se mantiene igual)
   if (error && hasPermission === false) {
     return (
       <Dialog open={isOpen} onOpenChange={onClose}>

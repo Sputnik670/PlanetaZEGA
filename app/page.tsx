@@ -2,26 +2,24 @@
 
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
-import { Loader2, Package } from "lucide-react"
+import { Loader2, Package, QrCode } from "lucide-react"
 import DashboardDueno from "@/components/dashboard-dueno"
 import VistaEmpleado from "@/components/vista-empleado"
 import AuthForm from "@/components/auth-form"
 import ProfileSetup from "@/components/profile-setup"
-import SeleccionarSucursal from "@/components/seleccionar-sucursal" // ✅ Importamos el nuevo componente
-import QRFichajeScanner from "@/components/qr-fichaje-scanner" // ✅ Scanner de QR para fichaje
+import SeleccionarSucursal from "@/components/seleccionar-sucursal"
+import QRFichajeScanner from "@/components/qr-fichaje-scanner"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { toast } from "sonner"
-import { QrCode } from "lucide-react"
 
 interface UserProfile {
     id: string
     rol: "dueño" | "empleado"
     nombre: string
-    organization_id: string // ✅ Agregado: Necesario para filtrar sucursales
+    organization_id: string
 }
 
-// ✅ Componente para escanear QR de fichaje (solo empleados)
 function EscanearQRFichaje({ onQRScanned }: { onQRScanned: (data: { sucursal_id: string }) => void }) {
   const [showScanner, setShowScanner] = useState(false)
 
@@ -90,7 +88,6 @@ function EscanearQRFichaje({ onQRScanned }: { onQRScanned: (data: { sucursal_id:
   )
 }
 
-// AppRouter: Renderiza el componente correcto según el rol del usuario
 function AppRouter({ userProfile, onLogout, sucursalId }: { userProfile: UserProfile, onLogout: () => void, sucursalId: string }) {
     if (userProfile.rol === "dueño") {
         return <DashboardDueno onBack={onLogout} sucursalId={sucursalId} />
@@ -113,8 +110,6 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [hasProfile, setHasProfile] = useState(false)
-  
-  // ✅ Nuevo Estado: Guardamos la sucursal elegida
   const [sucursalId, setSucursalId] = useState<string | null>(null)
 
   const fetchProfile = async (userId: string) => {
@@ -147,78 +142,73 @@ export default function HomePage() {
     }
   }
 
+  // 1. Manejo de Sesión
   useEffect(() => {
-    const handleSessionChange = (session: any) => {
-        setSession(session)
-        if (session?.user) {
-            fetchProfile(session.user.id)
-        } else {
-            setLoading(false)
-            setUserProfile(null)
-            setHasProfile(false)
-            setSucursalId(null) // ✅ Reseteamos sucursal al salir
-        }
-    }
-    
     supabase.auth.getSession().then(({ data: { session } }) => {
-        handleSessionChange(session)
+        setSession(session)
+        if (session?.user) fetchProfile(session.user.id)
+        else setLoading(false)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      handleSessionChange(session)
+      setSession(session)
+      if (session?.user) fetchProfile(session.user.id)
+      else {
+        setLoading(false)
+        setUserProfile(null)
+        setHasProfile(false)
+        setSucursalId(null)
+      }
     })
 
     return () => subscription.unsubscribe()
   }, [])
 
-  // Leer sucursalId de la URL DESPUÉS de que la sesión esté lista
+  // 2. Lógica de Sincronización de Sucursal (URL y Asistencia Activa)
   useEffect(() => {
-    if (session && userProfile) {
-      // Verificar si hay sucursalId en la URL (viene de /fichaje)
+    const sincronizarSucursal = async () => {
+      if (!session || !userProfile) return
+
+      // Prioridad 1: URL (viene de redirección de fichaje)
       const urlParams = new URLSearchParams(window.location.search)
-      const sucursalIdFromUrl = urlParams.get('sucursal_id')
-      if (sucursalIdFromUrl && !sucursalId) {
-        setSucursalId(sucursalIdFromUrl)
-        // Limpiar la URL
-        window.history.replaceState({}, '', window.location.pathname)
+      const idFromUrl = urlParams.get('sucursal_id')
+      
+      if (idFromUrl) {
+        setSucursalId(idFromUrl)
+        window.history.replaceState({}, '', '/') // Limpiar URL limpia
+        return
       }
-    }
-  }, [session, userProfile, sucursalId])
 
-  // Si el empleado tiene asistencia activa pero no tiene sucursalId, detectarla automáticamente
-  useEffect(() => {
-    const detectarSucursalActiva = async () => {
-      if (userProfile?.rol === "empleado" && !sucursalId && session?.user) {
-        try {
-          const { data: asistencia } = await supabase
-            .from('asistencia')
-            .select('sucursal_id')
-            .eq('empleado_id', session.user.id)
-            .is('salida', null)
-            .maybeSingle()
+      // Prioridad 2: Asistencia activa en DB (si es empleado y no hay ID seleccionado)
+      if (userProfile.rol === "empleado" && !sucursalId) {
+        const { data: asistencia } = await supabase
+          .from('asistencia')
+          .select('sucursal_id')
+          .eq('empleado_id', session.user.id)
+          .is('salida', null)
+          .maybeSingle()
 
-          if (asistencia?.sucursal_id) {
-            setSucursalId(asistencia.sucursal_id)
-          }
-        } catch (error) {
-          console.error("Error detectando sucursal activa:", error)
+        if (asistencia?.sucursal_id) {
+          setSucursalId(asistencia.sucursal_id)
         }
       }
     }
 
-    if (userProfile && session) {
-      detectarSucursalActiva()
-    }
-  }, [userProfile, session, sucursalId])
+    sincronizarSucursal()
+  }, [session, userProfile])
 
   const handleLogout = async () => {
     setLoading(true)
     await supabase.auth.signOut()
-    setSucursalId(null) // ✅ Limpiamos sucursal
+    setSucursalId(null)
     setLoading(false)
   }
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-10 w-10 animate-spin text-primary" /></div>
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center">
+      <Loader2 className="h-10 w-10 animate-spin text-primary" />
+    </div>
+  )
 
   if (!session) return <AuthForm />
 
@@ -232,13 +222,10 @@ export default function HomePage() {
   }
 
   if (session && userProfile) {
-    // ✅ PASO CRÍTICO: Si no hay sucursal seleccionada
     if (!sucursalId) {
-        // Para empleados: mostrar scanner de QR
         if (userProfile.rol === "empleado") {
             return <EscanearQRFichaje onQRScanned={(data) => setSucursalId(data.sucursal_id)} />
         }
-        // Para dueños: mostrar selector de sucursal
         return (
             <SeleccionarSucursal 
                 organizationId={userProfile.organization_id} 
@@ -249,20 +236,8 @@ export default function HomePage() {
         )
     }
 
-    // ✅ Si ya eligió/escaneó, mostramos la App pasándole el ID
     return <AppRouter userProfile={userProfile} onLogout={handleLogout} sucursalId={sucursalId} />
   }
 
-  return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-        <Card className="p-6 text-center max-w-md">
-            <Package className="h-10 w-10 mx-auto text-yellow-500" />
-            <h2 className="text-lg font-bold mt-4">Cargando...</h2>
-            <div className="flex gap-2 justify-center mt-4">
-                <Button onClick={() => fetchProfile(session.user.id)} variant="outline">Reintentar</Button>
-                <Button onClick={handleLogout} variant="destructive">Salir</Button>
-            </div>
-        </Card>
-    </div>
-  )
+  return null
 }

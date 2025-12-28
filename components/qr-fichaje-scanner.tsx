@@ -102,6 +102,14 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
     }
 
     checkPermissions()
+
+    // Timeout de seguridad: si después de 5 segundos el loading sigue en true, forzar a false
+    const loadingTimeout = setTimeout(() => {
+      console.log("⏰ Timeout de seguridad: forzando loading a false")
+      setLoading(false)
+    }, 5000)
+
+    return () => clearTimeout(loadingTimeout)
   }, [isOpen])
 
   // Función helper para limpiar el stream de video (previene memory leaks)
@@ -322,13 +330,9 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
         const handleLoadedMetadata = () => {
           console.log("📹 Video metadata cargada, readyState:", video.readyState)
           saveStream()
-          // Solo cambiar estado si NO estamos ya escaneando
-          if (!scanning) {
-            setScanning(true)
-          }
-          if (loading) {
-            setLoading(false)
-          }
+          // Cambiar estados incondicionalmente para evitar problemas con closures
+          setScanning(true)
+          setLoading(false)
         }
 
         video.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true })

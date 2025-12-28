@@ -107,7 +107,7 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
     const loadingTimeout = setTimeout(() => {
       console.log("⏰ Timeout de seguridad: forzando loading a false")
       setLoading(false)
-    }, 5000)
+    }, 10000)
 
     return () => clearTimeout(loadingTimeout)
   }, [isOpen])

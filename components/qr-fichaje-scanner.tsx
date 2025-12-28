@@ -65,19 +65,19 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
         try {
           const getUserMediaWithTimeout = () => {
             return Promise.race([
-              navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: "environment" } 
+              navigator.mediaDevices.getUserMedia({
+                video: { facingMode: "environment" }
               }),
-              new Promise<never>((_, reject) => 
+              new Promise<never>((_, reject) =>
                 setTimeout(() => reject(new Error("Timeout: El acceso a la cámara está tardando demasiado. Intenta nuevamente.")), 10000)
               )
             ])
           }
-          
+
           const stream = await getUserMediaWithTimeout()
           stream.getTracks().forEach(track => track.stop()) // Detener inmediatamente
           setHasPermission(true)
-          setLoading(false)
+          // IMPORTANTE: Ya no setLoading(false) aquí - dejar que el video lo maneje
         } catch (err: any) {
           if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
             setError("Se necesita permiso para acceder a la cámara. Por favor, permite el acceso en la configuración de tu navegador.")
@@ -132,8 +132,8 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
   const { ref: zxingRef } = useZxing({
     onDecodeResult(result: any) {
       console.log("🎯 onDecodeResult llamado", { scanning, isOpen, isProcessing: isProcessingRef.current })
-      
-      if (!scanning || !isOpen || isProcessingRef.current) {
+
+      if (!isOpen || isProcessingRef.current) {
         console.log("⚠️ Condiciones no cumplidas, ignorando")
         return
       }
@@ -252,16 +252,18 @@ export default function QRFichajeScanner({ onQRScanned, onClose, isOpen }: QRFic
         console.warn("Error de decodificación (puede ser normal):", err.message)
       }
     },
-    constraints: { 
-      video: { 
+    constraints: {
+      video: {
         facingMode: "environment",
         width: { ideal: 1280 },
         height: { ideal: 720 }
-      }, 
-      audio: false 
+      },
+      audio: false
     },
     timeBetweenDecodingAttempts: 300,
-    pause: !isOpen || !scanning || !hasPermission || isProcessingRef.current || loading
+    // CRÍTICO: NO pausar mientras loading=true, porque necesitamos que el video cargue primero
+    // Solo pausar si: no está abierto, sin permisos, o procesando
+    pause: !isOpen || hasPermission === false || isProcessingRef.current
   } as any)
 
   // Función adicional para limpiar desde zxingRef directamente

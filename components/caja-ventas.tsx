@@ -4,14 +4,15 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Trash2, ShoppingCart, Plus, Minus, Loader2, ScanBarcode, ReceiptText, X } from "lucide-react"
+import { Trash2, ShoppingCart, Plus, Minus, Loader2, ScanBarcode, ReceiptText, X, AlertCircle } from "lucide-react"
 import { toast } from "sonner"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { generarTicketVenta } from "@/lib/generar-ticket"
-import { useZxing } from "react-zxing"
+// 1. Importamos la librería robusta
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode"
 
 interface Producto {
   id: string
@@ -32,61 +33,101 @@ interface CajaVentasProps {
   onVentaCompletada?: () => void 
 }
 
-// --- COMPONENTE SCANNER PARA PRODUCTOS (CÓDIGO DE BARRAS) ---
+// --- COMPONENTE SCANNER OPTIMIZADO PARA PRODUCTOS ---
 function BarcodeScannerVentas({ onResult, onClose }: { onResult: (code: string) => void, onClose: () => void }) {
+  const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null)
-
-  const { ref } = useZxing({
-    onDecodeResult(result: any) {
-      const code = result.getText ? result.getText() : String(result)
-      if (navigator.vibrate) navigator.vibrate(100)
-      onResult(code)
-    },
-    onError(err: any) {
-      if (err.name !== "NotFoundError") console.error("Error scanner:", err)
-    },
-    constraints: { 
-      video: { 
-        facingMode: { ideal: "environment" },
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      }, 
-      audio: false 
-    },
-    paused: false
-  } as any)
+  const scannerRef = useRef<Html5Qrcode | null>(null)
+  
+  // ID único para evitar conflictos con el scanner de fichaje
+  const scannerId = "reader-ventas"
 
   useEffect(() => {
-    const checkPermissions = async () => {
+    // 2. Lógica de inicialización con delay de seguridad para Vercel
+    const initTimer = setTimeout(async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true })
-        stream.getTracks().forEach(track => track.stop())
-        setHasPermission(true)
-      } catch (err) {
-        setHasPermission(false)
-        toast.error("No se pudo acceder a la cámara")
-      } finally {
+        if (!document.getElementById(scannerId)) {
+          throw new Error("El contenedor de video no está listo.")
+        }
+
+        const html5QrCode = new Html5Qrcode(scannerId)
+        scannerRef.current = html5QrCode
+
+        const config = {
+          fps: 20,
+          // Caja rectangular mejor adaptada para códigos de barras largos
+          qrbox: { width: 280, height: 200 }, 
+          aspectRatio: 1.0,
+          // Soportamos todos los formatos comunes de productos + QR
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.QR_CODE,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E
+          ]
+        }
+
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          config,
+          (decodedText) => {
+            // Éxito: vibramos y devolvemos el código
+            if (navigator.vibrate) navigator.vibrate(100)
+            onResult(decodedText)
+          },
+          () => { 
+            // Error silencioso de frame
+          }
+        )
+        setLoading(false)
+      } catch (err: any) {
+        console.error("Error crítico scanner ventas:", err)
+        setError("No se pudo iniciar la cámara. Verifica los permisos.")
         setLoading(false)
       }
+    }, 500) // Delay de 500ms crítico
+
+    // Cleanup
+    return () => {
+      clearTimeout(initTimer)
+      if (scannerRef.current?.isScanning) {
+        scannerRef.current.stop().catch(console.error)
+        scannerRef.current.clear()
+      }
     }
-    checkPermissions()
-  }, [])
+  }, [onResult])
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center bg-black min-h-[400px] p-6 text-white text-center space-y-4">
+        <AlertCircle className="h-12 w-12 text-red-500" />
+        <p className="font-bold">Error de cámara</p>
+        <p className="text-sm text-slate-400">{error}</p>
+        <Button onClick={onClose} variant="destructive" className="w-full">Cerrar</Button>
+      </div>
+    )
+  }
 
   return (
     <div className="relative flex flex-col items-center justify-center bg-black w-full min-h-[400px]">
       {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-50 text-white">
+        <div className="absolute inset-0 flex items-center justify-center bg-black z-50 text-white">
           <Loader2 className="h-8 w-8 animate-spin mb-2" />
-          <p>Cargando escáner...</p>
+          <p>Conectando lector...</p>
         </div>
       )}
-      <video ref={ref} className="w-full h-full object-cover max-h-[70vh]" playsInline muted autoPlay />
-      <div className="absolute inset-0 border-2 border-primary/50 pointer-events-none">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-40 border-2 border-white/80 rounded-lg shadow-[0_0_0_999px_rgba(0,0,0,0.5)]" />
-      </div>
-      <div className="absolute bottom-4 flex flex-col gap-2 z-50">
-        <Button variant="destructive" className="rounded-full px-8" onClick={onClose}>
+      
+      {/* Contenedor donde se inyecta el video */}
+      <div id={scannerId} className="w-full h-full" />
+      
+      <div className="absolute bottom-4 flex flex-col gap-2 z-50 pointer-events-none">
+        <Button 
+          variant="destructive" 
+          className="rounded-full px-8 pointer-events-auto shadow-xl" 
+          onClick={onClose}
+        >
           <X className="mr-2 h-4 w-4" /> Cancelar
         </Button>
       </div>
@@ -102,6 +143,7 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
   const [procesandoVenta, setProcesandoVenta] = useState(false)
   const [metodoPago, setMetodoPago] = useState<"efectivo" | "tarjeta" | "billetera_virtual">("efectivo")
   const [showScanner, setShowScanner] = useState(false)
+  
   const inputRef = useRef<HTMLInputElement>(null)
 
   const agregarAlCarrito = useCallback((producto: Producto) => {
@@ -130,6 +172,7 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
         .select('*')
         .eq('sucursal_id', sucursalId) 
         .or(`nombre.ilike.%${query}%,codigo_barras.eq.${query}`)
+        .not('nombre', 'in', '("Carga SUBE","Carga Virtual")') 
         .limit(5)
 
       if (error) throw error
@@ -158,6 +201,7 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
 
   const handleBarcodeScanned = (code: string) => {
     setShowScanner(false)
+    toast.success("Código detectado", { description: "Buscando producto..." })
     buscarProductos(code, true)
   }
 
@@ -285,6 +329,22 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
         <div className="flex justify-between font-black text-2xl tracking-tighter">
           <span className="text-slate-400 text-xs uppercase">Total</span>
           <span>$ {calcularTotal().toLocaleString('es-AR')}</span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+            {(['efectivo', 'billetera_virtual', 'tarjeta'] as const).map((m) => (
+                <button 
+                    key={m}
+                    onClick={() => setMetodoPago(m)}
+                    className={cn(
+                        "flex flex-col items-center gap-1 py-3 rounded-xl border-2 font-bold text-[9px] uppercase transition-all", 
+                        metodoPago === m ? "bg-slate-900 border-slate-900 text-white" : "bg-white border-slate-100 text-slate-400"
+                    )}
+                >
+                    {m === 'efectivo' && 'Efectivo'}
+                    {m === 'billetera_virtual' && 'Virtual'}
+                    {m === 'tarjeta' && 'Tarjeta'}
+                </button>
+            ))}
         </div>
         <Button 
           className="w-full h-20 text-xl font-black rounded-[1.5rem] bg-blue-600 hover:bg-blue-700" 

@@ -3,11 +3,16 @@ import { test, expect, chromium } from '@playwright/test';
 /**
  * Test directo para producción - NO usa webServer
  * Ejecutar: npx playwright test e2e/qr-scanner-prod-direct.spec.ts --project=chromium
+ *
+ * IMPORTANTE: Configurar variables de entorno antes de ejecutar:
+ * - TEST_BASE_URL (default: https://app-cadena-kiosco-24-7.vercel.app)
+ * - TEST_EMPLOYEE_EMAIL
+ * - TEST_EMPLOYEE_PASSWORD
  */
 
-const BASE_URL = 'https://app-cadena-kiosco-24-7.vercel.app';
-const EMPLOYEE_EMAIL = 'entornomincyt@gmail.com';
-const EMPLOYEE_PASSWORD = 'RamYLu.2021';
+const BASE_URL = process.env.TEST_BASE_URL || 'https://app-cadena-kiosco-24-7.vercel.app';
+const EMPLOYEE_EMAIL = process.env.TEST_EMPLOYEE_EMAIL || '';
+const EMPLOYEE_PASSWORD = process.env.TEST_EMPLOYEE_PASSWORD || '';
 
 test.describe('QR Scanner - Producción (Directo)', () => {
   test('Capturar logs y errores del scanner', async () => {
@@ -117,6 +122,7 @@ test.describe('QR Scanner - Producción (Directo)', () => {
     }
   });
 });
+
 
 
 

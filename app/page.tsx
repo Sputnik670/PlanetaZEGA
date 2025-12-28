@@ -90,14 +90,12 @@ function EscanearQRFichaje({ onQRScanned }: { onQRScanned: (data: { sucursal_id:
   )
 }
 
-// ✅ AppRouter ahora recibe sucursalId
+// AppRouter: Renderiza el componente correcto según el rol del usuario
 function AppRouter({ userProfile, onLogout, sucursalId }: { userProfile: UserProfile, onLogout: () => void, sucursalId: string }) {
     if (userProfile.rol === "dueño") {
-        // @ts-ignore - (El siguiente paso será actualizar DashboardDueno para que acepte esta prop)
-        return <DashboardDueno onBack={onLogout} sucursalId={sucursalId} /> 
+        return <DashboardDueno onBack={onLogout} sucursalId={sucursalId} />
     }
     if (userProfile.rol === "empleado") {
-        // @ts-ignore - (El siguiente paso será actualizar VistaEmpleado para que acepte esta prop)
         return <VistaEmpleado onBack={onLogout} sucursalId={sucursalId} />
     }
     return (

@@ -17,10 +17,14 @@ function FichajeContent() {
   const [tipo, setTipo] = useState<"entrada" | "salida" | null>(null)
   const [sucursalNombre, setSucursalNombre] = useState("")
   const [sucursalId, setSucursalId] = useState<string | null>(null)
+  const [procesado, setProcesado] = useState(false) // Prevenir reprocesamiento
 
   useEffect(() => {
-    procesarFichaje()
-  }, [])
+    // Solo procesar si no se ha procesado ya
+    if (!procesado) {
+      procesarFichaje()
+    }
+  }, [procesado])
 
   const procesarFichaje = async () => {
     try {
@@ -80,10 +84,10 @@ function FichajeContent() {
         throw new Error("No tienes acceso a esta sucursal")
       }
 
-      // Verificar estado actual de fichaje
+      // Verificar estado actual de fichaje (en TODAS las sucursales)
       const { data: asistenciaActual } = await supabase
         .from('asistencia')
-        .select('id, sucursal_id')
+        .select('id, sucursal_id, sucursales(nombre)')
         .eq('empleado_id', user.id)
         .is('salida', null)
         .maybeSingle()
@@ -91,6 +95,11 @@ function FichajeContent() {
       // Validar lógica de entrada/salida
       if (tipoParam === "entrada") {
         if (asistenciaActual) {
+          // Verificar si la asistencia abierta es de otra sucursal
+          if (asistenciaActual.sucursal_id !== sucursalId) {
+            const otraSucursal = (asistenciaActual.sucursales as any)?.nombre || "otra sucursal"
+            throw new Error(`Ya tienes una entrada activa en ${otraSucursal}. Debes fichar la salida allí primero.`)
+          }
           throw new Error(`Ya tienes una entrada registrada. Debes fichar la salida primero.`)
         }
 
@@ -140,6 +149,9 @@ function FichajeContent() {
         }
       }
 
+      // Marcar como procesado ANTES de redirección para prevenir doble procesamiento
+      setProcesado(true)
+
       // Redirigir a la app con el sucursalId en la URL para que se establezca automáticamente
       // Usar router.push en lugar de window.location.href para mantener la sesión
       setTimeout(() => {
@@ -152,6 +164,7 @@ function FichajeContent() {
       setResultado("error")
       setMensaje(err.message || "Error al procesar el fichaje")
       toast.error("Error", { description: err.message })
+      setProcesado(false) // Permitir reintentar en caso de error
     } finally {
       setLoading(false)
     }

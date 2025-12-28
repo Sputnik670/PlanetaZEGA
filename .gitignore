@@ -38,6 +38,9 @@ yarn-error.log*
 # Local env files (can opt-in for committing if needed)
 .env*.local
 .env*
+.env.test
+*.env.test
+.env.production.local
 
 # Vercel
 .vercel

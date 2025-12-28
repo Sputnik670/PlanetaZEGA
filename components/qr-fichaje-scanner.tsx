@@ -8,9 +8,8 @@ import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Loader2, X, AlertCircle } from "lucide-react"
 import { toast } from "sonner"
 
-// Interfaz restaurada para compatibilidad con page.tsx
 interface QRFichajeScannerProps {
-  onQRScanned: (data: any) => void
+  onQRScanned?: (data: any) => void
   onClose: () => void
   isOpen: boolean
 }
@@ -22,21 +21,35 @@ export default function QRFichajeScanner({ onClose, isOpen, onQRScanned }: QRFic
   const scannerRef = useRef<Html5Qrcode | null>(null)
   const isProcessingRef = useRef(false)
 
+  // ID único para el contenedor del video
   const scannerId = "reader-fichaje-v2"
 
   useEffect(() => {
     if (!isOpen) return
 
-    const startScanner = async () => {
+    // 1. Limpieza preventiva de instancias anteriores
+    if (scannerRef.current?.isScanning) {
+      scannerRef.current.stop().catch(console.error)
+    }
+
+    // 2. Retraso crítico para Vercel/Móviles:
+    // Esperamos 500ms a que el Dialog termine de renderizarse en el DOM
+    // antes de inyectar el video. Esto evita el error "Element not found" o "Camera unavailable".
+    const initTimer = setTimeout(async () => {
       try {
+        // Asegurarse de que el elemento existe antes de instanciar
+        if (!document.getElementById(scannerId)) {
+          throw new Error("El contenedor de video no está listo.")
+        }
+
         const html5QrCode = new Html5Qrcode(scannerId)
         scannerRef.current = html5QrCode
 
         const config = {
-          fps: 20, // Aumentamos FPS para mayor fluidez
-          qrbox: { width: 280, height: 280 }, // Caja visual más grande para facilitar el encuadre
+          fps: 20, 
+          qrbox: { width: 250, height: 250 },
           aspectRatio: 1.0,
-          formatsToSupport: [ Html5QrcodeSupportedFormats.QR_CODE ]
+          formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE]
         }
 
         await html5QrCode.start(
@@ -46,23 +59,27 @@ export default function QRFichajeScanner({ onClose, isOpen, onQRScanned }: QRFic
             if (isProcessingRef.current) return
             handleScanSuccess(decodedText)
           },
-          () => {
-            // Error silencioso mientras busca
+          () => { 
+            // Error silencioso de frame (normal mientras busca)
           }
         )
         setLoading(false)
       } catch (err: any) {
-        console.error("Error iniciando scanner:", err)
-        setError("Error al acceder a la cámara. Asegúrate de dar permisos.")
-        setLoading(false)
+        console.error("Error crítico scanner:", err)
+        // Solo mostramos error si no fue cancelado por el usuario
+        if (isOpen) {
+          setError("No se pudo iniciar la cámara. Por favor cierra y vuelve a intentar.")
+          setLoading(false)
+        }
       }
-    }
+    }, 500)
 
-    startScanner()
-
+    // Cleanup al cerrar
     return () => {
+      clearTimeout(initTimer) // Cancelar inicio si el usuario cierra rápido
       if (scannerRef.current?.isScanning) {
         scannerRef.current.stop().catch(console.error)
+        scannerRef.current.clear()
       }
     }
   }, [isOpen])
@@ -72,7 +89,6 @@ export default function QRFichajeScanner({ onClose, isOpen, onQRScanned }: QRFic
     let redirectUrl: string | null = null
 
     try {
-      // Lógica de detección ultra-flexible para cualquier entorno
       if (text.includes('/fichaje?')) {
         redirectUrl = text.substring(text.indexOf('/fichaje'))
       } else if (text.startsWith('/fichaje')) {
@@ -90,7 +106,6 @@ export default function QRFichajeScanner({ onClose, isOpen, onQRScanned }: QRFic
     if (redirectUrl) {
       toast.success("Código detectado")
       
-      // Notificar a la app principal (page.tsx)
       if (onQRScanned) {
         onQRScanned({ text })
       }
@@ -99,7 +114,7 @@ export default function QRFichajeScanner({ onClose, isOpen, onQRScanned }: QRFic
       router.push(redirectUrl)
     } else {
       isProcessingRef.current = false
-      toast.error("El QR no parece ser un código de fichaje válido")
+      toast.error("QR no válido para fichaje")
     }
   }
 
@@ -107,9 +122,10 @@ export default function QRFichajeScanner({ onClose, isOpen, onQRScanned }: QRFic
     try {
       if (scannerRef.current?.isScanning) {
         await scannerRef.current.stop()
+        scannerRef.current.clear()
       }
     } catch (err) {
-      console.error("Error al detener el scanner:", err)
+      console.error("Error al detener:", err)
     } finally {
       onClose()
     }
@@ -138,12 +154,12 @@ export default function QRFichajeScanner({ onClose, isOpen, onQRScanned }: QRFic
             <div className="absolute inset-0 flex items-center justify-center bg-black z-50">
               <div className="text-center text-white space-y-4">
                 <Loader2 className="h-10 w-10 animate-spin mx-auto text-blue-500" />
-                <p className="text-sm font-medium">Iniciando motor de escaneo...</p>
+                <p className="text-sm font-medium">Conectando cámara...</p>
               </div>
             </div>
           )}
           
-          {/* Contenedor del motor html5-qrcode */}
+          {/* DIV CRÍTICO: html5-qrcode inyecta el video aquí */}
           <div id={scannerId} className="w-full h-full" />
           
           <div className="absolute bottom-8 w-full flex flex-col items-center gap-4 z-50 pointer-events-none">

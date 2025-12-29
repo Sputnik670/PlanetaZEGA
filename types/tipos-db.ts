@@ -105,6 +105,13 @@ export type Database = {
             referencedRelation: "vista_metricas_por_sucursal"
             referencedColumns: ["sucursal_id"]
           },
+          {
+            foreignKeyName: "actividades_empleados_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
         ]
       }
       alertas_vencimientos: {
@@ -208,31 +215,38 @@ export type Database = {
             referencedRelation: "vista_metricas_por_sucursal"
             referencedColumns: ["sucursal_id"]
           },
+          {
+            foreignKeyName: "alertas_vencimientos_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
         ]
       }
       asistencia: {
         Row: {
-          created_at: string | null
+          created_at: string
           empleado_id: string
-          entrada: string | null
+          entrada: string
           id: string
           organization_id: string
           salida: string | null
           sucursal_id: string
         }
         Insert: {
-          created_at?: string | null
+          created_at?: string
           empleado_id: string
-          entrada?: string | null
+          entrada?: string
           id?: string
           organization_id: string
           salida?: string | null
           sucursal_id: string
         }
         Update: {
-          created_at?: string | null
+          created_at?: string
           empleado_id?: string
-          entrada?: string | null
+          entrada?: string
           id?: string
           organization_id?: string
           salida?: string | null
@@ -295,14 +309,21 @@ export type Database = {
             referencedRelation: "vista_metricas_por_sucursal"
             referencedColumns: ["sucursal_id"]
           },
+          {
+            foreignKeyName: "asistencia_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
         ]
       }
       caja_diaria: {
         Row: {
-          created_at: string | null
+          created_at: string
           diferencia: number | null
           empleado_id: string | null
-          fecha_apertura: string | null
+          fecha_apertura: string
           fecha_cierre: string | null
           id: string
           monto_final: number | null
@@ -311,10 +332,10 @@ export type Database = {
           sucursal_id: string
         }
         Insert: {
-          created_at?: string | null
+          created_at?: string
           diferencia?: number | null
           empleado_id?: string | null
-          fecha_apertura?: string | null
+          fecha_apertura?: string
           fecha_cierre?: string | null
           id?: string
           monto_final?: number | null
@@ -323,10 +344,10 @@ export type Database = {
           sucursal_id: string
         }
         Update: {
-          created_at?: string | null
+          created_at?: string
           diferencia?: number | null
           empleado_id?: string | null
-          fecha_apertura?: string | null
+          fecha_apertura?: string
           fecha_cierre?: string | null
           id?: string
           monto_final?: number | null
@@ -391,11 +412,19 @@ export type Database = {
             referencedRelation: "vista_metricas_por_sucursal"
             referencedColumns: ["sucursal_id"]
           },
+          {
+            foreignKeyName: "caja_diaria_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
         ]
       }
       compras: {
         Row: {
           comprobante_nro: string | null
+          created_at: string
           estado_pago: string | null
           fecha_compra: string | null
           id: string
@@ -407,17 +436,19 @@ export type Database = {
         }
         Insert: {
           comprobante_nro?: string | null
+          created_at?: string
           estado_pago?: string | null
           fecha_compra?: string | null
           id?: string
           medio_pago?: string | null
-          monto_total?: number
+          monto_total: number
           organization_id: string
           proveedor_id?: string | null
           vencimiento_pago?: string | null
         }
         Update: {
           comprobante_nro?: string | null
+          created_at?: string
           estado_pago?: string | null
           fecha_compra?: string | null
           id?: string
@@ -449,7 +480,7 @@ export type Database = {
           costo_anterior: number | null
           costo_nuevo: number | null
           empleado_id: string | null
-          fecha_cambio: string | null
+          fecha_cambio: string
           id: string
           organization_id: string
           precio_venta_anterior: number | null
@@ -460,7 +491,7 @@ export type Database = {
           costo_anterior?: number | null
           costo_nuevo?: number | null
           empleado_id?: string | null
-          fecha_cambio?: string | null
+          fecha_cambio?: string
           id?: string
           organization_id: string
           precio_venta_anterior?: number | null
@@ -471,7 +502,7 @@ export type Database = {
           costo_anterior?: number | null
           costo_nuevo?: number | null
           empleado_id?: string | null
-          fecha_cambio?: string | null
+          fecha_cambio?: string
           id?: string
           organization_id?: string
           precio_venta_anterior?: number | null
@@ -519,6 +550,13 @@ export type Database = {
             columns: ["producto_id"]
             isOneToOne: false
             referencedRelation: "view_productos_con_stock"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "historial_precios_producto_id_fkey"
+            columns: ["producto_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
             referencedColumns: ["id"]
           },
         ]
@@ -626,47 +664,54 @@ export type Database = {
             referencedRelation: "vista_metricas_por_sucursal"
             referencedColumns: ["sucursal_id"]
           },
+          {
+            foreignKeyName: "metricas_diarias_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
         ]
       }
       misiones: {
         Row: {
           caja_diaria_id: string | null
-          created_at: string | null
+          created_at: string
           descripcion: string | null
           empleado_id: string
-          es_completada: boolean | null
+          es_completada: boolean
           id: string
-          objetivo_unidades: number | null
+          objetivo_unidades: number
           organization_id: string
-          puntos: number | null
+          puntos: number
           tipo: string
-          unidades_completadas: number | null
+          unidades_completadas: number
         }
         Insert: {
           caja_diaria_id?: string | null
-          created_at?: string | null
+          created_at?: string
           descripcion?: string | null
           empleado_id: string
-          es_completada?: boolean | null
+          es_completada?: boolean
           id?: string
-          objetivo_unidades?: number | null
+          objetivo_unidades?: number
           organization_id: string
-          puntos?: number | null
+          puntos?: number
           tipo: string
-          unidades_completadas?: number | null
+          unidades_completadas?: number
         }
         Update: {
           caja_diaria_id?: string | null
-          created_at?: string | null
+          created_at?: string
           descripcion?: string | null
           empleado_id?: string
-          es_completada?: boolean | null
+          es_completada?: boolean
           id?: string
-          objetivo_unidades?: number | null
+          objetivo_unidades?: number
           organization_id?: string
-          puntos?: number | null
+          puntos?: number
           tipo?: string
-          unidades_completadas?: number | null
+          unidades_completadas?: number
         }
         Relationships: [
           {
@@ -710,7 +755,7 @@ export type Database = {
         Row: {
           caja_diaria_id: string
           categoria: string | null
-          created_at: string | null
+          created_at: string
           descripcion: string
           id: string
           monto: number
@@ -720,7 +765,7 @@ export type Database = {
         Insert: {
           caja_diaria_id: string
           categoria?: string | null
-          created_at?: string | null
+          created_at?: string
           descripcion: string
           id?: string
           monto: number
@@ -730,7 +775,7 @@ export type Database = {
         Update: {
           caja_diaria_id?: string
           categoria?: string | null
-          created_at?: string | null
+          created_at?: string
           descripcion?: string
           id?: string
           monto?: number
@@ -756,19 +801,19 @@ export type Database = {
       }
       organizations: {
         Row: {
-          created_at: string | null
+          created_at: string
           id: string
           nombre: string
           plan: string | null
         }
         Insert: {
-          created_at?: string | null
+          created_at?: string
           id?: string
           nombre: string
           plan?: string | null
         }
         Update: {
-          created_at?: string | null
+          created_at?: string
           id?: string
           nombre?: string
           plan?: string | null
@@ -777,7 +822,7 @@ export type Database = {
       }
       pending_invites: {
         Row: {
-          created_at: string | null
+          created_at: string
           email: string
           id: string
           organization_id: string
@@ -785,7 +830,7 @@ export type Database = {
           sucursal_id: string | null
         }
         Insert: {
-          created_at?: string | null
+          created_at?: string
           email: string
           id?: string
           organization_id: string
@@ -793,7 +838,7 @@ export type Database = {
           sucursal_id?: string | null
         }
         Update: {
-          created_at?: string | null
+          created_at?: string
           email?: string
           id?: string
           organization_id?: string
@@ -836,50 +881,57 @@ export type Database = {
             referencedRelation: "vista_metricas_por_sucursal"
             referencedColumns: ["sucursal_id"]
           },
+          {
+            foreignKeyName: "pending_invites_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
         ]
       }
       perfiles: {
         Row: {
-          activo: boolean | null
-          created_at: string | null
+          activo: boolean
+          created_at: string
           email: string | null
           id: string
-          nivel: number | null
+          nivel: number
           nombre: string | null
           organization_id: string | null
-          puntos: number | null
+          puntos: number
           rol: string
           sucursal_actual_id: string | null
           sucursal_id: string | null
-          xp: number | null
+          xp: number
         }
         Insert: {
-          activo?: boolean | null
-          created_at?: string | null
+          activo?: boolean
+          created_at?: string
           email?: string | null
           id: string
-          nivel?: number | null
+          nivel?: number
           nombre?: string | null
           organization_id?: string | null
-          puntos?: number | null
+          puntos?: number
           rol: string
           sucursal_actual_id?: string | null
           sucursal_id?: string | null
-          xp?: number | null
+          xp?: number
         }
         Update: {
-          activo?: boolean | null
-          created_at?: string | null
+          activo?: boolean
+          created_at?: string
           email?: string | null
           id?: string
-          nivel?: number | null
+          nivel?: number
           nombre?: string | null
           organization_id?: string | null
-          puntos?: number | null
+          puntos?: number
           rol?: string
           sucursal_actual_id?: string | null
           sucursal_id?: string | null
-          xp?: number | null
+          xp?: number
         }
         Relationships: [
           {
@@ -918,6 +970,13 @@ export type Database = {
             referencedColumns: ["sucursal_id"]
           },
           {
+            foreignKeyName: "perfiles_sucursal_actual_id_fkey"
+            columns: ["sucursal_actual_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
             foreignKeyName: "perfiles_sucursal_id_fkey"
             columns: ["sucursal_id"]
             isOneToOne: false
@@ -945,34 +1004,41 @@ export type Database = {
             referencedRelation: "vista_metricas_por_sucursal"
             referencedColumns: ["sucursal_id"]
           },
+          {
+            foreignKeyName: "perfiles_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
         ]
       }
       plantillas_misiones: {
         Row: {
-          activa: boolean | null
-          created_at: string | null
+          activa: boolean
+          created_at: string
           descripcion: string
           id: string
           organization_id: string
-          puntos: number | null
+          puntos: number
           sucursal_id: string | null
         }
         Insert: {
-          activa?: boolean | null
-          created_at?: string | null
+          activa?: boolean
+          created_at?: string
           descripcion: string
           id?: string
           organization_id: string
-          puntos?: number | null
+          puntos?: number
           sucursal_id?: string | null
         }
         Update: {
-          activa?: boolean | null
-          created_at?: string | null
+          activa?: boolean
+          created_at?: string
           descripcion?: string
           id?: string
           organization_id?: string
-          puntos?: number | null
+          puntos?: number
           sucursal_id?: string | null
         }
         Relationships: [
@@ -1011,6 +1077,13 @@ export type Database = {
             referencedRelation: "vista_metricas_por_sucursal"
             referencedColumns: ["sucursal_id"]
           },
+          {
+            foreignKeyName: "plantillas_misiones_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
         ]
       }
       productos: {
@@ -1018,40 +1091,40 @@ export type Database = {
           categoria: string | null
           codigo_barras: string | null
           costo: number
-          created_at: string | null
+          created_at: string
           emoji: string | null
           id: string
           nombre: string
           organization_id: string
           precio_venta: number
-          stock_minimo: number | null
-          vida_util_dias: number | null
+          stock_minimo: number
+          vida_util_dias: number
         }
         Insert: {
           categoria?: string | null
           codigo_barras?: string | null
           costo?: number
-          created_at?: string | null
+          created_at?: string
           emoji?: string | null
           id?: string
           nombre: string
           organization_id: string
           precio_venta?: number
-          stock_minimo?: number | null
-          vida_util_dias?: number | null
+          stock_minimo?: number
+          vida_util_dias?: number
         }
         Update: {
           categoria?: string | null
           codigo_barras?: string | null
           costo?: number
-          created_at?: string | null
+          created_at?: string
           emoji?: string | null
           id?: string
           nombre?: string
           organization_id?: string
           precio_venta?: number
-          stock_minimo?: number | null
-          vida_util_dias?: number | null
+          stock_minimo?: number
+          vida_util_dias?: number
         }
         Relationships: [
           {
@@ -1067,39 +1140,39 @@ export type Database = {
         Row: {
           condicion_pago: string | null
           contacto_nombre: string | null
-          created_at: string | null
+          created_at: string
           email: string | null
           id: string
           nombre: string
           organization_id: string
           rubro: string | null
-          saldo_actual: number | null
+          saldo_actual: number
           sucursal_id: string | null
           telefono: string | null
         }
         Insert: {
           condicion_pago?: string | null
           contacto_nombre?: string | null
-          created_at?: string | null
+          created_at?: string
           email?: string | null
           id?: string
           nombre: string
           organization_id: string
           rubro?: string | null
-          saldo_actual?: number | null
+          saldo_actual?: number
           sucursal_id?: string | null
           telefono?: string | null
         }
         Update: {
           condicion_pago?: string | null
           contacto_nombre?: string | null
-          created_at?: string | null
+          created_at?: string
           email?: string | null
           id?: string
           nombre?: string
           organization_id?: string
           rubro?: string | null
-          saldo_actual?: number | null
+          saldo_actual?: number
           sucursal_id?: string | null
           telefono?: string | null
         }
@@ -1139,6 +1212,13 @@ export type Database = {
             referencedRelation: "vista_metricas_por_sucursal"
             referencedColumns: ["sucursal_id"]
           },
+          {
+            foreignKeyName: "proveedores_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
         ]
       }
       stock: {
@@ -1147,9 +1227,9 @@ export type Database = {
           cantidad: number
           compra_id: string | null
           costo_unitario_historico: number | null
-          created_at: string | null
+          created_at: string
           estado: string | null
-          fecha_ingreso: string | null
+          fecha_ingreso: string
           fecha_vencimiento: string | null
           fecha_venta: string | null
           id: string
@@ -1168,9 +1248,9 @@ export type Database = {
           cantidad: number
           compra_id?: string | null
           costo_unitario_historico?: number | null
-          created_at?: string | null
+          created_at?: string
           estado?: string | null
-          fecha_ingreso?: string | null
+          fecha_ingreso?: string
           fecha_vencimiento?: string | null
           fecha_venta?: string | null
           id?: string
@@ -1189,9 +1269,9 @@ export type Database = {
           cantidad?: number
           compra_id?: string | null
           costo_unitario_historico?: number | null
-          created_at?: string | null
+          created_at?: string
           estado?: string | null
-          fecha_ingreso?: string | null
+          fecha_ingreso?: string
           fecha_vencimiento?: string | null
           fecha_venta?: string | null
           id?: string
@@ -1242,6 +1322,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "stock_producto_id_fkey"
+            columns: ["producto_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "stock_proveedor_id_fkey"
             columns: ["proveedor_id"]
             isOneToOne: false
@@ -1276,29 +1363,42 @@ export type Database = {
             referencedRelation: "vista_metricas_por_sucursal"
             referencedColumns: ["sucursal_id"]
           },
+          {
+            foreignKeyName: "stock_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
         ]
       }
       sucursales: {
         Row: {
-          created_at: string | null
+          created_at: string
           direccion: string | null
           id: string
           nombre: string
           organization_id: string
+          qr_entrada_url: string | null
+          qr_salida_url: string | null
         }
         Insert: {
-          created_at?: string | null
+          created_at?: string
           direccion?: string | null
           id?: string
           nombre: string
           organization_id: string
+          qr_entrada_url?: string | null
+          qr_salida_url?: string | null
         }
         Update: {
-          created_at?: string | null
+          created_at?: string
           direccion?: string | null
           id?: string
           nombre?: string
           organization_id?: string
+          qr_entrada_url?: string | null
+          qr_salida_url?: string | null
         }
         Relationships: [
           {
@@ -1443,11 +1543,19 @@ export type Database = {
             referencedRelation: "vista_metricas_por_sucursal"
             referencedColumns: ["sucursal_id"]
           },
+          {
+            foreignKeyName: "tareas_empleados_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
         ]
       }
       ventas: {
         Row: {
-          creado_en: string | null
+          caja_diaria_id: string | null
+          creado_en: string
           id: string
           items: Json | null
           metodo_pago: string | null
@@ -1458,7 +1566,8 @@ export type Database = {
           total: number
         }
         Insert: {
-          creado_en?: string | null
+          caja_diaria_id?: string | null
+          creado_en?: string
           id?: string
           items?: Json | null
           metodo_pago?: string | null
@@ -1469,7 +1578,8 @@ export type Database = {
           total: number
         }
         Update: {
-          creado_en?: string | null
+          caja_diaria_id?: string | null
+          creado_en?: string
           id?: string
           items?: Json | null
           metodo_pago?: string | null
@@ -1478,6 +1588,429 @@ export type Database = {
           perfil_id?: string
           sucursal_id?: string
           total?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ventas_caja_diaria_id_fkey"
+            columns: ["caja_diaria_id"]
+            isOneToOne: false
+            referencedRelation: "caja_diaria"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ventas_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ventas_perfil_id_fkey"
+            columns: ["perfil_id"]
+            isOneToOne: false
+            referencedRelation: "perfiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ventas_perfil_id_fkey"
+            columns: ["perfil_id"]
+            isOneToOne: false
+            referencedRelation: "vista_resumen_empleados"
+            referencedColumns: ["perfil_id"]
+          },
+          {
+            foreignKeyName: "ventas_perfil_id_fkey"
+            columns: ["perfil_id"]
+            isOneToOne: false
+            referencedRelation: "vista_top_vendedores_mes"
+            referencedColumns: ["perfil_id"]
+          },
+          {
+            foreignKeyName: "ventas_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "sucursales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ventas_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "view_productos_con_stock"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "ventas_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_empleados_por_sucursal"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "ventas_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_metricas_por_sucursal"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "ventas_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
+        ]
+      }
+    }
+    Views: {
+      view_productos_con_stock: {
+        Row: {
+          categoria: string | null
+          codigo_barras: string | null
+          costo: number | null
+          emoji: string | null
+          id: string | null
+          nombre: string | null
+          organization_id: string | null
+          precio_venta: number | null
+          stock_disponible: number | null
+          stock_minimo: number | null
+          sucursal_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "productos_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vista_alertas_vencimientos_activas: {
+        Row: {
+          creado_en: string | null
+          dias_restantes: number | null
+          fecha_vencimiento: string | null
+          id: string | null
+          organization_id: string | null
+          producto_emoji: string | null
+          producto_id: string | null
+          producto_nombre: string | null
+          stock_id: string | null
+          sucursal_id: string | null
+          sucursal_nombre: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alertas_vencimientos_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alertas_vencimientos_stock_id_fkey"
+            columns: ["stock_id"]
+            isOneToOne: false
+            referencedRelation: "stock"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alertas_vencimientos_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "sucursales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alertas_vencimientos_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "view_productos_con_stock"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "alertas_vencimientos_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_empleados_por_sucursal"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "alertas_vencimientos_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_metricas_por_sucursal"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "alertas_vencimientos_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "stock_producto_id_fkey"
+            columns: ["producto_id"]
+            isOneToOne: false
+            referencedRelation: "productos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_producto_id_fkey"
+            columns: ["producto_id"]
+            isOneToOne: false
+            referencedRelation: "view_productos_con_stock"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_producto_id_fkey"
+            columns: ["producto_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vista_asistencias_hoy: {
+        Row: {
+          entrada: string | null
+          id: string | null
+          nombre: string | null
+          organization_id: string | null
+          perfil_id: string | null
+          salida: string | null
+          sucursal: string | null
+          sucursal_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asistencia_empleado_id_fkey"
+            columns: ["perfil_id"]
+            isOneToOne: false
+            referencedRelation: "perfiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "asistencia_empleado_id_fkey"
+            columns: ["perfil_id"]
+            isOneToOne: false
+            referencedRelation: "vista_resumen_empleados"
+            referencedColumns: ["perfil_id"]
+          },
+          {
+            foreignKeyName: "asistencia_empleado_id_fkey"
+            columns: ["perfil_id"]
+            isOneToOne: false
+            referencedRelation: "vista_top_vendedores_mes"
+            referencedColumns: ["perfil_id"]
+          },
+          {
+            foreignKeyName: "asistencia_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "asistencia_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "sucursales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "asistencia_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "view_productos_con_stock"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "asistencia_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_empleados_por_sucursal"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "asistencia_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_metricas_por_sucursal"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "asistencia_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
+        ]
+      }
+      vista_empleados_por_sucursal: {
+        Row: {
+          empleados_activos: number | null
+          empleados_actuales: number | null
+          sucursal_id: string | null
+          sucursal_nombre: string | null
+          total_empleados_asignados: number | null
+        }
+        Relationships: []
+      }
+      vista_metricas_por_sucursal: {
+        Row: {
+          cantidad_ventas_mes: number | null
+          empleados_activos_mes: number | null
+          promedio_venta_mes: number | null
+          puntos_totales_mes: number | null
+          sucursal_id: string | null
+          sucursal_nombre: string | null
+          tareas_completadas_mes: number | null
+          total_ventas_mes: number | null
+        }
+        Relationships: []
+      }
+      vista_productos_bajo_stock: {
+        Row: {
+          categoria: string | null
+          emoji: string | null
+          id: string | null
+          nombre: string | null
+          organization_id: string | null
+          stock_disponible: number | null
+          stock_minimo: number | null
+          sucursal_id: string | null
+          sucursal_nombre: string | null
+          unidades_faltantes: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "productos_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vista_resumen_empleados: {
+        Row: {
+          cantidad_ventas_mes: number | null
+          dias_trabajados_mes: number | null
+          email: string | null
+          nivel: number | null
+          nombre: string | null
+          perfil_id: string | null
+          puntos_mes: number | null
+          puntos_totales: number | null
+          sucursal_actual: string | null
+          sucursal_actual_id: string | null
+          sucursal_asignada: string | null
+          sucursal_id: string | null
+          tareas_completadas_mes: number | null
+          total_ventas_mes: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "perfiles_sucursal_actual_id_fkey"
+            columns: ["sucursal_actual_id"]
+            isOneToOne: false
+            referencedRelation: "sucursales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perfiles_sucursal_actual_id_fkey"
+            columns: ["sucursal_actual_id"]
+            isOneToOne: false
+            referencedRelation: "view_productos_con_stock"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "perfiles_sucursal_actual_id_fkey"
+            columns: ["sucursal_actual_id"]
+            isOneToOne: false
+            referencedRelation: "vista_empleados_por_sucursal"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "perfiles_sucursal_actual_id_fkey"
+            columns: ["sucursal_actual_id"]
+            isOneToOne: false
+            referencedRelation: "vista_metricas_por_sucursal"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "perfiles_sucursal_actual_id_fkey"
+            columns: ["sucursal_actual_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "perfiles_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "sucursales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "perfiles_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "view_productos_con_stock"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "perfiles_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_empleados_por_sucursal"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "perfiles_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_metricas_por_sucursal"
+            referencedColumns: ["sucursal_id"]
+          },
+          {
+            foreignKeyName: "perfiles_sucursal_id_fkey"
+            columns: ["sucursal_id"]
+            isOneToOne: false
+            referencedRelation: "vista_productos_bajo_stock"
+            referencedColumns: ["sucursal_id"]
+          },
+        ]
+      }
+      vista_top_vendedores_mes: {
+        Row: {
+          cantidad_ventas: number | null
+          nombre: string | null
+          perfil_id: string | null
+          promedio_venta: number | null
+          sucursal: string | null
+          total_ventas: number | null
+        }
+        Relationships: []
+      }
+      vista_ventas_recientes: {
+        Row: {
+          creado_en: string | null
+          id: string | null
+          items: Json | null
+          metodo_pago: string | null
+          organization_id: string | null
+          perfil_id: string | null
+          sucursal_id: string | null
+          sucursal_nombre: string | null
+          total: number | null
+          vendedor_nombre: string | null
         }
         Relationships: [
           {
@@ -1536,146 +2069,21 @@ export type Database = {
             referencedRelation: "vista_metricas_por_sucursal"
             referencedColumns: ["sucursal_id"]
           },
-        ]
-      }
-    }
-    Views: {
-      view_productos_con_stock: {
-        Row: {
-          categoria: string | null
-          codigo_barras: string | null
-          costo: number | null
-          emoji: string | null
-          id: string | null
-          nombre: string | null
-          organization_id: string | null
-          precio_venta: number | null
-          stock_disponible: number | null
-          stock_minimo: number | null
-          sucursal_id: string | null
-        }
-        Relationships: [
           {
-            foreignKeyName: "productos_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      vista_empleados_por_sucursal: {
-        Row: {
-          empleados_activos: number | null
-          empleados_actuales: number | null
-          sucursal_id: string | null
-          sucursal_nombre: string | null
-          total_empleados_asignados: number | null
-        }
-        Relationships: []
-      }
-      vista_metricas_por_sucursal: {
-        Row: {
-          cantidad_ventas_mes: number | null
-          empleados_activos_mes: number | null
-          promedio_venta_mes: number | null
-          puntos_totales_mes: number | null
-          sucursal_id: string | null
-          sucursal_nombre: string | null
-          tareas_completadas_mes: number | null
-          total_ventas_mes: number | null
-        }
-        Relationships: []
-      }
-      vista_resumen_empleados: {
-        Row: {
-          cantidad_ventas_mes: number | null
-          dias_trabajados_mes: number | null
-          email: string | null
-          nivel: number | null
-          nombre: string | null
-          perfil_id: string | null
-          puntos_mes: number | null
-          puntos_totales: number | null
-          sucursal_actual: string | null
-          sucursal_actual_id: string | null
-          sucursal_asignada: string | null
-          sucursal_id: string | null
-          tareas_completadas_mes: number | null
-          total_ventas_mes: number | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "perfiles_sucursal_actual_id_fkey"
-            columns: ["sucursal_actual_id"]
-            isOneToOne: false
-            referencedRelation: "sucursales"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "perfiles_sucursal_actual_id_fkey"
-            columns: ["sucursal_actual_id"]
-            isOneToOne: false
-            referencedRelation: "view_productos_con_stock"
-            referencedColumns: ["sucursal_id"]
-          },
-          {
-            foreignKeyName: "perfiles_sucursal_actual_id_fkey"
-            columns: ["sucursal_actual_id"]
-            isOneToOne: false
-            referencedRelation: "vista_empleados_por_sucursal"
-            referencedColumns: ["sucursal_id"]
-          },
-          {
-            foreignKeyName: "perfiles_sucursal_actual_id_fkey"
-            columns: ["sucursal_actual_id"]
-            isOneToOne: false
-            referencedRelation: "vista_metricas_por_sucursal"
-            referencedColumns: ["sucursal_id"]
-          },
-          {
-            foreignKeyName: "perfiles_sucursal_id_fkey"
+            foreignKeyName: "ventas_sucursal_id_fkey"
             columns: ["sucursal_id"]
             isOneToOne: false
-            referencedRelation: "sucursales"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "perfiles_sucursal_id_fkey"
-            columns: ["sucursal_id"]
-            isOneToOne: false
-            referencedRelation: "view_productos_con_stock"
-            referencedColumns: ["sucursal_id"]
-          },
-          {
-            foreignKeyName: "perfiles_sucursal_id_fkey"
-            columns: ["sucursal_id"]
-            isOneToOne: false
-            referencedRelation: "vista_empleados_por_sucursal"
-            referencedColumns: ["sucursal_id"]
-          },
-          {
-            foreignKeyName: "perfiles_sucursal_id_fkey"
-            columns: ["sucursal_id"]
-            isOneToOne: false
-            referencedRelation: "vista_metricas_por_sucursal"
+            referencedRelation: "vista_productos_bajo_stock"
             referencedColumns: ["sucursal_id"]
           },
         ]
-      }
-      vista_top_vendedores_mes: {
-        Row: {
-          cantidad_ventas: number | null
-          nombre: string | null
-          perfil_id: string | null
-          promedio_venta: number | null
-          sucursal: string | null
-          total_ventas: number | null
-        }
-        Relationships: []
       }
     }
     Functions: {
+      calcular_horas_trabajadas: {
+        Args: { p_fecha?: string; p_perfil_id: string }
+        Returns: number
+      }
       crear_perfil_desde_auth_user: {
         Args: { user_id: string }
         Returns: string
@@ -1685,29 +2093,22 @@ export type Database = {
         Returns: undefined
       }
       get_my_org_id: { Args: never; Returns: string }
+      get_user_email: { Args: never; Returns: string }
       get_user_organization_id: { Args: never; Returns: string }
       incrementar_saldo_proveedor: {
         Args: { id_input: string; monto_input: number }
         Returns: undefined
       }
-      procesar_venta:
-        | {
-            Args: {
-              p_items: Json
-              p_metodo_pago_global: string
-              p_monto_total_cliente: number
-            }
-            Returns: Json
-          }
-        | {
-            Args: {
-              p_items: Json
-              p_metodo_pago_global: string
-              p_monto_total_cliente: number
-              p_sucursal_id: string
-            }
-            Returns: Json
-          }
+      procesar_venta: {
+        Args: {
+          p_caja_id: string
+          p_items: Json
+          p_metodo_pago_global: string
+          p_monto_total_cliente: number
+          p_sucursal_id: string
+        }
+        Returns: undefined
+      }
       verificar_stock_disponible: {
         Args: {
           p_cantidad_solicitada: number

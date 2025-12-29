@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, DollarSign, Lock, Unlock, Calculator, AlertCircle, TrendingUp, TrendingDown } from "lucide-react"
+import { Loader2, Lock, Unlock, Calculator, AlertCircle } from "lucide-react"
 import { toast } from "sonner"
 import { format, addDays, parseISO } from "date-fns"
 import { triggerConfetti } from "@/components/confetti-trigger"
@@ -139,6 +139,7 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
     } catch (error: any) { toast.error(error.message) } finally { setLoading(false) }
   }
 
+  // --- LÓGICA CORREGIDA DE CIERRE ---
   const handleCerrarCaja = async () => {
     if (!caja) return
     const montoDeclarado = parseFloat(montoFinal)
@@ -146,7 +147,9 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
 
     setLoading(true)
     try {
-      // 1. Obtener Ventas en Efectivo (Productos + Cargas SUBE/Virtual si fueron en efectivo)
+      // 1. Obtener Ventas en Efectivo (Fuente: STOCK)
+      // Usamos stock porque aquí guardamos el metodo_pago exacto de cada item.
+      // Esto filtra automáticamente las ventas con tarjeta/QR.
       const { data: vData } = await supabase.from('stock')
         .select('cantidad, precio_venta_historico')
         .eq('caja_diaria_id', caja.id)
@@ -155,18 +158,22 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
       
       const totalVentasEfectivo = vData?.reduce((sum, i) => sum + (Number(i.precio_venta_historico || 0) * (i.cantidad || 1)), 0) || 0
 
-      // 2. Obtener Movimientos Manuales (Ingresos y Egresos registrados manualmente)
+      // 2. Obtener Movimientos Manuales (Fuente: MOVIMIENTOS_CAJA)
+      // ⚠️ FIX: Excluir 'ventas' para no duplicar lo calculado arriba.
+      // Solo queremos ingresos manuales (ej: cambio chico) o egresos (gastos).
       const { data: mData } = await supabase.from('movimientos_caja')
-        .select('monto, tipo')
+        .select('monto, tipo, categoria')
         .eq('caja_diaria_id', caja.id)
+        .neq('categoria', 'ventas') // <--- FILTRO CRÍTICO
       
       const totalIngresosExtra = mData?.filter(m => m.tipo === 'ingreso').reduce((sum, i) => sum + Number(i.monto), 0) || 0
-      const totalEgresosExtra = mData?.filter(m => m.tipo === 'egreso').reduce((sum, i) => sum + Number(i.monto), 0) || 0
+      const totalGastos = mData?.filter(m => m.tipo === 'egreso').reduce((sum, i) => sum + Number(i.monto), 0) || 0
 
-      // ✅ ECUACIÓN FINAL: (Inicial + Ventas Cash + Ingresos Manuales) - Egresos Manuales
-      const dineroEsperado = (Number(caja.monto_inicial) + totalVentasEfectivo + totalIngresosExtra) - totalEgresosExtra
+      // 3. ECUACIÓN FINAL: (Base Inicial + Ventas Efectivo + Ingresos Manuales) - Gastos Manuales
+      const dineroEsperado = (Number(caja.monto_inicial) + totalVentasEfectivo + totalIngresosExtra) - totalGastos
+      
       const desvio = montoDeclarado - dineroEsperado
-      const exitoArqueo = Math.abs(desvio) <= 100 
+      const exitoArqueo = Math.abs(desvio) <= 100 // Tolerancia de $100
 
       if (exitoArqueo) {
           await supabase.from('misiones').update({ es_completada: true, unidades_completadas: 1 }).eq('caja_diaria_id', caja.id).eq('tipo', 'arqueo_cierre')
@@ -175,7 +182,7 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
           triggerConfetti()
           toast.success("🏆 Cierre Excelente", { description: "La caja coincide con el sistema." })
       } else {
-          toast.warning("Turno con Diferencia", { description: `Desvío de $${desvio.toFixed(0)} (Esp: $${dineroEsperado})` })
+          toast.warning("Turno con Diferencia", { description: `Desvío de $${desvio.toFixed(0)} (Esp: $${formatMoney(dineroEsperado)})` })
       }
 
       await supabase.from('caja_diaria').update({ 
@@ -186,7 +193,12 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
 
       setCaja(null)
       onCajaCerrada()
-    } catch (error) { toast.error("Error al cerrar") } finally { setLoading(false) }
+    } catch (error) { 
+        console.error(error)
+        toast.error("Error al cerrar") 
+    } finally { 
+        setLoading(false) 
+    }
   }
 
   const formatMoney = (val: number) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(val)

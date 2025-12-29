@@ -164,7 +164,7 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
   }, [])
 
   const buscarProductos = useCallback(async (query: string, autoAdd: boolean = false) => {
-    if (!query) {
+    if (!query || query.trim().length === 0) {
       setProductos([])
       return
     }
@@ -202,6 +202,20 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
     }
   }, [sucursalId, agregarAlCarrito])
 
+  // ✅ CORRECCIÓN 1: Búsqueda predictiva (Debounce)
+  // Esto permite buscar mientras escribes sin presionar Enter
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      if (busqueda.trim().length >= 2) {
+        buscarProductos(busqueda, false)
+      } else if (busqueda.trim().length === 0) {
+        setProductos([])
+      }
+    }, 300)
+
+    return () => clearTimeout(delayDebounceFn)
+  }, [busqueda, buscarProductos])
+
   const handleBarcodeScanned = (code: string) => {
     setShowScanner(false)
     toast.success("Código detectado", { description: "Buscando producto..." })
@@ -229,8 +243,11 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
         cantidad: item.cantidad
       }))
 
+      // ✅ CORRECCIÓN 2: Pasamos p_caja_id (turnoId)
+      // Esto vincula la venta al turno abierto para la auditoría y cierre de caja.
       const { data, error } = await supabase.rpc('procesar_venta', {
         p_sucursal_id: sucursalId,
+        p_caja_id: turnoId, // <--- CAMBIO CRÍTICO AQUÍ
         p_items: itemsSimplificados,
         p_metodo_pago_global: metodoPago,
         p_monto_total_cliente: calcularTotal()
@@ -238,7 +255,7 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
 
       if (error) throw error
       
-      // ✅ Cambio: Generación de ticket opcional según el estado
+      // Generación de ticket opcional según el estado
       if (imprimirTicket) {
         generarTicketVenta({
           organizacion: "Kiosco 24hs",
@@ -283,6 +300,7 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
             className="pl-4 pr-32 bg-white font-black h-16 rounded-2xl border-2 border-slate-100"
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
+            // Mantenemos onKeyDown para forzar búsqueda inmediata si el usuario quiere
             onKeyDown={(e) => e.key === 'Enter' && buscarProductos(busqueda, true)} 
           />
           <Button
@@ -337,7 +355,7 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
           <span>$ {calcularTotal().toLocaleString('es-AR')}</span>
         </div>
 
-        {/* ✅ Nuevo: Selector para habilitar/deshabilitar el comprobante */}
+        {/* Selector para habilitar/deshabilitar el comprobante */}
         <div className="flex items-center justify-between px-3 py-2 bg-slate-50 rounded-xl border border-dashed border-slate-200">
           <span className="text-[10px] font-black uppercase text-slate-400 tracking-tighter">¿Generar comprobante?</span>
           <Button 

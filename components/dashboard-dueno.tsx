@@ -83,6 +83,7 @@ interface VentaJoin {
     notas?: string | null
     cantidad: number 
     productos: { nombre: string; precio_venta: number; emoji: string } | null 
+    caja_diaria_id?: string //
 }
 
 interface PaymentBreakdown {
@@ -244,8 +245,20 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
         costo += (v.costo_unitario_historico || 0) * cant
         if (['tarjeta', 'transferencia', 'billetera_virtual'].includes(v.metodo_pago)) blanco += (v.precio_venta_historico || v.productos?.precio_venta || 0) * cant
     })
-    return { bruto, neta: bruto - costo, margen: bruto > 0 ? ((bruto - costo) / bruto) * 100 : 0, blanco, negro: bruto - blanco }
-  }, [ventasRecientes])
+
+    // Integrar movimientos manuales para Utilidad Neta real
+    let manualIngresos = 0
+    let manualEgresos = 0
+    turnosAudit.forEach(t => {
+        t.movimientos_caja?.forEach(m => {
+            if (m.tipo === 'ingreso') manualIngresos += m.monto
+            else if (m.tipo === 'egreso') manualEgresos += m.monto
+        })
+    })
+
+    const neta = (bruto - costo) + manualIngresos - manualEgresos
+    return { bruto, neta, margen: bruto > 0 ? ((bruto - costo) / bruto) * 100 : 0, blanco, negro: bruto - blanco }
+  }, [ventasRecientes, turnosAudit])
 
   const matrizRentabilidad = useMemo(() => {
     const stars: any[] = [], bones: any[] = []
@@ -365,7 +378,13 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
         </div>
         <div className="flex justify-between items-end">
             <div><h1 className="text-2xl font-black tracking-tight flex items-center gap-2 uppercase">Torre de Control <Sparkles className="h-5 w-5 text-yellow-400" /></h1><p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Panel Administrativo Global</p></div>
-            <div className="text-right"><p className="text-[10px] text-slate-400 font-bold uppercase">Capital Stock</p><p className="text-xl font-black text-emerald-400">{formatMoney(productos.reduce((a,b) => a + (b.costo * (b.stock_disponible || 0)), 0))}</p></div>
+            <div className="text-right">
+                <p className="text-[10px] text-slate-400 font-bold uppercase">Capital Stock</p>
+                {/* Corrección Capital Stock: filtrar servicios y stock huerfano */}
+                <p className="text-xl font-black text-emerald-400">
+                    {formatMoney(productos.filter(p => p.categoria !== "Servicios" && (p.stock_disponible || 0) > 0).reduce((a,b) => a + (b.costo * (b.stock_disponible || 0)), 0))}
+                </p>
+            </div>
         </div>
         <div className="flex gap-2 mt-8 overflow-x-auto pb-2 scrollbar-hide">
           {[
@@ -533,8 +552,31 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
                                                 <div className="p-4 bg-white rounded-2xl border shadow-sm text-center"><p className="text-[10px] font-black text-slate-400 uppercase mb-1">Misiones</p><p className="text-2xl font-black text-slate-900">{t.misiones?.filter(m => m.es_completada).length} / {t.misiones?.length}</p></div>
                                             </div>
 
+                                            {/* Detalle de Ventas del Turno solicitado */}
                                             <div className="space-y-3">
-                                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><ArrowDownRight className="h-3 w-3" /> Movimientos Manuales</h4>
+                                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><ShoppingBag className="h-3 w-3" /> Detalle de Productos Vendidos</h4>
+                                                {ventasRecientes.filter(v => v.caja_diaria_id === t.id).length > 0 ? (
+                                                    <div className="space-y-2">
+                                                        {ventasRecientes.filter(v => v.caja_diaria_id === t.id).map((v) => (
+                                                            <div key={v.id} className="flex justify-between items-center bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="text-sm">{v.productos?.emoji}</span>
+                                                                    <p className="text-[10px] font-black text-slate-700 uppercase">{v.productos?.nombre}</p>
+                                                                    <Badge variant="outline" className="text-[9px] py-0 h-4">{v.cantidad}u</Badge>
+                                                                </div>
+                                                                <p className="text-[11px] font-mono font-bold text-slate-600">
+                                                                    {formatMoney((v.precio_venta_historico || v.productos?.precio_venta || 0) * v.cantidad)}
+                                                                </p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-[10px] italic text-slate-400 text-center py-2">Sin ventas registradas en este turno</p>
+                                                )}
+                                            </div>
+
+                                            <div className="space-y-3">
+                                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><ArrowDownRight className="h-3 w-3" /> Otros Movimientos (Manuales)</h4>
                                                 {t.movimientos_caja?.length > 0 ? (
                                                     <div className="space-y-2">
                                                         {t.movimientos_caja.map((m) => (

@@ -146,19 +146,25 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
 
     setLoading(true)
     try {
-      // 1. Obtener Ventas en Efectivo
+      // 1. Obtener Ventas en Efectivo (Productos + Cargas SUBE/Virtual si fueron en efectivo)
       const { data: vData } = await supabase.from('stock')
         .select('cantidad, precio_venta_historico')
-        .eq('caja_diaria_id', caja.id).eq('metodo_pago', 'efectivo').eq('tipo_movimiento', 'salida') 
-      const totalVentasEfectivo = vData?.reduce((sum, i) => sum + ((i.precio_venta_historico || 0) * (i.cantidad || 1)), 0) || 0
+        .eq('caja_diaria_id', caja.id)
+        .eq('metodo_pago', 'efectivo')
+        .eq('tipo_movimiento', 'salida') 
+      
+      const totalVentasEfectivo = vData?.reduce((sum, i) => sum + (Number(i.precio_venta_historico || 0) * (i.cantidad || 1)), 0) || 0
 
-      // 2. Obtener Movimientos Manuales (Ingresos y Egresos)
-      const { data: mData } = await supabase.from('movimientos_caja').select('monto, tipo').eq('caja_diaria_id', caja.id)
-      const totalIngresosExtra = mData?.filter(m => m.tipo === 'ingreso').reduce((sum, i) => sum + i.monto, 0) || 0
-      const totalEgresosExtra = mData?.filter(m => m.tipo === 'egreso').reduce((sum, i) => sum + i.monto, 0) || 0
+      // 2. Obtener Movimientos Manuales (Ingresos y Egresos registrados manualmente)
+      const { data: mData } = await supabase.from('movimientos_caja')
+        .select('monto, tipo')
+        .eq('caja_diaria_id', caja.id)
+      
+      const totalIngresosExtra = mData?.filter(m => m.tipo === 'ingreso').reduce((sum, i) => sum + Number(i.monto), 0) || 0
+      const totalEgresosExtra = mData?.filter(m => m.tipo === 'egreso').reduce((sum, i) => sum + Number(i.monto), 0) || 0
 
       // ✅ ECUACIÓN FINAL: (Inicial + Ventas Cash + Ingresos Manuales) - Egresos Manuales
-      const dineroEsperado = (caja.monto_inicial + totalVentasEfectivo + totalIngresosExtra) - totalEgresosExtra
+      const dineroEsperado = (Number(caja.monto_inicial) + totalVentasEfectivo + totalIngresosExtra) - totalEgresosExtra
       const desvio = montoDeclarado - dineroEsperado
       const exitoArqueo = Math.abs(desvio) <= 100 
 
@@ -169,7 +175,7 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
           triggerConfetti()
           toast.success("🏆 Cierre Excelente", { description: "La caja coincide con el sistema." })
       } else {
-          toast.warning("Turno con Diferencia", { description: `Desvío de $${desvio.toFixed(0)}` })
+          toast.warning("Turno con Diferencia", { description: `Desvío de $${desvio.toFixed(0)} (Esp: $${dineroEsperado})` })
       }
 
       await supabase.from('caja_diaria').update({ 
@@ -209,9 +215,6 @@ export default function ArqueoCaja({ onCajaAbierta, onCajaCerrada, turnoActivo, 
                     <p className="text-xl font-black text-blue-900 text-center">{format(parseISO(caja.fecha_apertura), 'HH:mm')} HS</p>
                 </div>
             </div>
-
-            {/* Visualización de flujo de caja para el empleado */}
-            
 
             <div className="space-y-4">
                 <Label className="text-[11px] font-black uppercase text-slate-500 flex items-center justify-center gap-2">

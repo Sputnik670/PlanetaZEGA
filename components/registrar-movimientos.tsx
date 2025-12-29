@@ -23,8 +23,6 @@ export default function RegistrarMovimiento({ cajaId, onMovimientoRegistrado }: 
   const [categoria, setCategoria] = useState("proveedores")
   const [historial, setHistorial] = useState<any[]>([])
 
-  // ✅ CORRECCIÓN: Filtramos la tabla movimientos_caja para mostrar SOLO egresos (gastos)
-  // Esto evita que las ventas de servicios o cargas SUBE (ingresos) aparezcan aquí.
   const fetchMovimientos = async () => {
     const { data } = await supabase
       .from('movimientos_caja')
@@ -37,32 +35,26 @@ export default function RegistrarMovimiento({ cajaId, onMovimientoRegistrado }: 
   }
 
   useEffect(() => {
-    fetchMovimientos()
+    if (cajaId) fetchMovimientos()
   }, [cajaId])
 
   const handleGuardarGasto = async () => {
     const valorMonto = parseFloat(monto)
     if (isNaN(valorMonto) || valorMonto <= 0) return toast.error("Ingresa un monto válido")
-    if (!descripcion.trim()) return toast.error("Agregá una descripción (ej: Pago a repartidor)")
+    if (!descripcion.trim()) return toast.error("Agregá una descripción")
 
     setLoading(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user?.id) throw new Error("No hay sesión activa")
 
-      const { data: perfil } = await supabase
-        .from('perfiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single()
-
+      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single()
       if (!perfil?.organization_id) throw new Error("No se encontró la organización.")
 
-      // ✅ REGISTRO COMPLETO: Incluimos el empleado_id para auditoría.
+      // ✅ CORRECCIÓN: Eliminamos 'empleado_id' que no existe en la tabla movimientos_caja
       const { error } = await supabase.from('movimientos_caja').insert({
           organization_id: perfil.organization_id,
           caja_diaria_id: cajaId,
-          empleado_id: user.id, 
           monto: valorMonto,
           tipo: 'egreso', 
           descripcion: descripcion.trim(),
@@ -71,23 +63,19 @@ export default function RegistrarMovimiento({ cajaId, onMovimientoRegistrado }: 
 
       if (error) throw error
 
-      toast.success("Gasto registrado y restado de caja")
+      toast.success("Gasto registrado")
       setMonto("")
       setDescripcion("")
       fetchMovimientos()
       onMovimientoRegistrado() 
     } catch (error: any) {
-      toast.error("Error al registrar movimiento")
+      toast.error("Error al registrar: " + error.message)
     } finally {
       setLoading(false)
     }
   }
 
-  const formatMoney = (val: number) => new Intl.NumberFormat('es-AR', { 
-    style: 'currency', 
-    currency: 'ARS',
-    maximumFractionDigits: 0 
-  }).format(val)
+  const formatMoney = (val: number) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(val)
 
   return (
     <div className="space-y-4">
@@ -125,41 +113,27 @@ export default function RegistrarMovimiento({ cajaId, onMovimientoRegistrado }: 
               </Select>
             </div>
           </div>
-
           <div className="space-y-2">
             <Label className="text-[10px] font-bold uppercase text-slate-500">Descripción del gasto</Label>
-            <Input
-              placeholder="Ej: Repartidor de Pan"
-              className="h-12 text-sm"
-              value={descripcion}
-              onChange={(e) => setDescripcion(e.target.value)}
-            />
+            <Input placeholder="Ej: Repartidor de Pan" className="h-12 text-sm" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} />
           </div>
-
-          <Button 
-            onClick={handleGuardarGasto} 
-            disabled={loading}
-            className="w-full h-12 bg-amber-600 hover:bg-amber-700 text-white font-black rounded-xl text-xs uppercase"
-          >
+          <Button onClick={handleGuardarGasto} disabled={loading} className="w-full h-12 bg-amber-600 hover:bg-amber-700 text-white font-black rounded-xl text-xs uppercase">
             {loading ? <Loader2 className="animate-spin" /> : "REGISTRAR GASTO"}
           </Button>
         </div>
       </Card>
 
-      {/* Historial de Gastos del Turno */}
       {historial.length > 0 && (
         <Card className="p-4 bg-slate-50 border-dashed border-2 border-slate-200 rounded-2xl shadow-inner">
           <div className="flex items-center gap-2 mb-3 text-slate-500 text-[10px] font-black uppercase tracking-widest">
-            <History className="h-3 w-3" /> Gastos Registrados en este Turno
+            <History className="h-3 w-3" /> Gastos del Turno
           </div>
           <div className="space-y-2 max-h-[180px] overflow-y-auto scrollbar-hide">
             {historial.map((m) => (
               <div key={m.id} className="flex justify-between items-center bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
                 <div>
                   <p className="text-[11px] font-black text-slate-800 uppercase leading-none mb-1">{m.descripcion}</p>
-                  <p className="text-[9px] text-slate-400 font-bold uppercase">
-                    {m.categoria} • {format(new Date(m.created_at), 'HH:mm')} HS
-                  </p>
+                  <p className="text-[9px] text-slate-400 font-bold uppercase">{m.categoria} • {format(new Date(m.created_at), 'HH:mm')} HS</p>
                 </div>
                 <span className="text-red-600 font-black text-sm">-{formatMoney(m.monto)}</span>
               </div>

@@ -144,6 +144,9 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
   const [metodoPago, setMetodoPago] = useState<"efectivo" | "tarjeta" | "billetera_virtual">("efectivo")
   const [showScanner, setShowScanner] = useState(false)
   
+  // ✅ Nuevo estado para controlar la generación del ticket
+  const [imprimirTicket, setImprimirTicket] = useState(true)
+  
   const inputRef = useRef<HTMLInputElement>(null)
 
   const agregarAlCarrito = useCallback((producto: Producto) => {
@@ -235,19 +238,22 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
 
       if (error) throw error
       
-      generarTicketVenta({
-        organizacion: "Kiosco 24hs",
-        fecha: new Date().toLocaleString('es-AR'),
-        items: carrito.map(i => ({
-            cantidad: i.cantidad,
-            producto: i.nombre,
-            precioUnitario: i.precio,
-            subtotal: i.precio * i.cantidad
-        })),
-        total: calcularTotal(),
-        metodoPago: metodoPago,
-        vendedor: empleadoNombre
-      })
+      // ✅ Cambio: Generación de ticket opcional según el estado
+      if (imprimirTicket) {
+        generarTicketVenta({
+          organizacion: "Kiosco 24hs",
+          fecha: new Date().toLocaleString('es-AR'),
+          items: carrito.map(i => ({
+              cantidad: i.cantidad,
+              producto: i.nombre,
+              precioUnitario: i.precio,
+              subtotal: i.precio * i.cantidad
+          })),
+          total: calcularTotal(),
+          metodoPago: metodoPago,
+          vendedor: empleadoNombre
+        })
+      }
 
       toast.success("Venta Exitosa")
       setCarrito([])
@@ -330,6 +336,23 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
           <span className="text-slate-400 text-xs uppercase">Total</span>
           <span>$ {calcularTotal().toLocaleString('es-AR')}</span>
         </div>
+
+        {/* ✅ Nuevo: Selector para habilitar/deshabilitar el comprobante */}
+        <div className="flex items-center justify-between px-3 py-2 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+          <span className="text-[10px] font-black uppercase text-slate-400 tracking-tighter">¿Generar comprobante?</span>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => setImprimirTicket(!imprimirTicket)}
+            className={cn(
+              "h-8 px-4 rounded-lg font-black text-[9px] uppercase transition-all",
+              imprimirTicket ? "bg-blue-100 text-blue-600" : "bg-slate-200 text-slate-500"
+            )}
+          >
+            {imprimirTicket ? "SÍ, IMPRIMIR" : "NO, SOLO REGISTRAR"}
+          </Button>
+        </div>
+
         <div className="grid grid-cols-3 gap-2">
             {(['efectivo', 'billetera_virtual', 'tarjeta'] as const).map((m) => (
                 <button 

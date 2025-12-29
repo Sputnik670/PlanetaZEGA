@@ -14,7 +14,7 @@ import {
   Eye, TrendingDown, Star, User, ShoppingBag, Clock, 
   Pencil, Trash2, History, Save, ChevronDown, ChevronUp, Calculator, ScanBarcode,
   Users, Sparkles, Printer, Briefcase, Receipt, X, MapPin, Settings, ChevronRight,
-  ArrowDownRight, QrCode
+  ArrowDownRight, QrCode, AlertCircle
 } from "lucide-react" 
 import { BarChart, Bar, XAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts" 
 import CrearProducto from "@/components/crear-producto"
@@ -309,7 +309,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
     setStockBatchList(data || [])
   }
 
-  // ✅ CORRECCIÓN QUIRÚRGICA: Mapeo de campos para generarTicketPDF
   const handlePrintTurno = (t: TurnoAudit) => {
     const vT = ventasRecientes.filter(v => {
         const fV = parseISO(v.fecha_venta); 
@@ -328,13 +327,13 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
         fechaApertura: format(parseISO(t.fecha_apertura), 'dd/MM/yyyy HH:mm'),
         fechaCierre: t.fecha_cierre ? format(parseISO(t.fecha_cierre), 'dd/MM/yyyy HH:mm') : null,
         montoInicial: t.monto_inicial,
-        totalVentasEfectivo: totE, // Campo corregido
-        totalIngresos: extra,      // Campo añadido
+        totalVentasEfectivo: totE,
+        totalIngresos: extra,
         totalGastos: gast,
         cajaEsperada: esp,
         cajaReal: t.monto_final,
         diferencia: t.monto_final !== null ? t.monto_final - esp : null,
-        gastos: t.movimientos_caja || [] // Pasamos todos los movimientos para el desglose
+        gastos: t.movimientos_caja || []
     })
     toast.success("Ticket generado")
   }
@@ -377,7 +376,8 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
             { id: "catalog", label: "Dato Maestro", icon: Plus },
             { id: "suppliers", label: "Logística", icon: Users },
             { id: "team", label: "Mi Equipo", icon: Briefcase },
-            { id: "alerts", label: "Gestión Riesgos", icon: AlertTriangle },
+            // ✅ CAMBIO 1: Nombre de solapa actualizado
+            { id: "alerts", label: "Advertencias de Stock", icon: AlertTriangle },
           ].map(t => (
             <Button key={t.id} onClick={() => setActiveTab(t.id as any)} variant={activeTab === t.id ? "secondary" : "ghost"} size="sm" className="rounded-full text-xs font-bold whitespace-nowrap"><t.icon className="mr-1.5 h-3.5 w-3.5" /> {t.label}</Button>
           ))}
@@ -399,6 +399,98 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
                     <Card className="p-5 border-2 shadow-sm"><h3 className="text-[10px] font-black uppercase text-slate-400 mb-6 tracking-widest">Ingresos por Método</h3><div className="space-y-5">{Object.entries(paymentBreakdown).map(([k, v]) => v > 0 && (<div key={k}><div className="flex justify-between text-xs font-black mb-2 uppercase"><span className="text-slate-600">{k.replace('_', ' ')}</span><span className="font-mono">{formatMoney(v)}</span></div><Progress value={(v/totalVendido)*100} className="h-2 bg-slate-100" /></div>))}</div></Card>
                     <Card className="p-5 border-2 shadow-sm"><h3 className="text-[10px] font-black uppercase text-slate-400 mb-6 tracking-widest">Evolución Diaria</h3><div className="h-[200px] w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={chartData}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/><XAxis dataKey="fecha" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} /><Tooltip cursor={{fill: '#f8fafc'}} /><Bar dataKey="total" fill="oklch(0.6 0.2 250)" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></div></Card>
                 </div>
+            </div>
+        )}
+
+        {/* ✅ CAMBIO 2, 3 y 4: Nueva vista de Advertencias detallada */}
+        {activeTab === "alerts" && (
+            <div className="space-y-6 animate-in fade-in">
+                {/* 1. Ofertas automáticas (Happy Hour se basa en criticos) */}
+                <HappyHour criticos={capitalEnRiesgo.criticos} onDiscountApplied={fetchData} />
+
+                {/* 2. Resumen Visual con nombres mejorados */}
+                <div className="grid grid-cols-2 gap-4">
+                    <Card className="p-5 border-2 border-orange-200 bg-orange-50/50 shadow-sm">
+                        <p className="text-[11px] font-black text-orange-600 uppercase mb-2">Riesgo Vencimiento</p>
+                        <h3 className="text-3xl font-black text-slate-800">{formatMoney(capitalEnRiesgo.capital)}</h3>
+                        <p className="text-[10px] font-bold text-orange-400 uppercase mt-2">{capitalEnRiesgo.unidades} UNIDADES CRÍTICAS</p>
+                    </Card>
+                    <Card className="p-5 border-2 border-red-200 bg-red-50/50 shadow-sm">
+                        <p className="text-[11px] font-black text-red-600 uppercase mb-2">Stock Insuficiente</p>
+                        <h3 className="text-3xl font-black text-slate-800">{productos.filter(p => (p.stock_disponible || 0) <= UMBRAL_STOCK_BAJO && p.categoria !== "Servicios").length}</h3>
+                        <p className="text-[10px] font-bold text-red-400 uppercase mt-2">PRODUCTOS CRÍTICOS</p>
+                    </Card>
+                </div>
+
+                {/* 3. Listado Detallado de Vencimientos */}
+                <Card className="p-6 border-2 border-orange-100 rounded-[2rem] bg-white shadow-sm">
+                    <div className="flex items-center gap-2 mb-6">
+                        <div className="p-2 bg-orange-100 rounded-xl text-orange-600"><Clock className="h-5 w-5" /></div>
+                        <div>
+                            <h3 className="text-sm font-black uppercase text-slate-800">Próximos a Vencer</h3>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Lotes con vencimiento en menos de 10 días</p>
+                        </div>
+                    </div>
+                    
+                    <div className="space-y-3">
+                        {capitalEnRiesgo.criticos.length === 0 ? (
+                            <p className="text-center py-6 text-xs italic text-slate-400">Sin vencimientos próximos en este local.</p>
+                        ) : (
+                            capitalEnRiesgo.criticos.map((item, idx) => (
+                                <div key={idx} className="flex justify-between items-center bg-slate-50 p-4 rounded-2xl border-2 border-transparent hover:border-orange-200 transition-all">
+                                    <div className="flex items-center gap-3">
+                                        <span className="text-2xl">{item.emoji}</span>
+                                        <div>
+                                            <p className="text-xs font-black uppercase text-slate-700">{item.nombre}</p>
+                                            <p className="text-[10px] font-bold text-orange-500 uppercase flex items-center gap-1">
+                                                Vence: {format(parseISO(item.fecha_vencimiento), 'dd/MM/yyyy')}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <Badge className="bg-orange-500 text-white font-black text-[10px]">{item.cantidad} U.</Badge>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </Card>
+
+                {/* 4. Listado de Stock Bajo / Insuficiente */}
+                <Card className="p-6 border-2 border-red-100 rounded-[2rem] bg-white shadow-sm">
+                    <div className="flex items-center gap-2 mb-6">
+                        <div className="p-2 bg-red-100 rounded-xl text-red-600"><AlertCircle className="h-5 w-5" /></div>
+                        <div>
+                            <h3 className="text-sm font-black uppercase text-slate-800">Reponer Urgente</h3>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Inventario menor a {UMBRAL_STOCK_BAJO} unidades</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-3">
+                        {productos.filter(p => (p.stock_disponible || 0) <= UMBRAL_STOCK_BAJO && p.categoria !== "Servicios").length === 0 ? (
+                            <p className="text-center py-6 text-xs italic text-slate-400">Todo el stock está en niveles óptimos.</p>
+                        ) : (
+                            productos
+                                .filter(p => (p.stock_disponible || 0) <= UMBRAL_STOCK_BAJO && p.categoria !== "Servicios")
+                                .sort((a, b) => (a.stock_disponible || 0) - (b.stock_disponible || 0))
+                                .map((p) => (
+                                    <div key={p.id} className="flex justify-between items-center bg-slate-50 p-4 rounded-2xl border-2 border-transparent hover:border-red-200 transition-all">
+                                        <div className="flex items-center gap-3">
+                                            <span className="text-2xl">{p.emoji}</span>
+                                            <div>
+                                                <p className="text-xs font-black uppercase text-slate-700">{p.nombre}</p>
+                                                <p className="text-[9px] font-bold text-slate-400 uppercase">{p.categoria}</p>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className={cn("text-xl font-black tabular-nums leading-none", p.stock_disponible! <= 0 ? "text-red-600" : "text-red-400")}>
+                                                {p.stock_disponible}
+                                            </p>
+                                            <p className="text-[9px] font-black text-slate-400 uppercase">Existencia</p>
+                                        </div>
+                                    </div>
+                                ))
+                        )}
+                    </div>
+                </Card>
             </div>
         )}
 
@@ -580,17 +672,9 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
                 </Card>
             </div>
         )}
-        {activeTab === "alerts" && (
-            <div className="space-y-6 animate-in fade-in">
-                <HappyHour criticos={capitalEnRiesgo.criticos} onDiscountApplied={fetchData} />
-                <div className="grid grid-cols-2 gap-4">
-                    <Card className="p-5 border-2 border-orange-200 bg-orange-50/50 shadow-sm"><p className="text-[11px] font-black text-orange-600 uppercase mb-2">Riesgo Vencimiento</p><h3 className="text-3xl font-black text-slate-800">{formatMoney(capitalEnRiesgo.capital)}</h3><p className="text-[10px] font-bold text-orange-400 uppercase mt-2">{capitalEnRiesgo.unidades} UNIDADES CRÍTICAS</p></Card>
-                    <Card className="p-5 border-2 border-red-200 bg-red-50/50 shadow-sm"><p className="text-[11px] font-black text-red-600 uppercase mb-2">Quiebres Stock</p><h3 className="text-3xl font-black text-slate-800">{productos.filter(p => p.stock_disponible! <= 0).length}</h3><p className="text-[10px] font-bold text-red-400 uppercase mt-2">AGOTADOS</p></Card>
-                </div>
-            </div>
-        )}
       </div>
 
+      {/* MODALES EXTERNOS (IGUALES) */}
       <Dialog open={!!editingProduct} onOpenChange={o => !o && setEditingProduct(null)}>
         <DialogContent className="max-w-md rounded-3xl">
             <DialogHeader><DialogTitle className="font-black uppercase flex items-center gap-2"><Pencil className="h-5 w-5 text-primary"/> Editar Catálogo</DialogTitle></DialogHeader>

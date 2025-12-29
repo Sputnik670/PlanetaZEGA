@@ -141,7 +141,7 @@ export function InvitarEmpleado() {
                     <UserCheck className="h-7 w-7" />
                 </div>
                 <div>
-                    <h2 className="text-xl font-black uppercase tracking-tight">Alta de Equipo</h2>
+                    <h2 className="text-xl font-black uppercase tracking-tight">Alta de nuevo colaborador</h2>
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Contratación Directa</p>
                 </div>
             </div>

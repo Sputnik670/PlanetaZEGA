@@ -371,11 +371,10 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
           {[
             { id: "sales", label: "Caja y Ventas", icon: DollarSign },
             { id: "inventory", label: "Stock", icon: Package },
-            // ✅ CAMBIO 1: Nombre de solapa actualizado
             { id: "finance", label: "Panel de Utilidades", icon: TrendingUp },
             { id: "supervision", label: "Supervisión 360°", icon: Eye },
             { id: "catalog", label: "Alta de Catálogo", icon: Plus },
-            { id: "suppliers", label: "Logística", icon: Users },
+            { id: "suppliers", label: "Proveedores", icon: Users },
             { id: "team", label: "Mi Equipo", icon: Briefcase },
             { id: "alerts", label: "Advertencias de Stock", icon: AlertTriangle },
           ].map(t => (
@@ -386,7 +385,7 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
 
       <div className="p-4 space-y-4">
         {["sales", "supervision", "finance"].includes(activeTab) && (
-            <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+            <Popover>
                 <PopoverTrigger asChild><Button variant="outline" className="w-full justify-start h-14 border-2 shadow-sm bg-white font-black text-slate-700"><CalendarIcon className="mr-2 h-5 w-5 text-primary" /> {dateRangeLabel.toUpperCase()}</Button></PopoverTrigger>
                 <PopoverContent className="w-auto p-0" align="center"><Calendar mode="range" selected={dateRange} onSelect={r => { setDateRange(r); if(r?.to) setIsCalendarOpen(false) }} locale={es} /></PopoverContent>
             </Popover>
@@ -635,8 +634,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <Card className="p-6 border-2 border-yellow-200 bg-yellow-50/20"><div className="flex items-center justify-between mb-6"><h4 className="text-sm font-black text-yellow-800 uppercase flex items-center gap-2"><Star className="h-5 w-5 fill-yellow-400" /> Estrellas</h4><Badge className="bg-yellow-400 text-yellow-900 text-[10px] font-black">ALTA ROTACIÓN</Badge></div><div className="space-y-3">{matrizRentabilidad.stars.map((p, i) => (<div key={i} className="flex justify-between items-center bg-white p-3 rounded-xl border border-yellow-100 shadow-sm"><div className="flex items-center gap-3"><span className="text-2xl">{p.emoji}</span><div><p className="text-xs font-black uppercase text-slate-700">{p.nombre}</p><p className="text-[9px] font-bold text-slate-400">{p.sales} ventas</p></div></div><span className="font-black text-emerald-600 text-sm">{p.marg}% Mg.</span></div>))}</div></Card>
-                    
-                    {/* ✅ CAMBIO 2: Renombre a "Menos Vendidos" */}
                     <Card className="p-6 border-2 border-slate-200">
                         <div className="flex items-center justify-between mb-6">
                             <h4 className="text-sm font-black text-slate-500 uppercase flex items-center gap-2">

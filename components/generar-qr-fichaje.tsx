@@ -41,7 +41,6 @@ export default function GenerarQRFichaje() {
 
       if (!perfil?.organization_id) return
 
-      // Cargar sucursales (sin los campos QR primero para evitar errores si no existen)
       const { data: dataSimple } = await supabase
         .from('sucursales')
         .select('id, nombre')
@@ -49,7 +48,6 @@ export default function GenerarQRFichaje() {
         .order('nombre')
 
       if (dataSimple) {
-        // Intentar cargar los campos QR si existen
         const { data: dataWithQR, error: qrError } = await supabase
           .from('sucursales')
           .select('id, nombre, qr_entrada_url, qr_salida_url')
@@ -57,7 +55,6 @@ export default function GenerarQRFichaje() {
           .order('nombre')
 
         const sucursalesData: Sucursal[] = dataSimple.map(s => {
-          // Solo usar dataWithQR si no hay error y es un array válido
           if (!qrError && dataWithQR && Array.isArray(dataWithQR)) {
             const withQR = dataWithQR.find((sq: any) => sq.id === s.id) as any
             return {
@@ -84,10 +81,9 @@ export default function GenerarQRFichaje() {
   }
 
   const generarQRData = (sucursalId: string, tipo: "entrada" | "salida") => {
-    // Generar URL que apunta a la página de fichaje
     const baseUrl = typeof window !== 'undefined' 
       ? window.location.origin 
-      : 'https://tu-app.vercel.app' // Fallback para SSR
+      : 'https://tu-app.vercel.app'
     
     const params = new URLSearchParams({
       sucursal_id: sucursalId,
@@ -120,9 +116,6 @@ export default function GenerarQRFichaje() {
   }
 
   const descargarQR = (sucursalId: string, tipo: "entrada" | "salida", nombre: string) => {
-    const qrData = generarQRData(sucursalId, tipo)
-    
-    // Para iOS, necesitamos convertir SVG a imagen
     const svgElement = document.querySelector(`#qr-${sucursalId}-${tipo}`) as SVGSVGElement
     if (!svgElement) {
       toast.error("No se encontró el código QR")
@@ -130,7 +123,6 @@ export default function GenerarQRFichaje() {
     }
 
     try {
-      // Convertir SVG a canvas para mejor compatibilidad
       const svgData = new XMLSerializer().serializeToString(svgElement)
       const canvas = document.createElement('canvas')
       const ctx = canvas.getContext('2d')
@@ -151,7 +143,6 @@ export default function GenerarQRFichaje() {
             link.href = downloadUrl
             link.download = `QR-${tipo}-${nombre.replace(/\s+/g, '-')}.png`
             
-            // Para iOS, abrir en nueva ventana si no funciona el download
             if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
               window.open(downloadUrl, '_blank')
               toast.info("QR abierto en nueva ventana", { description: "Guarda la imagen desde ahí" })
@@ -171,7 +162,7 @@ export default function GenerarQRFichaje() {
       img.src = url
     } catch (error) {
       console.error("Error descargando QR:", error)
-      toast.error("Error al descargar QR", { description: "Intenta copiar el JSON y usar qr.io" })
+      toast.error("Error al descargar QR")
     }
   }
 
@@ -179,7 +170,7 @@ export default function GenerarQRFichaje() {
     const qrUrl = generarQRData(sucursalId, tipo)
     navigator.clipboard.writeText(qrUrl)
     setCopiado(true)
-    toast.success("URL del QR copiada", { description: "Puedes compartirla o usarla en qr.io" })
+    toast.success("URL del QR copiada")
     setTimeout(() => setCopiado(false), 2000)
   }
 
@@ -189,10 +180,11 @@ export default function GenerarQRFichaje() {
     <div className="space-y-6">
       <div className="space-y-4">
         <div>
-          <label className="text-sm font-bold text-slate-700 uppercase mb-2 block">
+          <label htmlFor="sucursal-fichaje-select" className="text-sm font-bold text-slate-700 uppercase mb-2 block">
             Seleccionar Sucursal
           </label>
           <select
+            id="sucursal-fichaje-select"
             value={sucursalSeleccionada}
             onChange={(e) => {
               setSucursalSeleccionada(e.target.value)
@@ -270,7 +262,6 @@ export default function GenerarQRFichaje() {
               />
             </div>
 
-            {/* Mostrar si ya hay un QR guardado */}
             {((tipoQR === "entrada" && sucursalActual?.qr_entrada_url) || 
               (tipoQR === "salida" && sucursalActual?.qr_salida_url)) && (
               <div className="bg-green-50 border border-green-200 rounded-lg p-3">
@@ -286,7 +277,6 @@ export default function GenerarQRFichaje() {
                   setGuardando(true)
                   const qrUrl = generarQRData(sucursalSeleccionada, tipoQR)
                   await guardarQR(sucursalSeleccionada, tipoQR, qrUrl)
-                  // Recargar sucursales para actualizar los QR guardados
                   await cargarSucursales()
                   setGuardando(false)
                 }}
@@ -332,12 +322,6 @@ export default function GenerarQRFichaje() {
               </Button>
             </div>
 
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
-              <p className="text-xs text-yellow-800 font-bold">
-                💡 <strong>iOS:</strong> Si la descarga no funciona, copia la URL y usa <a href="https://qr.io/es/" target="_blank" rel="noopener noreferrer" className="underline text-yellow-900">qr.io</a> para generar el QR
-              </p>
-            </div>
-            
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
               <p className="text-xs text-blue-800 font-bold">
                 🔑 <strong>Llave de Acceso:</strong> Este QR funciona como una llave. Al escanearlo, el empleado podrá iniciar o finalizar su turno en este local.
@@ -362,4 +346,3 @@ export default function GenerarQRFichaje() {
     </div>
   )
 }
-

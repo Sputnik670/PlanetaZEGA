@@ -370,13 +370,13 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
         <div className="flex gap-2 mt-8 overflow-x-auto pb-2 scrollbar-hide">
           {[
             { id: "sales", label: "Caja y Ventas", icon: DollarSign },
-            { id: "inventory", label: "Inventario Real", icon: Package },
-            { id: "finance", label: "Inteligencia BI", icon: TrendingUp },
+            { id: "inventory", label: "Stock", icon: Package },
+            // ✅ CAMBIO 1: Nombre de solapa actualizado
+            { id: "finance", label: "Panel de Utilidades", icon: TrendingUp },
             { id: "supervision", label: "Supervisión 360°", icon: Eye },
-            { id: "catalog", label: "Dato Maestro", icon: Plus },
+            { id: "catalog", label: "Alta de Catálogo", icon: Plus },
             { id: "suppliers", label: "Logística", icon: Users },
             { id: "team", label: "Mi Equipo", icon: Briefcase },
-            // ✅ CAMBIO 1: Nombre de solapa actualizado
             { id: "alerts", label: "Advertencias de Stock", icon: AlertTriangle },
           ].map(t => (
             <Button key={t.id} onClick={() => setActiveTab(t.id as any)} variant={activeTab === t.id ? "secondary" : "ghost"} size="sm" className="rounded-full text-xs font-bold whitespace-nowrap"><t.icon className="mr-1.5 h-3.5 w-3.5" /> {t.label}</Button>
@@ -402,13 +402,10 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
             </div>
         )}
 
-        {/* ✅ CAMBIO 2, 3 y 4: Nueva vista de Advertencias detallada */}
         {activeTab === "alerts" && (
             <div className="space-y-6 animate-in fade-in">
-                {/* 1. Ofertas automáticas (Happy Hour se basa en criticos) */}
                 <HappyHour criticos={capitalEnRiesgo.criticos} onDiscountApplied={fetchData} />
 
-                {/* 2. Resumen Visual con nombres mejorados */}
                 <div className="grid grid-cols-2 gap-4">
                     <Card className="p-5 border-2 border-orange-200 bg-orange-50/50 shadow-sm">
                         <p className="text-[11px] font-black text-orange-600 uppercase mb-2">Riesgo Vencimiento</p>
@@ -422,7 +419,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
                     </Card>
                 </div>
 
-                {/* 3. Listado Detallado de Vencimientos */}
                 <Card className="p-6 border-2 border-orange-100 rounded-[2rem] bg-white shadow-sm">
                     <div className="flex items-center gap-2 mb-6">
                         <div className="p-2 bg-orange-100 rounded-xl text-orange-600"><Clock className="h-5 w-5" /></div>
@@ -454,7 +450,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
                     </div>
                 </Card>
 
-                {/* 4. Listado de Stock Bajo / Insuficiente */}
                 <Card className="p-6 border-2 border-red-100 rounded-[2rem] bg-white shadow-sm">
                     <div className="flex items-center gap-2 mb-6">
                         <div className="p-2 bg-red-100 rounded-xl text-red-600"><AlertCircle className="h-5 w-5" /></div>
@@ -640,7 +635,23 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <Card className="p-6 border-2 border-yellow-200 bg-yellow-50/20"><div className="flex items-center justify-between mb-6"><h4 className="text-sm font-black text-yellow-800 uppercase flex items-center gap-2"><Star className="h-5 w-5 fill-yellow-400" /> Estrellas</h4><Badge className="bg-yellow-400 text-yellow-900 text-[10px] font-black">ALTA ROTACIÓN</Badge></div><div className="space-y-3">{matrizRentabilidad.stars.map((p, i) => (<div key={i} className="flex justify-between items-center bg-white p-3 rounded-xl border border-yellow-100 shadow-sm"><div className="flex items-center gap-3"><span className="text-2xl">{p.emoji}</span><div><p className="text-xs font-black uppercase text-slate-700">{p.nombre}</p><p className="text-[9px] font-bold text-slate-400">{p.sales} ventas</p></div></div><span className="font-black text-emerald-600 text-sm">{p.marg}% Mg.</span></div>))}</div></Card>
-                    <Card className="p-6 border-2 border-slate-200"><div className="flex items-center justify-between mb-6"><h4 className="text-sm font-black text-slate-500 uppercase flex items-center gap-2"><Trash2 className="h-5 w-5" /> Huesos</h4><Badge variant="outline" className="text-[10px] font-black">SIN MOVIMIENTO</Badge></div><div className="space-y-3">{matrizRentabilidad.bones.map((p, i) => (<div key={i} className="flex justify-between items-center opacity-60 bg-slate-50 p-3 rounded-xl border"><span className="text-xs font-bold uppercase text-slate-600">{p.emoji} {p.nombre}</span></div>))}</div></Card>
+                    
+                    {/* ✅ CAMBIO 2: Renombre a "Menos Vendidos" */}
+                    <Card className="p-6 border-2 border-slate-200">
+                        <div className="flex items-center justify-between mb-6">
+                            <h4 className="text-sm font-black text-slate-500 uppercase flex items-center gap-2">
+                                <Trash2 className="h-5 w-5" /> Menos Vendidos
+                            </h4>
+                            <Badge variant="outline" className="text-[10px] font-black">BAJA ROTACIÓN</Badge>
+                        </div>
+                        <div className="space-y-3">
+                            {matrizRentabilidad.bones.map((p, i) => (
+                                <div key={i} className="flex justify-between items-center opacity-60 bg-slate-50 p-3 rounded-xl border">
+                                    <span className="text-xs font-bold uppercase text-slate-600">{p.emoji} {p.nombre}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </Card>
                 </div>
             </div>
         )}
@@ -674,7 +685,6 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
         )}
       </div>
 
-      {/* MODALES EXTERNOS (IGUALES) */}
       <Dialog open={!!editingProduct} onOpenChange={o => !o && setEditingProduct(null)}>
         <DialogContent className="max-w-md rounded-3xl">
             <DialogHeader><DialogTitle className="font-black uppercase flex items-center gap-2"><Pencil className="h-5 w-5 text-primary"/> Editar Catálogo</DialogTitle></DialogHeader>

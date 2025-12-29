@@ -2,236 +2,94 @@
 
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { supabase } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
-import { Loader2, Package, Save, Plus, DollarSign, TrendingUp, ScanBarcode, X, Calendar as CalendarIcon } from "lucide-react"
+import { Loader2, Package, Save, Plus, DollarSign, TrendingUp, ScanBarcode, X, Calendar as CalendarIcon, AlertCircle } from "lucide-react"
 import { toast } from "sonner"
-import { format } from "date-fns"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { useZxing } from "react-zxing"
+// ✅ Usamos el motor robusto para evitar fallos en Vercel
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode"
 
-// --- CONFIGURACIÓN DE ESCANER MEJORADO PARA MÓVILES ---
+// --- CONFIGURACIÓN DE ESCANER ROBUSTO ---
 function BarcodeScanner({ onResult, onClose }: { onResult: (code: string) => void, onClose: () => void }) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null)
-  const [manualInput, setManualInput] = useState("")
-  const [showManualInput, setShowManualInput] = useState(false)
+  const scannerRef = useRef<Html5Qrcode | null>(null)
+  const scannerId = "reader-catalogo-v2"
 
-  // Verificar permisos de cámara
   useEffect(() => {
-    const checkPermissions = async () => {
+    // Retraso de seguridad para asegurar que el DOM de Vercel/Móvil esté listo
+    const initTimer = setTimeout(async () => {
       try {
-        // Verificar si el navegador soporta getUserMedia
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          setError("Tu navegador no soporta el acceso a la cámara")
-          setHasPermission(false)
-          setLoading(false)
-          return
+        if (!document.getElementById(scannerId)) return
+
+        const html5QrCode = new Html5Qrcode(scannerId)
+        scannerRef.current = html5QrCode
+
+        const config = {
+          fps: 20,
+          qrbox: { width: 260, height: 180 },
+          aspectRatio: 1.0,
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.QR_CODE
+          ]
         }
 
-        // Intentar acceder a la cámara para verificar permisos
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: "environment" } 
-          })
-          // Si llegamos aquí, tenemos permisos
-          stream.getTracks().forEach(track => track.stop()) // Liberar stream de prueba
-          setHasPermission(true)
-        } catch (err: any) {
-          if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-            setError("Se necesita permiso para acceder a la cámara. Por favor, permite el acceso en la configuración de tu navegador.")
-            setHasPermission(false)
-          } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-            setError("No se encontró ninguna cámara en tu dispositivo")
-            setHasPermission(false)
-          } else {
-            setError(`Error al acceder a la cámara: ${err.message}`)
-            setHasPermission(false)
-          }
-        }
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          config,
+          (decodedText) => {
+            if (navigator.vibrate) navigator.vibrate(100)
+            onResult(decodedText)
+          },
+          () => {}
+        )
         setLoading(false)
-      } catch (err) {
-        setError("Error al verificar permisos de cámara")
-        setHasPermission(false)
+      } catch (err: any) {
+        setError("No se pudo acceder a la cámara. Verifica los permisos.")
         setLoading(false)
       }
-    }
+    }, 500)
 
-    checkPermissions()
-  }, [])
-
-  const { ref } = useZxing({
-    onDecodeResult(result: any) {
-      if (result && result.getText) {
-        const code = result.getText()
-        // Feedback visual: vibrar si está disponible (móvil)
-        if (navigator.vibrate) {
-          navigator.vibrate(100)
-        }
-        onResult(code)
-      } else {
-        onResult(String(result))
+    return () => {
+      clearTimeout(initTimer)
+      if (scannerRef.current?.isScanning) {
+        scannerRef.current.stop().catch(console.error)
+        scannerRef.current.clear()
       }
-    },
-    onError(err: any) {
-      console.error("Error del scanner:", err)
-      if (err.name !== "NotFoundError") {
-        setError("Error al escanear. Intenta nuevamente o usa entrada manual.")
-      }
-    },
-    constraints: { 
-      video: { 
-        facingMode: "environment", // Cámara trasera en móviles
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      }, 
-      audio: false 
     }
-  } as any)
+  }, [onResult])
 
-  const handleManualSubmit = () => {
-    if (manualInput.trim()) {
-      onResult(manualInput.trim())
-      setManualInput("")
-      setShowManualInput(false)
-    }
-  }
-
-  // Si no hay permisos o hay error, mostrar opción manual
-  if (hasPermission === false || error) {
+  if (error) {
     return (
-      <div className="relative flex flex-col items-center justify-center bg-black min-h-[400px] p-6">
-        <div className="text-center space-y-4 text-white">
-          <X className="h-16 w-16 mx-auto text-red-400" />
-          <div>
-            <p className="font-bold text-lg mb-2">No se puede acceder a la cámara</p>
-            <p className="text-sm text-gray-300 mb-4">{error}</p>
-          </div>
-          
-          {!showManualInput ? (
-            <div className="space-y-3">
-              <Button 
-                onClick={() => setShowManualInput(true)}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                Ingresar código manualmente
-              </Button>
-              <Button 
-                variant="outline" 
-                onClick={onClose}
-                className="border-white text-white hover:bg-white/10"
-              >
-                Cancelar
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-3 w-full max-w-xs">
-              <Input
-                type="text"
-                placeholder="Ingresa el código de barras"
-                value={manualInput}
-                onChange={(e) => setManualInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleManualSubmit()}
-                className="bg-white text-black"
-                autoFocus
-              />
-              <div className="flex gap-2">
-                <Button 
-                  onClick={handleManualSubmit}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700"
-                  disabled={!manualInput.trim()}
-                >
-                  Confirmar
-                </Button>
-                <Button 
-                  variant="outline"
-                  onClick={() => {
-                    setShowManualInput(false)
-                    setManualInput("")
-                  }}
-                  className="border-white text-white hover:bg-white/10"
-                >
-                  Volver
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
+      <div className="flex flex-col items-center justify-center bg-black min-h-[400px] p-8 text-white text-center space-y-4">
+        <AlertCircle className="h-12 w-12 text-red-500" />
+        <p className="font-bold uppercase text-sm">Error de Cámara</p>
+        <p className="text-xs text-slate-400">{error}</p>
+        <Button onClick={onClose} variant="destructive" className="w-full">Cerrar</Button>
       </div>
     )
   }
 
   return (
-    <div className="relative flex flex-col items-center justify-center bg-black w-full min-h-[400px] max-h-[70vh]">
+    <div className="relative flex flex-col items-center justify-center bg-black w-full min-h-[400px]">
       {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-50">
-          <div className="text-center text-white">
-            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
-            <p className="text-sm">Iniciando cámara...</p>
-          </div>
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black z-50 text-white gap-3">
+          <Loader2 className="h-10 w-10 animate-spin text-blue-500" />
+          <p className="text-[10px] font-bold uppercase">Iniciando Lector...</p>
         </div>
       )}
-      
-      <video 
-        ref={ref} 
-        className="w-full h-full object-cover" 
-        playsInline 
-        muted 
-        autoPlay
-        style={{ maxHeight: "70vh" }}
-      />
-      
-      <div className="absolute top-0 left-0 w-full h-full border-2 border-primary/50 pointer-events-none">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-40 border-2 border-white/80 rounded-lg shadow-[0_0_0_999px_rgba(0,0,0,0.5)]">
-          <p className="absolute -top-8 w-full text-center text-white font-bold text-sm drop-shadow-md">
-            Apunta al código
-          </p>
-        </div>
-      </div>
-      
-      <div className="absolute bottom-4 left-0 right-0 flex flex-col items-center gap-2 z-50">
-        <Button 
-          type="button" 
-          variant="outline"
-          size="sm"
-          className="bg-white/10 border-white/20 text-white hover:bg-white/20"
-          onClick={() => setShowManualInput(!showManualInput)}
-        >
-          {showManualInput ? "Ocultar entrada manual" : "Ingresar manualmente"}
-        </Button>
-        
-        {showManualInput && (
-          <div className="w-full max-w-xs px-4 space-y-2">
-            <Input
-              type="text"
-              placeholder="Código de barras"
-              value={manualInput}
-              onChange={(e) => setManualInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleManualSubmit()}
-              className="bg-white text-black"
-              autoFocus
-            />
-            <Button 
-              onClick={handleManualSubmit}
-              className="w-full bg-blue-600 hover:bg-blue-700"
-              disabled={!manualInput.trim()}
-            >
-              Confirmar
-            </Button>
-          </div>
-        )}
-        
-        <Button 
-          type="button" 
-          variant="destructive" 
-          className="rounded-full px-6 shadow-lg" 
-          onClick={onClose}
-        >
+      <div id={scannerId} className="w-full h-full" />
+      <div className="absolute bottom-6 flex flex-col gap-2 z-50">
+        <Button variant="destructive" className="rounded-full px-10 shadow-xl font-bold uppercase text-[10px]" onClick={onClose}>
           <X className="mr-2 h-4 w-4" /> Cancelar
         </Button>
       </div>
@@ -244,17 +102,25 @@ async function fetchProductFromApi(barcode: string) {
     const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`)
     const data = await response.json()
     if (data.status === 1) {
-      return { found: true, nombre: data.product.product_name_es || data.product.product_name, marca: data.product.brands, image: data.product.image_front_small_url }
+      return { 
+        found: true, 
+        nombre: data.product.product_name_es || data.product.product_name, 
+        marca: data.product.brands 
+      }
     }
     return { found: false }
   } catch (e) { return { found: false } }
 }
 
-const QUICK_EMOJIS = ["🍫", "🍬", "🍭", "🍪", "🥤", "🧃", "🍺", "🧊", "🚬", "🔋", "🧼", "🧴", "🥖", "🥐", "🥪", "📦", "🍦", "🍎", "🍌", "⚡"]
+const QUICK_EMOJIS = [
+    "🍫", "🍬", "🍭", "🍩", "🍪", "🥤", "🧃", "☕", "🧉", "🥛", 
+    "🥖", "🥐", "🥪", "🌭", "🍔", "🚬", "🔥", "🔋", "🧼", "🧴", 
+    "🖊️", "📓", "✂️", "📍", "📱", "💻", "⚡", "📦", "🎁", "🎲"
+]
 
 interface CrearProductoProps {
   onProductCreated?: () => void
-  sucursalId?: string // ✅ Recibimos la sucursal activa desde el Dashboard
+  sucursalId?: string 
 }
 
 export default function CrearProducto({ onProductCreated, sucursalId }: CrearProductoProps) {
@@ -286,14 +152,18 @@ export default function CrearProducto({ onProductCreated, sucursalId }: CrearPro
     if (code === formData.codigo_barras) return;
 
     toast.info("Verificando código...")
-
     try {
         const { data: { user } } = await supabase.auth.getUser()
-        if (!user?.id) throw new Error("No hay sesión activa")
-        const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single<{ organization_id: string | null }>()
-        if (!perfil?.organization_id) throw new Error("No se encontró la organización.")
+        if (!user) return;
 
-        // 🛡️ Buscamos solo en nuestra organización
+        const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single()
+        
+        // ✅ FIX TS 2345: Validamos que exista la organización antes de usarla
+        if (!perfil?.organization_id) {
+            toast.error("No se encontró tu organización");
+            return;
+        }
+
         const { data: existente } = await supabase
             .from('productos')
             .select('nombre')
@@ -313,31 +183,33 @@ export default function CrearProducto({ onProductCreated, sucursalId }: CrearPro
             nombre: apiData.found ? `${apiData.marca ? apiData.marca + ' ' : ''}${apiData.nombre}` : prev.nombre, 
             emoji: apiData.found ? "🥫" : "📦" 
         }))
-        
-        if (apiData.found) toast.success("Datos encontrados online")
-    } catch (error) { toast.error("Error al verificar código") }
+        if (apiData.found) toast.success("Identificado")
+    } catch (error) { console.error(error) }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!sucursalId) {
-        toast.error("Error de Sucursal", { description: "Selecciona una sucursal en el panel superior antes de crear productos con stock." });
+        toast.error("Error", { description: "Selecciona una sucursal arriba." });
         return;
     }
     setLoading(true)
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user?.id) throw new Error("No hay sesión activa")
-      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single<{ organization_id: string | null }>()
-      
-      if (!perfil?.organization_id) throw new Error("No se encontró organización activa.")
+      if (!user) throw new Error("No hay sesión");
 
-      // 1. Crear el DATO MAESTRO (Catálogo Global)
+      const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single()
+      
+      // ✅ FIX TS 2345: Validación de organización
+      const orgId = perfil?.organization_id;
+      if (!orgId) throw new Error("No hay organización vinculada.");
+
+      // 1. Crear el producto en el Catálogo
       const { data: nuevoProducto, error: errorProd } = await supabase
         .from('productos')
         .insert([{
-            organization_id: perfil.organization_id, // ✅ VINCULACIÓN EMPRESA
+            organization_id: orgId,
             nombre: formData.nombre,
             categoria: formData.categoria,
             precio_venta: precioNum,
@@ -346,40 +218,32 @@ export default function CrearProducto({ onProductCreated, sucursalId }: CrearPro
             emoji: formData.emoji,
             codigo_barras: formData.codigo_barras || null 
         }])
-        .select()
-        .single()
+        .select().single()
 
       if (errorProd) throw errorProd
 
-      // 2. Crear el MOVIMIENTO INICIAL (Stock Local)
+      // 2. Crear el movimiento inicial de Stock
       const cantidad = parseInt(formData.cantidad_inicial) || 0
-      
       if (cantidad > 0 && nuevoProducto) {
-        const { error: errorStock } = await supabase
-          .from('stock')
-          .insert({
-              organization_id: perfil.organization_id, // Empresa
-              sucursal_id: sucursalId,                 // ✅ SUCURSAL SELECCIONADA EN EL DASHBOARD
+        await supabase.from('stock').insert({
+              organization_id: orgId,
+              sucursal_id: sucursalId,
               producto_id: nuevoProducto.id,
               cantidad: cantidad,
               tipo_movimiento: 'entrada',
               estado: 'disponible',
-              costo_unitario_historico: costoNum,     // Guardamos el costo de este lote
+              costo_unitario_historico: costoNum,
               fecha_vencimiento: formData.fecha_vencimiento || null,
               fecha_ingreso: new Date().toISOString()
           })
-
-        if (errorStock) throw errorStock
       }
 
-      toast.success("Producto creado", { description: "Se agregó al catálogo y se cargó el stock inicial." })
-      
+      toast.success("Catálogo actualizado")
       setFormData({ codigo_barras: "", nombre: "", categoria: "", precio_venta: "", costo: "", fecha_vencimiento: "", cantidad_inicial: "0", emoji: "📦" })
       if (onProductCreated) onProductCreated()
 
     } catch (error: any) {
-      console.error(error)
-      toast.error("Error al guardar", { description: error.message })
+      toast.error("Error", { description: error.message })
     } finally {
       setLoading(false)
     }
@@ -387,40 +251,52 @@ export default function CrearProducto({ onProductCreated, sucursalId }: CrearPro
 
   return (
     <>
-        <Card className="p-6 w-full max-w-md mx-auto bg-white shadow-lg border-2 border-primary/10">
-        <div className="flex items-center gap-2 mb-6 text-primary"><div className="p-2 bg-primary/10 rounded-lg"><Package className="h-6 w-6" /></div><div><h2 className="text-xl font-bold leading-none">Nuevo Producto</h2><p className="text-xs text-muted-foreground mt-1">Alta de catálogo + Stock inicial</p></div></div>
+        <Card className="p-6 w-full max-w-md mx-auto bg-white shadow-2xl border-0 rounded-[2.5rem]">
+        <div className="flex items-center gap-3 mb-8 text-slate-900">
+            <div className="p-3 bg-slate-100 rounded-2xl"><Package className="h-6 w-6" /></div>
+            <h2 className="text-xl font-black uppercase tracking-tight leading-none">Alta de Catálogo</h2>
+        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-                 <div className="flex justify-between items-end"><label htmlFor="nombre" className="text-xs font-semibold text-muted-foreground uppercase">Nombre del Producto</label><Button type="button" size="sm" variant={formData.codigo_barras ? "secondary" : "default"} onClick={() => setShowScanner(true)} className={`h-7 text-xs gap-1.5 ${!formData.codigo_barras ? "bg-blue-600 hover:bg-blue-700 text-white" : ""}`}><ScanBarcode className="h-3.5 w-3.5" />{formData.codigo_barras ? "Cambiar Código" : "Escanear"}</Button></div>
+        <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="space-y-2">
+                 <div className="flex justify-between items-end px-1"><label className="text-[10px] font-black text-slate-400 uppercase">Identificación</label><Button type="button" size="sm" variant={formData.codigo_barras ? "secondary" : "default"} onClick={() => setShowScanner(true)} className={`h-8 text-[9px] font-black uppercase rounded-xl gap-2 ${!formData.codigo_barras ? "bg-blue-600 text-white" : ""}`}><ScanBarcode className="h-3.5 w-3.5" />{formData.codigo_barras ? "Cambiar" : "Escanear"}</Button></div>
                  <div className="flex gap-2">
-                    <Input id="nombre" name="nombre" placeholder="Ej: Alfajor Jorgito" value={formData.nombre} onChange={handleChange} className="font-medium flex-1" required />
-                    <div className="w-16 shrink-0"><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full text-xl px-0 shadow-none border-dashed" type="button" title="Elegir Icono">{formData.emoji}</Button></PopoverTrigger><PopoverContent className="w-64 p-3" align="end"><p className="text-xs font-bold text-muted-foreground mb-2">Icono Rápido</p><div className="grid grid-cols-5 gap-2">{QUICK_EMOJIS.map(em => (<button key={em} type="button" onClick={() => setFormData({...formData, emoji: em})} className="text-2xl hover:bg-slate-100 p-1 rounded transition-colors">{em}</button>))}</div></PopoverContent></Popover></div>
+                    <Input id="nombre" name="nombre" placeholder="Nombre" value={formData.nombre} onChange={handleChange} className="font-bold flex-1 h-14 rounded-2xl bg-slate-50 border-transparent" required />
+                    <div className="w-16 shrink-0">
+                        <Popover>
+                            <PopoverTrigger asChild><Button variant="outline" className="w-full h-14 text-2xl px-0 rounded-2xl bg-slate-50 border-transparent" type="button">{formData.emoji}</Button></PopoverTrigger>
+                            <PopoverContent className="w-64 p-4 bg-white rounded-3xl shadow-2xl" align="end">
+                                <p className="text-[10px] font-black text-slate-400 mb-3 text-center uppercase">Icono</p>
+                                <div className="grid grid-cols-5 gap-2 max-h-56 overflow-y-auto pr-1">
+                                    {QUICK_EMOJIS.map(em => (<button key={em} type="button" onClick={() => setFormData({...formData, emoji: em})} className="text-2xl hover:bg-slate-100 p-2 rounded-xl transition-all">{em}</button>))}
+                                </div>
+                            </PopoverContent>
+                        </Popover>
+                    </div>
                  </div>
-                 {formData.codigo_barras && (<p className="text-[10px] text-blue-600 font-mono">Código Barras: {formData.codigo_barras}</p>)}
             </div>
 
-            <div className="space-y-1.5"><label htmlFor="categoria" className="text-xs font-semibold text-muted-foreground uppercase">Categoría</label><Input id="categoria" name="categoria" placeholder="Golosinas / Bebidas" value={formData.categoria} onChange={handleChange} required /></div>
+            <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase px-1">Categoría</label><Input id="categoria" name="categoria" placeholder="Ej: Bebidas" value={formData.categoria} onChange={handleChange} className="h-12 rounded-2xl bg-slate-50 border-transparent font-bold" required /></div>
 
-            <div className="grid grid-cols-2 gap-3 p-3 bg-blue-50/50 rounded-lg border border-blue-100">
-                <div className="space-y-1.5"><label htmlFor="costo" className="text-xs font-bold text-muted-foreground uppercase flex items-center gap-1">Costo Unit.</label><div className="relative"><DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" /><Input id="costo" name="costo" type="number" placeholder="0" className="pl-6 bg-white h-9" value={formData.costo} onChange={handleChange} /></div></div>
-                <div className="space-y-1.5"><label htmlFor="precio_venta" className="text-xs font-bold text-primary uppercase">Precio Venta</label><div className="relative"><DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-primary" /><Input id="precio_venta" name="precio_venta" type="number" placeholder="0" className="pl-6 border-primary/30 bg-white h-9 font-bold" value={formData.precio_venta} onChange={handleChange} required /></div></div>
-                {(precioNum > 0 && costoNum > 0) && (<div className={`col-span-2 text-xs flex justify-between items-center px-3 py-1.5 rounded border bg-white ${parseFloat(margen) < 30 ? "text-red-600 border-red-200" : "text-emerald-700 border-emerald-200"}`}><span className="font-bold flex items-center gap-1"><TrendingUp className="h-3 w-3" /> Margen: {margen}%</span><span>Ganancia: <strong>${ganancia.toFixed(0)}</strong></span></div>)}
+            <div className="grid grid-cols-2 gap-4 p-5 bg-slate-900 rounded-3xl">
+                <div className="space-y-1.5"><label className="text-[9px] font-black text-slate-500 uppercase">Costo</label><div className="relative"><DollarSign className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-500" /><Input id="costo" name="costo" type="number" className="pl-7 bg-slate-800 border-transparent text-white h-10 rounded-xl" value={formData.costo} onChange={handleChange} /></div></div>
+                <div className="space-y-1.5"><label className="text-[9px] font-black text-blue-400 uppercase">Venta</label><div className="relative"><DollarSign className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-blue-400" /><Input id="precio_venta" name="precio_venta" type="number" className="pl-7 bg-slate-800 border-blue-900/50 text-blue-100 h-10 rounded-xl font-bold" value={formData.precio_venta} onChange={handleChange} required /></div></div>
+                {(precioNum > 0 && costoNum > 0) && (<div className={`col-span-2 text-[9px] font-black flex justify-between items-center px-3 py-2 rounded-xl bg-white/5 border border-white/10 ${parseFloat(margen) < 30 ? "text-red-400" : "text-emerald-400"}`}><span>MARGEN: {margen}%</span><span>NETO: ${ganancia.toFixed(0)}</span></div>)}
             </div>
 
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 mt-2 space-y-3">
-                <div className="flex items-center justify-between"><label className="text-sm font-bold text-slate-700 flex items-center gap-2"><Plus className="h-4 w-4 text-emerald-600" /> Stock Inicial</label></div>
+            <div className="p-5 bg-blue-50/50 rounded-3xl border-2 border-blue-100 space-y-4">
+                <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2"><Plus className="h-3 w-3" /> Stock de Inicio</label>
                 <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1"><label htmlFor="cantidad_inicial" className="text-[10px] font-bold text-muted-foreground uppercase">Unidades</label><Input id="cantidad_inicial" name="cantidad_inicial" type="number" min="0" value={formData.cantidad_inicial} onChange={handleChange} className="bg-white text-lg font-bold text-center"/></div>
-                    <div className="space-y-1"><label htmlFor="fecha_vencimiento" className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1"><CalendarIcon className="h-3 w-3" /> Vencimiento</label><Input id="fecha_vencimiento" type="date" name="fecha_vencimiento" value={formData.fecha_vencimiento} onChange={handleChange} className="bg-white text-xs px-1"/></div>
+                    <div className="space-y-1"><label className="text-[9px] font-black text-blue-400 uppercase">Cant.</label><Input id="cantidad_inicial" name="cantidad_inicial" type="number" value={formData.cantidad_inicial} onChange={handleChange} className="bg-white text-xl font-black text-center h-14 rounded-2xl border-blue-200"/></div>
+                    <div className="space-y-1"><label className="text-[9px] font-black text-blue-400 uppercase">Vence</label><Input id="fecha_vencimiento" type="date" name="fecha_vencimiento" value={formData.fecha_vencimiento} onChange={handleChange} className="bg-white text-[10px] font-bold h-14 rounded-2xl border-blue-200 px-2"/></div>
                 </div>
             </div>
 
-            <Button type="submit" className="w-full h-12 text-md font-bold shadow-sm" disabled={loading}>{loading ? <Loader2 className="animate-spin mr-2" /> : <Save className="mr-2 h-5 w-5" />} Crear y Guardar</Button>
+            <Button type="submit" className="w-full h-16 text-sm font-black uppercase tracking-widest shadow-xl rounded-2xl bg-blue-600 hover:bg-blue-700" disabled={loading}>{loading ? <Loader2 className="animate-spin" /> : "Confirmar Alta"}</Button>
         </form>
         </Card>
 
-        <Dialog open={showScanner} onOpenChange={setShowScanner}><DialogContent className="sm:max-w-md p-0 overflow-hidden bg-black border-none text-white">{showScanner && (<BarcodeScanner onResult={handleBarcodeDetected} onClose={() => setShowScanner(false)} />)}</DialogContent></Dialog>
+        <Dialog open={showScanner} onOpenChange={setShowScanner}><DialogContent className="sm:max-w-md p-0 overflow-hidden bg-black border-none text-white shadow-2xl rounded-3xl">{showScanner && (<BarcodeScanner onResult={handleBarcodeDetected} onClose={() => setShowScanner(false)} />)}</DialogContent></Dialog>
     </>
   )
 }

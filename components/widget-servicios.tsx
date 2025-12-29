@@ -1,4 +1,3 @@
-// components/widget-servicios.tsx
 "use client"
 
 import { useState, useEffect } from "react"
@@ -100,8 +99,8 @@ export default function WidgetServicios({ onVentaRegistrada }: { onVentaRegistra
                 sucursal_id: turno.sucursal_id,
                 caja_diaria_id: turno.id,
                 producto_id: virtualProductId,
-                cantidad: 1, // ✅ OBLIGATORIO
-                tipo_movimiento: 'salida', // ✅ OBLIGATORIO
+                cantidad: 1, // <--- FALTABA ESTO
+                tipo_movimiento: 'salida', // <--- FALTABA ESTO
                 estado: 'vendido',
                 fecha_venta: fechaArgentina.toISOString(),
                 metodo_pago: metodoPago,
@@ -135,8 +134,8 @@ export default function WidgetServicios({ onVentaRegistrada }: { onVentaRegistra
 
             <div className="space-y-3">
                 <div>
-                    {/* ✅ FIX A11Y: Vinculamos explícitamente el Label con el Select */}
                     <Label htmlFor="select-servicio" className="text-indigo-100 text-xs mb-1 block">Operadora / Servicio</Label>
+                    {/* ✅ FIX A11Y + ID/NAME necesarios para select */}
                     <select 
                         id="select-servicio" 
                         name="servicio"

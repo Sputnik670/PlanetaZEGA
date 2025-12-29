@@ -83,7 +83,7 @@ interface VentaJoin {
     notas?: string | null
     cantidad: number 
     productos: { nombre: string; precio_venta: number; emoji: string } | null 
-    caja_diaria_id?: string //
+    caja_diaria_id?: string // [CORRECCION] Necesario para el detalle de cierre
 }
 
 interface PaymentBreakdown {
@@ -239,6 +239,7 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
 
   const biMetrics = useMemo(() => {
     let bruto = 0, costo = 0, blanco = 0
+    // 1. Margen de productos vendidos
     ventasRecientes.forEach(v => {
         const cant = v.cantidad || 1
         bruto += (v.precio_venta_historico || v.productos?.precio_venta || 0) * cant
@@ -246,7 +247,7 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
         if (['tarjeta', 'transferencia', 'billetera_virtual'].includes(v.metodo_pago)) blanco += (v.precio_venta_historico || v.productos?.precio_venta || 0) * cant
     })
 
-    // Integrar movimientos manuales para Utilidad Neta real
+    // [CORRECCIÓN] 2. Sumar Ingresos manuales y Restar Egresos manuales
     let manualIngresos = 0
     let manualEgresos = 0
     turnosAudit.forEach(t => {
@@ -256,8 +257,16 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
         })
     })
 
-    const neta = (bruto - costo) + manualIngresos - manualEgresos
-    return { bruto, neta, margen: bruto > 0 ? ((bruto - costo) / bruto) * 100 : 0, blanco, negro: bruto - blanco }
+    const utilidadProductos = bruto - costo
+    const neta = utilidadProductos + manualIngresos - manualEgresos
+
+    return { 
+        bruto, 
+        neta, 
+        margen: bruto > 0 ? (utilidadProductos / bruto) * 100 : 0, 
+        blanco, 
+        negro: bruto - blanco 
+    }
   }, [ventasRecientes, turnosAudit])
 
   const matrizRentabilidad = useMemo(() => {
@@ -380,7 +389,7 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
             <div><h1 className="text-2xl font-black tracking-tight flex items-center gap-2 uppercase">Torre de Control <Sparkles className="h-5 w-5 text-yellow-400" /></h1><p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Panel Administrativo Global</p></div>
             <div className="text-right">
                 <p className="text-[10px] text-slate-400 font-bold uppercase">Capital Stock</p>
-                {/* Corrección Capital Stock: filtrar servicios y stock huerfano */}
+                {/* [CORRECCIÓN] Capital Stock: Filtramos Servicios y stock negativo */}
                 <p className="text-xl font-black text-emerald-400">
                     {formatMoney(productos.filter(p => p.categoria !== "Servicios" && (p.stock_disponible || 0) > 0).reduce((a,b) => a + (b.costo * (b.stock_disponible || 0)), 0))}
                 </p>
@@ -552,7 +561,7 @@ export default function DashboardDueno({ onBack, sucursalId }: DashboardDuenoPro
                                                 <div className="p-4 bg-white rounded-2xl border shadow-sm text-center"><p className="text-[10px] font-black text-slate-400 uppercase mb-1">Misiones</p><p className="text-2xl font-black text-slate-900">{t.misiones?.filter(m => m.es_completada).length} / {t.misiones?.length}</p></div>
                                             </div>
 
-                                            {/* Detalle de Ventas del Turno solicitado */}
+                                            {/* [CORRECCIÓN] Detalle de Productos Vendidos por turno */}
                                             <div className="space-y-3">
                                                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><ShoppingBag className="h-3 w-3" /> Detalle de Productos Vendidos</h4>
                                                 {ventasRecientes.filter(v => v.caja_diaria_id === t.id).length > 0 ? (

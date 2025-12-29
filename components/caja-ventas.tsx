@@ -33,17 +33,15 @@ interface CajaVentasProps {
   onVentaCompletada?: () => void 
 }
 
-// --- COMPONENTE SCANNER OPTIMIZADO PARA PRODUCTOS ---
+// --- COMPONENTE SCANNER (Sin cambios, lógica original) ---
 function BarcodeScannerVentas({ onResult, onClose }: { onResult: (code: string) => void, onClose: () => void }) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const scannerRef = useRef<Html5Qrcode | null>(null)
   
-  // ID único para evitar conflictos con el scanner de fichaje
   const scannerId = "reader-ventas"
 
   useEffect(() => {
-    // 2. Lógica de inicialización con delay de seguridad para Vercel
     const initTimer = setTimeout(async () => {
       try {
         if (!document.getElementById(scannerId)) {
@@ -55,10 +53,8 @@ function BarcodeScannerVentas({ onResult, onClose }: { onResult: (code: string) 
 
         const config = {
           fps: 20,
-          // Caja rectangular mejor adaptada para códigos de barras largos
           qrbox: { width: 280, height: 200 }, 
           aspectRatio: 1.0,
-          // Soportamos todos los formatos comunes de productos + QR
           formatsToSupport: [
             Html5QrcodeSupportedFormats.QR_CODE,
             Html5QrcodeSupportedFormats.EAN_13,
@@ -73,7 +69,6 @@ function BarcodeScannerVentas({ onResult, onClose }: { onResult: (code: string) 
           { facingMode: "environment" },
           config,
           (decodedText) => {
-            // Éxito: vibramos y devolvemos el código
             if (navigator.vibrate) navigator.vibrate(100)
             onResult(decodedText)
           },
@@ -87,9 +82,8 @@ function BarcodeScannerVentas({ onResult, onClose }: { onResult: (code: string) 
         setError("No se pudo iniciar la cámara. Verifica los permisos.")
         setLoading(false)
       }
-    }, 500) // Delay de 500ms crítico
+    }, 500)
 
-    // Cleanup
     return () => {
       clearTimeout(initTimer)
       if (scannerRef.current?.isScanning) {
@@ -118,10 +112,7 @@ function BarcodeScannerVentas({ onResult, onClose }: { onResult: (code: string) 
           <p>Conectando lector...</p>
         </div>
       )}
-      
-      {/* Contenedor donde se inyecta el video */}
       <div id={scannerId} className="w-full h-full" />
-      
       <div className="absolute bottom-4 flex flex-col gap-2 z-50 pointer-events-none">
         <Button 
           variant="destructive" 
@@ -135,6 +126,7 @@ function BarcodeScannerVentas({ onResult, onClose }: { onResult: (code: string) 
   )
 }
 
+// --- COMPONENTE PRINCIPAL (Con las mejoras aplicadas) ---
 export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVentaCompletada }: CajaVentasProps) {
   const [busqueda, setBusqueda] = useState("")
   const [productos, setProductos] = useState<Producto[]>([])
@@ -143,8 +135,6 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
   const [procesandoVenta, setProcesandoVenta] = useState(false)
   const [metodoPago, setMetodoPago] = useState<"efectivo" | "tarjeta" | "billetera_virtual">("efectivo")
   const [showScanner, setShowScanner] = useState(false)
-  
-  // ✅ Nuevo estado para controlar la generación del ticket
   const [imprimirTicket, setImprimirTicket] = useState(true)
   
   const inputRef = useRef<HTMLInputElement>(null)
@@ -202,8 +192,8 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
     }
   }, [sucursalId, agregarAlCarrito])
 
-  // ✅ CORRECCIÓN 1: Búsqueda predictiva (Debounce)
-  // Esto permite buscar mientras escribes sin presionar Enter
+  // ✅ MEJORA 1: Búsqueda predictiva (Debounce)
+  // Esto permite que el empleado busque sin necesidad de presionar ENTER a cada rato.
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
       if (busqueda.trim().length >= 2) {
@@ -243,11 +233,11 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
         cantidad: item.cantidad
       }))
 
-      // ✅ CORRECCIÓN 2: Pasamos p_caja_id (turnoId)
-      // Esto vincula la venta al turno abierto para la auditoría y cierre de caja.
+      // ✅ MEJORA 2: Conexión con el Cierre de Caja
+      // Agregamos `p_caja_id` para que esta venta cuente en el arqueo final.
       const { data, error } = await supabase.rpc('procesar_venta', {
         p_sucursal_id: sucursalId,
-        p_caja_id: turnoId, // <--- CAMBIO CRÍTICO AQUÍ
+        p_caja_id: turnoId, // <--- ESTA LÍNEA ES LA CLAVE DE LA AUDITORÍA
         p_items: itemsSimplificados,
         p_metodo_pago_global: metodoPago,
         p_monto_total_cliente: calcularTotal()
@@ -300,7 +290,7 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
             className="pl-4 pr-32 bg-white font-black h-16 rounded-2xl border-2 border-slate-100"
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
-            // Mantenemos onKeyDown para forzar búsqueda inmediata si el usuario quiere
+            // Mantenemos onKeyDown para permitir búsqueda manual inmediata si el usuario quiere
             onKeyDown={(e) => e.key === 'Enter' && buscarProductos(busqueda, true)} 
           />
           <Button
@@ -355,7 +345,6 @@ export default function CajaVentas({ turnoId, empleadoNombre, sucursalId, onVent
           <span>$ {calcularTotal().toLocaleString('es-AR')}</span>
         </div>
 
-        {/* Selector para habilitar/deshabilitar el comprobante */}
         <div className="flex items-center justify-between px-3 py-2 bg-slate-50 rounded-xl border border-dashed border-slate-200">
           <span className="text-[10px] font-black uppercase text-slate-400 tracking-tighter">¿Generar comprobante?</span>
           <Button 

@@ -51,10 +51,11 @@ export default function RegistrarMovimiento({ cajaId, onMovimientoRegistrado }: 
       const { data: perfil } = await supabase.from('perfiles').select('organization_id').eq('id', user.id).single()
       if (!perfil?.organization_id) throw new Error("No se encontró la organización.")
 
-      // ✅ CORRECCIÓN: Eliminamos 'empleado_id' que no existe en la tabla movimientos_caja
+      // ✅ CORRECCIÓN CRÍTICA: Eliminamos 'empleado_id' del insert porque no existe en la tabla
       const { error } = await supabase.from('movimientos_caja').insert({
           organization_id: perfil.organization_id,
           caja_diaria_id: cajaId,
+          // empleado_id: user.id, <--- ESTA ERA LA LÍNEA QUE ROMPÍA TODO
           monto: valorMonto,
           tipo: 'egreso', 
           descripcion: descripcion.trim(),
